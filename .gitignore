@@ -11,3 +11,8 @@ next-env.d.ts
 # build
 /app
 dist
+
+# environment variables
+.env.local
+.env*.local
+renderer/.env.local
