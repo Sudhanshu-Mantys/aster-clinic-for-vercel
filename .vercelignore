@@ -1,0 +1,19 @@
+# Electron-specific files and directories
+app/
+main/
+resources/
+dist/
+electron-builder.yml
+
+# Development files
+.next/
+node_modules/
+*.log
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
+import { isElectron, isWeb } from '../lib/environment'
 
 interface Team {
     id: string
@@ -83,6 +84,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Check if user is already logged in
     useEffect(() => {
         const checkAuth = async () => {
+            // Log environment for debugging
+            console.log('🌍 Running in:', isElectron() ? 'Electron' : 'Web Browser')
+
             try {
                 const token = localStorage.getItem('stack_access_token')
                 const refreshToken = localStorage.getItem('stack_refresh_token')
