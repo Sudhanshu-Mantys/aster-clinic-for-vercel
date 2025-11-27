@@ -34,7 +34,7 @@ export default function DashboardPage() {
     // Redirect if not logged in or no team selected
     useEffect(() => {
         if (!isLoading && (!user || !user.selected_team_id)) {
-            router.push('/home')
+            router.replace('/home')
         }
     }, [user, isLoading, router])
 

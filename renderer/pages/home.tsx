@@ -15,7 +15,7 @@ export default function HomePage() {
   // Redirect to dashboard if user is logged in and has a team selected
   useEffect(() => {
     if (!isLoading && user && user.selected_team_id) {
-      router.push('/dashboard')
+      router.replace('/dashboard')
     }
   }, [user, isLoading, router])
 

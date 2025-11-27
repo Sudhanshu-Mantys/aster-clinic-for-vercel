@@ -1,46 +1,48 @@
 /** @type {import('next').NextConfig} */
 
 // Detect if we're building for Electron or Web
-const isElectronBuild = process.env.npm_lifecycle_event === 'dev' || 
-                        process.env.npm_lifecycle_event === 'build' ||
-                        process.env.BUILD_TARGET === 'electron'
-
+// Check for Vercel environment or explicit web build commands
+const isVercel = process.env.VERCEL === '1'
 const isWebBuild = process.env.npm_lifecycle_event === 'dev:web' || 
                    process.env.npm_lifecycle_event === 'build:web' ||
-                   process.env.BUILD_TARGET === 'web'
+                   process.env.BUILD_TARGET === 'web' ||
+                   isVercel
+
+const isElectronBuild = !isWebBuild && (
+  process.env.npm_lifecycle_event === 'dev' || 
+  process.env.npm_lifecycle_event === 'build' ||
+  process.env.BUILD_TARGET === 'electron'
+)
 
 const config = {
-  // Static export for Electron, standard build for web
+  // Static export ONLY for Electron, NOT for web/Vercel
   output: isElectronBuild ? 'export' : undefined,
   
   // Different output directories for Electron vs Web
   distDir: isElectronBuild && process.env.NODE_ENV === 'production' ? '../app' : '.next',
   
-  trailingSlash: true,
+  // Only use trailing slash for Electron builds
+  trailingSlash: isElectronBuild,
   
   images: {
     // Unoptimized images for Electron, optimized for web
     unoptimized: isElectronBuild,
   },
   
-  webpack: (config) => {
-    return config
-  },
-  
-  turbopack: {},
-  
-  // Enable SWC minification for better performance
-  swcMinify: true,
-  
   // React strict mode for better development experience
   reactStrictMode: true,
+  
+  // Turbopack config (required for Next.js 16)
+  turbopack: {},
 }
 
 console.log('📦 Next.js Build Config:', {
   isElectronBuild,
   isWebBuild,
+  isVercel,
   output: config.output,
   distDir: config.distDir,
+  trailingSlash: config.trailingSlash,
   imagesUnoptimized: config.images.unoptimized,
 })
 
