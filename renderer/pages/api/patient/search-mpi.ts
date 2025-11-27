@@ -71,8 +71,13 @@ export default async function handler(
     req: NextApiRequest,
     res: NextApiResponse
 ) {
+    console.log('=== MPI Search API Called ===')
+    console.log('Method:', req.method)
+    console.log('Request body:', JSON.stringify(req.body, null, 2))
+
     // Only allow POST requests
     if (req.method !== 'POST') {
+        console.error('❌ Invalid method:', req.method)
         return res.status(405).json({ error: 'Method not allowed' })
     }
 
@@ -81,8 +86,11 @@ export default async function handler(
         customerSiteId = 1,
     } = req.body
 
+    console.log('Extracted params:', { mpi, customerSiteId })
+
     // Validate required parameters
     if (!mpi) {
+        console.error('❌ MPI is missing')
         return res.status(400).json({ error: 'MPI is required' })
     }
 
@@ -90,6 +98,7 @@ export default async function handler(
     const toDate = new Date()
     const fromDate = new Date()
     fromDate.setFullYear(fromDate.getFullYear() - 5)
+    console.log('Date range:', { fromDate: formatDate(fromDate), toDate: formatDate(toDate) })
 
     // Build the request body for the Aster Clinics API
     const requestBody: MPISearchRequest = {
@@ -131,7 +140,11 @@ export default async function handler(
         },
     }
 
+    console.log('Request body to send:', JSON.stringify(requestBody, null, 2))
+
     try {
+        console.log('🚀 Making API request to:', `${API_BASE_URL}/apmgnt/patient/all/appointment/search/get`)
+
         // Make the request to the Aster Clinics API
         const response = await fetch(`${API_BASE_URL}/apmgnt/patient/all/appointment/search/get`, {
             method: 'POST',
@@ -141,12 +154,15 @@ export default async function handler(
             body: JSON.stringify(requestBody),
         })
 
+        console.log('📥 Response status:', response.status, response.statusText)
+
         // Get the response data
         const data = await response.json()
+        console.log('📦 Response data:', JSON.stringify(data, null, 2))
 
         // Check if the response is ok
         if (!response.ok) {
-            console.error('API Error:', {
+            console.error('❌ API Response NOT OK:', {
                 status: response.status,
                 statusText: response.statusText,
                 data,
@@ -159,27 +175,41 @@ export default async function handler(
 
         // Check if the API returned an error
         if (data.head && data.head.StatusValue !== 200) {
+            console.error('❌ API returned error status:', data.head)
             return res.status(400).json({
                 error: data.head.StatusText || 'Failed to search patient by MPI',
                 details: data,
             })
         }
 
+        console.log('✅ API response OK, RecordCount:', data.body?.RecordCount)
+
         // Check if no data was found
         if (data.body.RecordCount === 0 || !data.body.Data || data.body.Data.length === 0) {
+            console.log('⚠️ No patients found')
             return res.status(404).json({
                 error: 'No patient found with this MPI',
                 details: data,
             })
         }
 
+        console.log('🔄 Starting data transformation for', data.body.Data.length, 'patients')
+
         // Transform ALL appointment data to patient data format
-        const transformedPatients = data.body.Data.map((appointmentData: any) => {
+        const transformedPatients = data.body.Data.map((appointmentData: any, index: number) => {
+            console.log(`  Transforming patient ${index + 1}:`, {
+                full_name: appointmentData.full_name,
+                patient_id: appointmentData.patient_id,
+                mpi: appointmentData.mpi,
+            })
+
             // Parse full name into first, middle, last
             const nameParts = appointmentData.full_name?.trim().split(/\s+/) || []
             const firstname = nameParts[0] || ''
             const lastname = nameParts.length > 1 ? nameParts[nameParts.length - 1] : ''
             const middlename = nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : ''
+
+            console.log(`    Name parts:`, { firstname, middlename, lastname })
 
             return {
                 relationshipid: 0,
@@ -263,13 +293,23 @@ export default async function handler(
             },
         }
 
+        console.log('✅ Transformation complete, returning', transformedPatients.length, 'patients')
+        console.log('Final response:', JSON.stringify(transformedData, null, 2))
+
         // Return the transformed response
         return res.status(200).json(transformedData)
     } catch (error) {
-        console.error('Proxy error:', error)
+        console.error('❌❌❌ PROXY ERROR ❌❌❌')
+        console.error('Error type:', typeof error)
+        console.error('Error instance:', error instanceof Error)
+        console.error('Error object:', error)
+        console.error('Error message:', error instanceof Error ? error.message : 'Unknown error')
+        console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace')
+
         return res.status(500).json({
             error: 'Internal server error',
             message: error instanceof Error ? error.message : 'Unknown error',
+            details: error instanceof Error ? error.stack : String(error),
         })
     }
 }
