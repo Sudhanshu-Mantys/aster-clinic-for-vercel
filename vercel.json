@@ -1,7 +1,7 @@
 {
-  "buildCommand": "BUILD_TARGET=web npm run build:web",
-  "devCommand": "npm run dev:web",
-  "installCommand": "npm install",
-  "framework": "nextjs",
-  "outputDirectory": "renderer/.next"
+    "buildCommand": "BUILD_TARGET=web npm run build:web",
+    "devCommand": "npm run dev:web",
+    "installCommand": "npm install",
+    "framework": "nextjs",
+    "outputDirectory": "renderer/.next"
 }

@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
+import { getPatientDetails, searchPatientByMPI, searchPatientByPhone, PatientData } from '../lib/api'
 
 // Mock data types
 interface Request {
@@ -30,6 +31,9 @@ export default function DashboardPage() {
     const [searchType, setSearchType] = React.useState<'mpi' | 'patientId' | 'phoneNumber'>('patientId')
     const [searchValue, setSearchValue] = React.useState('')
     const [isSearching, setIsSearching] = React.useState(false)
+    const [patientDetails, setPatientDetails] = React.useState<PatientData | null>(null)
+    const [allPatients, setAllPatients] = React.useState<PatientData[]>([])
+    const [searchError, setSearchError] = React.useState<string | null>(null)
 
     // Redirect if not logged in or no team selected
     useEffect(() => {
@@ -128,23 +132,50 @@ export default function DashboardPage() {
     const handlePrefillSearch = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!searchValue.trim()) {
-            alert('Please enter a search value')
+            setSearchError('Please enter a search value')
             return
         }
 
         setIsSearching(true)
+        setSearchError(null)
+        setPatientDetails(null)
+        setAllPatients([])
+
         try {
-            // TODO: Implement actual API call to search for patient
             console.log('Searching with:', { searchType, searchValue })
 
-            // Simulate API call
-            await new Promise(resolve => setTimeout(resolve, 1000))
+            let response
 
-            // TODO: Handle the search results and navigate to prefill form
-            alert(`Search completed for ${searchType}: ${searchValue}`)
+            // Call appropriate API based on search type
+            if (searchType === 'patientId') {
+                const patientId = parseInt(searchValue.trim(), 10)
+                if (isNaN(patientId)) {
+                    throw new Error('Patient ID must be a valid number')
+                }
+                response = await getPatientDetails(patientId)
+            } else if (searchType === 'mpi') {
+                response = await searchPatientByMPI(searchValue.trim())
+            } else if (searchType === 'phoneNumber') {
+                response = await searchPatientByPhone(searchValue.trim())
+            }
+
+            console.log('✅ Patient details retrieved:', response)
+
+            // Store all patient details
+            if (response && response.body && response.body.Data && response.body.Data.length > 0) {
+                setAllPatients(response.body.Data)
+                // If only one patient, select it automatically
+                if (response.body.Data.length === 1) {
+                    setPatientDetails(response.body.Data[0])
+                }
+                // TODO: Navigate to prefill form or display the data in the UI
+            } else {
+                throw new Error('No patient data found')
+            }
         } catch (error) {
             console.error('Search error:', error)
-            alert('Failed to search. Please try again.')
+            const errorMessage = error instanceof Error ? error.message : 'Failed to search. Please try again.'
+            setSearchError(errorMessage)
         } finally {
             setIsSearching(false)
         }
@@ -345,12 +376,244 @@ export default function DashboardPage() {
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                onClick={() => setSearchValue('')}
+                                                onClick={() => {
+                                                    setSearchValue('')
+                                                    setPatientDetails(null)
+                                                    setAllPatients([])
+                                                    setSearchError(null)
+                                                }}
                                                 disabled={isSearching}
                                             >
                                                 Clear
                                             </Button>
                                         </div>
+
+                                        {/* Error Message */}
+                                        {searchError && (
+                                            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                                                <div className="flex items-start">
+                                                    <svg
+                                                        className="w-5 h-5 text-red-600 mt-0.5 mr-3"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={2}
+                                                            d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                                        />
+                                                    </svg>
+                                                    <div>
+                                                        <h4 className="text-sm font-medium text-red-900">Search Failed</h4>
+                                                        <p className="text-sm text-red-700 mt-1">{searchError}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Multiple Patients Selection */}
+                                        {allPatients.length > 1 && !patientDetails && (
+                                            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                                <div className="flex items-start mb-3">
+                                                    <svg
+                                                        className="w-5 h-5 text-blue-600 mt-0.5 mr-3"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={2}
+                                                            d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                                                        />
+                                                    </svg>
+                                                    <div className="flex-1">
+                                                        <h4 className="text-sm font-medium text-blue-900">
+                                                            Multiple Patients Found
+                                                        </h4>
+                                                        <p className="text-sm text-blue-700 mt-1">
+                                                            Found {allPatients.length} patients. Please select one:
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="ml-8 space-y-2">
+                                                    {allPatients.map((patient, index) => (
+                                                        <button
+                                                            key={`${patient.patient_id}-${index}`}
+                                                            onClick={() => setPatientDetails(patient)}
+                                                            className="w-full text-left p-4 bg-white border border-blue-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                                                        >
+                                                            <div className="flex items-start justify-between">
+                                                                <div className="flex-1">
+                                                                    <p className="font-medium text-gray-900">
+                                                                        {[patient.firstname, patient.middlename, patient.lastname]
+                                                                            .filter(Boolean)
+                                                                            .join(' ')}
+                                                                    </p>
+                                                                    <div className="mt-2 space-y-1">
+                                                                        {patient.mpi && (
+                                                                            <p className="text-sm text-gray-600">
+                                                                                <span className="font-medium">MPI:</span> {patient.mpi}
+                                                                            </p>
+                                                                        )}
+                                                                        {patient.patient_id && (
+                                                                            <p className="text-sm text-gray-600">
+                                                                                <span className="font-medium">Patient ID:</span>{' '}
+                                                                                {patient.patient_id}
+                                                                            </p>
+                                                                        )}
+                                                                        {patient.dob && (
+                                                                            <p className="text-sm text-gray-600">
+                                                                                <span className="font-medium">DOB:</span> {patient.dob}
+                                                                            </p>
+                                                                        )}
+                                                                        {patient.phone && (
+                                                                            <p className="text-sm text-gray-600">
+                                                                                <span className="font-medium">Phone:</span> {patient.phone}
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                <svg
+                                                                    className="w-5 h-5 text-blue-600 ml-3"
+                                                                    fill="none"
+                                                                    viewBox="0 0 24 24"
+                                                                    stroke="currentColor"
+                                                                >
+                                                                    <path
+                                                                        strokeLinecap="round"
+                                                                        strokeLinejoin="round"
+                                                                        strokeWidth={2}
+                                                                        d="M9 5l7 7-7 7"
+                                                                    />
+                                                                </svg>
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Patient Details Result */}
+                                        {patientDetails && (
+                                            <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                                                <div className="flex items-start mb-3">
+                                                    <svg
+                                                        className="w-5 h-5 text-green-600 mt-0.5 mr-3"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={2}
+                                                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                                                        />
+                                                    </svg>
+                                                    <div className="flex-1">
+                                                        <h4 className="text-sm font-medium text-green-900">Patient Found</h4>
+                                                        <p className="text-sm text-green-700 mt-1">
+                                                            Patient details retrieved successfully
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="ml-8 mt-3 space-y-2">
+                                                    {patientDetails.patient_id && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">Patient ID:</span>
+                                                            <span className="text-gray-900">{patientDetails.patient_id}</span>
+                                                        </div>
+                                                    )}
+                                                    {patientDetails.mpi && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">MPI:</span>
+                                                            <span className="text-gray-900">{patientDetails.mpi}</span>
+                                                        </div>
+                                                    )}
+                                                    {(patientDetails.firstname || patientDetails.lastname) && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">Name:</span>
+                                                            <span className="text-gray-900">
+                                                                {[patientDetails.firstname, patientDetails.middlename, patientDetails.lastname]
+                                                                    .filter(Boolean)
+                                                                    .join(' ')}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                    {patientDetails.uid_value && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">UID:</span>
+                                                            <span className="text-gray-900">{patientDetails.uid_value}</span>
+                                                        </div>
+                                                    )}
+                                                    {(patientDetails.phone || patientDetails.home_phone || patientDetails.phone_other) && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">Phone:</span>
+                                                            <span className="text-gray-900">
+                                                                {patientDetails.phone || patientDetails.home_phone || patientDetails.phone_other}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                    {patientDetails.email && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">Email:</span>
+                                                            <span className="text-gray-900">{patientDetails.email}</span>
+                                                        </div>
+                                                    )}
+                                                    {patientDetails.dob && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">Date of Birth:</span>
+                                                            <span className="text-gray-900">{patientDetails.dob}</span>
+                                                        </div>
+                                                    )}
+                                                    {patientDetails.calculated_age && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">Age:</span>
+                                                            <span className="text-gray-900">{patientDetails.calculated_age}</span>
+                                                        </div>
+                                                    )}
+                                                    {patientDetails.gender && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">Gender:</span>
+                                                            <span className="text-gray-900">{patientDetails.gender}</span>
+                                                        </div>
+                                                    )}
+                                                    {patientDetails.nationality && (
+                                                        <div className="flex items-center text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">Nationality:</span>
+                                                            <span className="text-gray-900">{patientDetails.nationality} ({patientDetails.iso_code})</span>
+                                                        </div>
+                                                    )}
+                                                    {(patientDetails.address1 || patientDetails.address2) && (
+                                                        <div className="flex items-start text-sm">
+                                                            <span className="font-medium text-gray-700 w-32">Address:</span>
+                                                            <span className="text-gray-900 flex-1">
+                                                                {[patientDetails.address1, patientDetails.address2, patientDetails.city]
+                                                                    .filter(Boolean)
+                                                                    .join(', ')}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {allPatients.length > 1 && (
+                                                    <div className="ml-8 mt-4 pt-4 border-t border-green-200">
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setPatientDetails(null)}
+                                                            className="text-green-700 border-green-300 hover:bg-green-100"
+                                                        >
+                                                            ← Back to Patient List
+                                                        </Button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </form>
                                 </CardContent>
                             </Card>

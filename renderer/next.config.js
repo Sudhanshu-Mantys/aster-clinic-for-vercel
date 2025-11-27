@@ -15,14 +15,11 @@ const isElectronBuild = !isWebBuild && (
 )
 
 const config = {
-  // Static export ONLY for Electron, NOT for web/Vercel
-  output: isElectronBuild ? 'export' : undefined,
+  // No static export - keep Next.js server running for API routes (CORS proxy)
+  // output: undefined (default)
   
-  // Different output directories for Electron vs Web
-  distDir: isElectronBuild && process.env.NODE_ENV === 'production' ? '../app' : '.next',
-  
-  // Only use trailing slash for Electron builds
-  trailingSlash: isElectronBuild,
+  // Use standard .next directory
+  distDir: '.next',
   
   images: {
     // Unoptimized images for Electron, optimized for web
@@ -40,10 +37,9 @@ console.log('📦 Next.js Build Config:', {
   isElectronBuild,
   isWebBuild,
   isVercel,
-  output: config.output,
   distDir: config.distDir,
-  trailingSlash: config.trailingSlash,
   imagesUnoptimized: config.images.unoptimized,
+  note: 'Next.js server mode - API routes enabled',
 })
 
 module.exports = config
