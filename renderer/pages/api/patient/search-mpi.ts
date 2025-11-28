@@ -5,7 +5,11 @@ import type { NextApiRequest, NextApiResponse } from 'next'
  * This route acts as a proxy to avoid CORS issues when calling the Aster Clinics API
  */
 
-const API_BASE_URL = 'https://prod.asterclinics.com/SCMS/web/app.php'
+// Use tunnel by default (safer, works from any network)
+// Set NEXT_USE_TUNNEL=false to bypass tunnel for direct access
+const useTunnel = process.env.NEXT_USE_TUNNEL !== 'false'
+
+const API_BASE_URL = useTunnel ? 'https://aster-clinics-dev.mantys.org/SCMS/web/app.php' : 'https://prod.asterclinics.com/SCMS/web/app.php'
 
 interface RequestHead {
     reqtime: string

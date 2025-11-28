@@ -200,3 +200,274 @@ export async function searchPatientByPhone(
     }
 }
 
+/**
+ * Search parameters for appointment search
+ */
+export interface AppointmentSearchParams {
+    // Search filters
+    mpi?: string
+    phoneNumber?: string | number
+    patientName?: string
+    mcnNo?: string
+    displayEncounterNumber?: string
+
+    // Date filters
+    fromDate?: string // Format: MM/DD/YYYY
+    toDate?: string   // Format: MM/DD/YYYY
+    isFilterDate?: number
+
+    // Pagination
+    pageNo?: number
+    recPerPage?: number
+
+    // IDs and filters
+    customerSiteId?: number
+    payerId?: number | null
+    visitTypeId?: number | null
+    physicianId?: number | null
+    specialisationId?: number | null
+    roomId?: number | null
+    visitPurposeId?: number | null
+    payerTypeId?: number | null
+
+    // Status and type filters
+    appStatusId?: string
+    encounterType?: number
+    isEmergencyAppointment?: number | null
+    insuranceType?: string | null
+
+    // Other filters
+    groupByApntStatus?: number
+    referralUploadFilter?: number
+    filterByReferral?: number
+    timeOrderBy?: number
+    orderType?: string | null
+    type?: string | null
+}
+
+/**
+ * Appointment data from the API
+ */
+export interface AppointmentData {
+    appointment_id: number
+    patient_id: number
+    mpi: string
+    full_name: string
+    mobile_phone: string
+    email: string
+    dob: string
+    age: string
+    gender: string
+    gender_id: number
+    nationality_id: string
+    is_estimated: string
+    appointment_date: string
+    appointment_time: string
+    appointment_status: string
+    appointment_status_id: number
+    physician_name: string
+    specialisation_name: string
+    [key: string]: any // For any additional fields
+}
+
+/**
+ * Response for appointment search
+ */
+export interface AppointmentSearchResponse {
+    head: {
+        StatusValue: number
+        StatusText: string
+    }
+    body: {
+        Data: AppointmentData[]
+        RecordCount: number
+        TotalRecords: number | null
+    }
+}
+
+/**
+ * Search for appointments with flexible filters
+ * @param params - Search parameters
+ */
+export async function searchAppointments(
+    params: AppointmentSearchParams
+): Promise<AppointmentSearchResponse> {
+    try {
+        // Call our Next.js API route (proxy) to avoid CORS issues
+        const response = await fetch('/api/patient/search-appointments', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(params),
+        })
+
+        const data = await response.json()
+
+        if (!response.ok) {
+            throw new Error(data.error || `API request failed with status ${response.status}`)
+        }
+
+        return data
+    } catch (error) {
+        console.error('Error searching appointments:', error)
+        throw error
+    }
+}
+
+/**
+ * Insurance details data structure (based on actual API response)
+ */
+export interface InsuranceData {
+    patient_insurance_tpa_policy_id: number
+    tpa_name: string
+    tpa_id: number
+    tpa_policy_id: string
+    tpa_group_policy_id: string | null
+    tpa_valid_till: string
+    insurance_company_id: number | null
+    insurance_name: string | null
+    insurance_policy_id: string
+    insurance_group_policy_id: string | null
+    insurance_valid_till: string
+    tpa_company_id: number
+    is_current: number
+    receiver_id: number
+    receiver_name: string
+    receiver_code: string
+    payer_valid_till: string | null
+    is_valid: number
+    proposer_rel_id: number
+    patient_id: number
+    patient_fname: string | null
+    patient_mname: string | null
+    patient_lname: string | null
+    patient_dob: string | null
+    patient_mpi: string
+    insurance_from: string
+    insurance_renewal: string | null
+    type: number
+    relation_id: number
+    plan_id: number
+    ins_plan: string
+    ins_plan_code: string
+    relation: string
+    ins_holderid: string | null
+    insurance_status_id: number
+    insurance_status: string
+    payer_id: number
+    payer_name: string
+    payer_code: string
+    rate_card_name: string
+    rate_card_id: number
+    policy_number: string | null
+    priority_patient_applicable: number
+    payer_type: number
+    description: string
+    site_id: number
+    insurance_type: number
+    authorization_limit: string
+    ins_exp_date: string
+    is_turbo_care: string
+    is_teleconsultation_available: string
+    copay: {
+        Default: {
+            copay_details?: Array<{
+                payableAmount: string
+                payableAmountType: number
+                payableAmountDesc: string
+                chargeGroupId: number | null
+                chargeGroupName: string
+                copayDeductId: number
+                isDeductable: number
+                isMaternity: number
+                isDefault: number
+                payableAmountMax: string | null
+                isAcrossChargeGroup: number
+            }>
+            Deduct_details?: Array<{
+                payableAmount: string
+                payableAmountType: number
+                payableAmountDesc: string
+                chargeGroupId: number | null
+                chargeGroupName: string
+                copayDeductId: number
+                isDefault: number
+                isDeductable: number
+                isMaternity: number
+                payableAmountMax: string | null
+                isAcrossChargeGroup: number
+            }>
+        }
+    }
+    [key: string]: any // For any additional fields
+}
+
+/**
+ * Response for insurance details
+ */
+export interface InsuranceDetailsResponse {
+    head: {
+        StatusValue: number
+        StatusText: string
+    }
+    body: {
+        Data: InsuranceData[]
+        RecordCount: number
+        TotalRecords: number | null
+    }
+}
+
+/**
+ * Parameters for fetching insurance details
+ */
+export interface InsuranceDetailsParams {
+    patientId: number
+    apntId?: number | null
+    encounterId?: number
+    customerId?: number
+    primaryInsPolicyId?: number | null
+    siteId?: number
+    isDiscard?: number
+    hasTopUpCard?: number
+}
+
+/**
+ * Get insurance details for a patient
+ * @param params - Insurance details parameters
+ */
+export async function getInsuranceDetails(
+    params: InsuranceDetailsParams
+): Promise<InsuranceDetailsResponse> {
+    try {
+        // Call our Next.js API route (proxy) to avoid CORS issues
+        const response = await fetch('/api/patient/insurance-details', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                patientId: params.patientId,
+                apntId: params.apntId ?? null,
+                encounterId: params.encounterId ?? 0,
+                customerId: params.customerId ?? 1,
+                primaryInsPolicyId: params.primaryInsPolicyId ?? null,
+                siteId: params.siteId ?? 1,
+                isDiscard: params.isDiscard ?? 0,
+                hasTopUpCard: params.hasTopUpCard ?? 0,
+            }),
+        })
+
+        const data = await response.json()
+
+        if (!response.ok) {
+            throw new Error(data.error || `API request failed with status ${response.status}`)
+        }
+
+        return data
+    } catch (error) {
+        console.error('Error fetching insurance details:', error)
+        throw error
+    }
+}
+

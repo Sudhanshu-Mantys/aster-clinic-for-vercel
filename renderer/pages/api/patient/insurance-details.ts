@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 
 /**
- * Next.js API Route - Patient Details Proxy
+ * Next.js API Route - Patient Insurance Details Proxy
  * This route acts as a proxy to avoid CORS issues when calling the Aster Clinics API
  */
 
@@ -19,17 +19,20 @@ interface RequestHead {
     reqtype: string
 }
 
-interface PatientDetailsRequestBody {
-    customerId: number
-    siteId: number
+interface InsuranceDetailsRequestBody {
+    apntId: number | null
     patientId: number
     encounterId: number
-    appointmentId: number
+    customerId: number
+    primaryInsPolicyId: number | null
+    siteId: number
+    isDiscard: number
+    hasTopUpCard: number
 }
 
-interface PatientDetailsRequest {
+interface InsuranceDetailsRequest {
     head: RequestHead
-    body: PatientDetailsRequestBody
+    body: InsuranceDetailsRequestBody
 }
 
 /**
@@ -50,10 +53,13 @@ export default async function handler(
 
     const {
         patientId,
-        customerId = 1,
-        siteId = 1,
+        apntId = null,
         encounterId = 0,
-        appointmentId = 0,
+        customerId = 1,
+        primaryInsPolicyId = null,
+        siteId = 1,
+        isDiscard = 0,
+        hasTopUpCard = 0,
     } = req.body
 
     // Validate required parameters
@@ -62,33 +68,46 @@ export default async function handler(
     }
 
     // Build the request body for the Aster Clinics API
-    const requestBody: PatientDetailsRequest = {
+    const requestBody: InsuranceDetailsRequest = {
         head: {
             reqtime: getRequestTime(),
             srvseqno: '',
             reqtype: 'POST',
         },
         body: {
-            customerId,
-            siteId,
+            apntId: apntId ? parseInt(apntId, 10) : null,
             patientId: parseInt(patientId, 10),
-            encounterId,
-            appointmentId,
+            encounterId: parseInt(encounterId, 10),
+            customerId,
+            primaryInsPolicyId: primaryInsPolicyId ? parseInt(primaryInsPolicyId, 10) : null,
+            siteId,
+            isDiscard,
+            hasTopUpCard,
         },
     }
 
+    console.log('Fetching insurance details for patient:', patientId)
+    console.log('Request body:', JSON.stringify(requestBody, null, 2))
+
     try {
         // Make the request to the Aster Clinics API
-        const response = await fetch(`${API_BASE_URL}/claim/get/patient/details`, {
+        const response = await fetch(`${API_BASE_URL}/claim/insurance/details/replicate/get`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Referer': 'app:/TrendEHR.swf',
+                'Accept': 'text/xml, application/xml, application/xhtml+xml, text/html;q=0.9, text/plain;q=0.8, text/css, image/png, image/jpeg, image/gif;q=0.8, application/x-shockwave-flash, video/mp4;q=0.9, flv-application/octet-stream;q=0.8, video/x-flv;q=0.7, audio/mp4, application/futuresplash, */*;q=0.5, application/x-mpegURL',
+                'x-flash-version': '32,0,0,182',
+                'Accept-Encoding': 'gzip,deflate',
+                'User-Agent': 'Mozilla/5.0 (Windows; U; en-US) AppleWebKit/533.19.4 (KHTML, like Gecko) AdobeAIR/32.0',
             },
             body: JSON.stringify(requestBody),
         })
 
         // Get the response data
         const data = await response.json()
+
+        console.log('Insurance details response:', JSON.stringify(data, null, 2))
 
         // Check if the response is ok
         if (!response.ok) {
@@ -98,7 +117,7 @@ export default async function handler(
                 data,
             })
             return res.status(response.status).json({
-                error: data.head?.StatusText || 'Failed to fetch patient details',
+                error: data.head?.StatusText || 'Failed to fetch insurance details',
                 details: data,
             })
         }
@@ -106,20 +125,12 @@ export default async function handler(
         // Check if the API returned an error
         if (data.head && data.head.StatusValue !== 200) {
             return res.status(400).json({
-                error: data.head.StatusText || 'Failed to fetch patient details',
+                error: data.head.StatusText || 'Failed to fetch insurance details',
                 details: data,
             })
         }
 
-        // Check if no data was found
-        if (data.body.RecordCount === 0 || data.body.Data.length === 0) {
-            return res.status(404).json({
-                error: 'No patient found with this ID',
-                details: data,
-            })
-        }
-
-        // Return the successful response
+        // Return the successful response (even if no insurance records found)
         return res.status(200).json(data)
     } catch (error) {
         console.error('Proxy error:', error)
