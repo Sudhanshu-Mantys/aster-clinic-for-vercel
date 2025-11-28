@@ -30,6 +30,13 @@ export const InsuranceDetailsSection: React.FC<InsuranceDetailsSectionProps> = (
         setShowEligibilitySidebar(true)
     }
 
+    const handleSearchAcrossAllTPAs = () => {
+        // Open eligibility form without specific insurance data
+        // This will trigger the form to prefill with Emirates ID and BOTH option
+        setSelectedInsuranceForEligibility(null)
+        setShowEligibilitySidebar(true)
+    }
+
     const handleCloseSidebar = () => {
         setShowEligibilitySidebar(false)
         // Delay clearing the selected insurance to allow sidebar animation to complete
@@ -58,8 +65,17 @@ export const InsuranceDetailsSection: React.FC<InsuranceDetailsSectionProps> = (
             )}
 
             {!isLoadingInsurance && !insuranceError && insuranceDetails.length === 0 && (
-                <div className="text-sm text-gray-500 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                    No insurance records found for this patient
+                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <p className="text-sm text-gray-500 mb-3">
+                        No insurance records found for this patient
+                    </p>
+                    <Button
+                        onClick={handleSearchAcrossAllTPAs}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                        size="sm"
+                    >
+                        🔍 Search Across All TPAs with Mantys
+                    </Button>
                 </div>
             )}
 
@@ -235,16 +251,16 @@ export const InsuranceDetailsSection: React.FC<InsuranceDetailsSectionProps> = (
             <Sidebar
                 isOpen={showEligibilitySidebar}
                 onClose={handleCloseSidebar}
-                title="Mantys Insurance Eligibility Check"
+                title={selectedInsuranceForEligibility
+                    ? "Mantys Insurance Eligibility Check"
+                    : "Search Across All TPAs"}
                 width="700px"
             >
-                {selectedInsuranceForEligibility && (
-                    <MantysEligibilityForm
-                        patientData={patientData}
-                        insuranceData={selectedInsuranceForEligibility}
-                        onClose={handleCloseSidebar}
-                    />
-                )}
+                <MantysEligibilityForm
+                    patientData={patientData}
+                    insuranceData={selectedInsuranceForEligibility}
+                    onClose={handleCloseSidebar}
+                />
             </Sidebar>
         </div>
     )

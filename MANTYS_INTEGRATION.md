@@ -24,15 +24,34 @@ A comprehensive insurance eligibility verification form that includes:
   - Service types (for eCare, Lifeline)
   - And many more...
 
-### 2. Updated Components
+### 2. New UI Component: `Sidebar.tsx`
+
+A reusable right-side sliding sidebar component with:
+- Smooth slide-in animation from the right
+- Dark backdrop overlay
+- Close on Escape key
+- Close on backdrop click
+- Close button in header
+- Scrollable content area
+- Prevents body scroll when open
+- Customizable width
+
+### 3. Updated Components
 
 #### `InsuranceDetailsSection.tsx`
 - Added "Check Eligibility with Mantys" button for active insurance policies
-- Integrated the Mantys eligibility form that opens when button is clicked
+- Integrated the Mantys eligibility form in a right-side sidebar
 - Passes patient and insurance data to pre-fill the form
+- Manages sidebar open/close state
 
 #### `PatientDetailsDisplay.tsx`
 - Updated to pass patient data to InsuranceDetailsSection
+
+#### `MantysEligibilityForm.tsx`
+- Redesigned for sidebar display (removed Card wrapper)
+- Added patient info summary card at the top
+- Sticky submit button at the bottom
+- Optimized for vertical scrolling
 
 ## How It Works
 
@@ -41,14 +60,17 @@ A comprehensive insurance eligibility verification form that includes:
 1. **Search for Patient**: User searches for a patient using MPI, Patient ID, or Phone Number
 2. **View Patient Details**: Patient details and insurance records are displayed
 3. **Check Eligibility**: Click "✓ Check Eligibility with Mantys" button on any active insurance policy
-4. **Pre-filled Form**: Mantys eligibility form opens with:
+4. **Sidebar Opens**: A right-side sidebar smoothly slides in from the right
+5. **Pre-filled Form**: Mantys eligibility form appears in sidebar with:
+   - Patient info summary card at the top
    - Patient name pre-filled
    - Phone number pre-filled
    - Emirates ID/Member ID pre-filled
    - Insurance provider pre-selected (if recognized)
    - Payer name pre-filled
-5. **Complete Form**: User completes any additional required fields based on the selected TPA
-6. **Submit**: Click "Check Eligibility" to submit to Mantys API
+6. **Complete Form**: User completes any additional required fields based on the selected TPA
+7. **Submit**: Click "Check Eligibility" to submit to Mantys API
+8. **Close Sidebar**: Click Cancel, X button, press Escape, or click backdrop to close
 
 ### Data Pre-filling
 
@@ -274,6 +296,7 @@ Options:
 
 ### Created
 - `renderer/components/MantysEligibilityForm.tsx` (1000+ lines)
+- `renderer/components/ui/sidebar.tsx` (Reusable sidebar component)
 
 ### Modified
 - `renderer/components/InsuranceDetailsSection.tsx`

@@ -11,11 +11,22 @@
   - Smart validation and auto-formatting
   - Pre-filling from patient/insurance data
   - Organization-specific business rules
+  - Optimized for sidebar display
 
-### 2. Integrated with Existing Components
+### 2. Created Reusable Sidebar Component
+- **File**: `renderer/components/ui/sidebar.tsx`
+- **Features**:
+  - Smooth slide-in animation from right
+  - Dark backdrop overlay
+  - Multiple ways to close (X button, Escape, backdrop click)
+  - Prevents body scroll when open
+  - Fully responsive and customizable
+
+### 3. Integrated with Existing Components
 - **Modified**: `InsuranceDetailsSection.tsx`
   - Added "Check Eligibility with Mantys" button
-  - Integrated form display logic
+  - Integrated sidebar for form display
+  - Manages sidebar state
   - Pass patient data to form
   
 - **Modified**: `PatientDetailsDisplay.tsx`
@@ -58,10 +69,12 @@ npm run dev:web
 4. **Search** for a patient (phone/ID/MPI)
 5. **Expand** an active insurance policy
 6. Click **"✓ Check Eligibility with Mantys"** button
-7. **Verify** form is pre-filled with patient data
-8. **Complete** required fields
-9. Click **"Check Eligibility"**
-10. **Check console** for payload (API integration pending)
+7. **Sidebar slides in** from the right with smooth animation
+8. **Verify** form is pre-filled with patient data in the sidebar
+9. **Complete** required fields
+10. Click **"Check Eligibility"**
+11. **Check console** for payload (API integration pending)
+12. **Close sidebar** using X, Cancel, Escape, or backdrop click
 
 ---
 
@@ -73,6 +86,9 @@ npm run dev:web
 - [x] Smart validation (Emirates ID, DHA Member ID)
 - [x] Auto-formatting for ID fields
 - [x] Pre-filling from patient/insurance data
+- [x] **Right-side sliding sidebar UI**
+- [x] **Smooth animations and transitions**
+- [x] **Multiple close methods (X, Escape, backdrop)**
 - [x] Integration with existing UI
 - [x] Button placement on insurance cards
 - [x] Organization-specific logic
@@ -286,14 +302,22 @@ Fields appear/disappear based on:
 - ❌ Red errors for required fields
 - 💡 Helpful tooltips and placeholders
 - ⏳ Loading states during submission
+- 🎯 Patient info summary card at the top of sidebar
+- 📌 Sticky submit button at bottom of sidebar
 
 ### User Experience
+- **Smooth sidebar animation** slides in from right
+- **Non-intrusive**: Patient details remain visible
+- **Multiple close options**: X button, Escape key, backdrop click
+- **Dark backdrop** focuses attention on form
+- **Prevents body scroll** when sidebar is open
 - Auto-formatting as you type (Emirates ID, DHA ID)
 - Searchable dropdowns for easy selection
 - Conditional fields reduce clutter
 - Clear validation messages
 - Pre-filled data saves time
 - One-click access from insurance cards
+- **Scrollable content** for long forms
 
 ---
 

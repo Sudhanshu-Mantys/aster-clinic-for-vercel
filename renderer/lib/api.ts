@@ -471,3 +471,30 @@ export async function getInsuranceDetails(
     }
 }
 
+// ============================================================================
+// MANTYS API INTEGRATION
+// ============================================================================
+
+// Re-export Mantys types and functions for convenience
+export type {
+    MantysEligibilityRequest,
+    MantysEligibilityResponse,
+    MantysKeyFields,
+    TPACode,
+    IDType,
+    VisitType
+} from '../types/mantys'
+
+export {
+    buildMantysPayload,
+    checkMantysEligibility,
+    extractMantysKeyFields,
+    formatEmiratesId,
+    formatDhaMemberId,
+    isValidEmiratesId,
+    isValidDhaMemberId,
+    getTPARequirements
+} from './mantys-utils'
+
+export { CLINIC_IDS } from '../types/mantys'
+
