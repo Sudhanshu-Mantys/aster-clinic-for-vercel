@@ -310,7 +310,7 @@ export default function DashboardPage() {
           <Tabs defaultValue="new-requests" className="w-full">
             <TabsList className="w-full justify-start">
               <TabsTrigger value="new-requests">New Requests</TabsTrigger>
-              <TabsTrigger value="all-history">All History</TabsTrigger>
+              {/*<TabsTrigger value="all-history">All History</TabsTrigger>*/}
               <TabsTrigger value="profile">Profile</TabsTrigger>
             </TabsList>
 

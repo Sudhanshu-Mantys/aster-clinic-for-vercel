@@ -14,6 +14,8 @@ import {
 } from "../lib/mantys-utils";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
+import { EligibilityHistoryService } from "../utils/eligibilityHistory";
+import pollingService from "../services/eligibilityPollingService";
 
 interface MantysEligibilityFormProps {
   patientData: PatientData | null;
@@ -85,6 +87,10 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   const [currentStatus, setCurrentStatus] = useState<
     "idle" | "pending" | "processing" | "complete"
   >("idle");
+
+  // History tracking
+  const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
+  const monitoringIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
 
   // Results State
   const [mantysResponse, setMantysResponse] =
@@ -700,73 +706,82 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // FORM SUBMISSION
   // ============================================================================
 
-  // Poll for status updates
-  const pollForStatus = async (taskId: string) => {
-    const MAX_ATTEMPTS = 150; // 150 attempts * 2 seconds = 5 minutes
-    const POLL_INTERVAL = 2000; // 2 seconds
-    let attempts = 0;
-
-    const poll = async () => {
-      attempts++;
-      setPollingAttempts(attempts);
-
-      try {
-        const response = await fetch("/api/mantys/check-status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ task_id: taskId }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Status check failed: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-
-        // Update status message based on current state
-        if (data.status === "pending") {
-          setStatusMessage("Navigating Insurance Portal...");
-          setCurrentStatus("pending");
-        } else if (data.status === "processing") {
-          setStatusMessage("Extracting eligibility data from TPA portal...");
-          setCurrentStatus("processing");
-          // Store interim results if available
-          if (data.interimResults) {
-            if (data.interimResults.screenshot) {
-              setInterimScreenshot(data.interimResults.screenshot);
-            }
-            if (data.interimResults.documents) {
-              setInterimDocuments(data.interimResults.documents);
-            }
-          }
-        } else if (data.status === "complete") {
-          setStatusMessage("Eligibility check complete!");
-          setCurrentStatus("complete");
-          setMantysResponse(data.result);
-          setShowResults(true);
-          setIsSubmitting(false);
-          return; // Done!
-        } else if (data.status === "error") {
-          throw new Error(data.message || "Eligibility check failed");
-        }
-
-        // Continue polling if not done and haven't exceeded max attempts
-        if (attempts < MAX_ATTEMPTS) {
-          setTimeout(poll, POLL_INTERVAL);
-        } else {
-          throw new Error(
-            "Eligibility check timed out after 5 minutes. Please try again.",
-          );
-        }
-      } catch (error: any) {
-        console.error("Error polling status:", error);
-        setApiError(error.message || "Failed to check status");
-        setIsSubmitting(false);
+  // Cleanup monitoring interval on unmount
+  useEffect(() => {
+    return () => {
+      if (monitoringIntervalRef.current) {
+        clearInterval(monitoringIntervalRef.current);
       }
     };
+  }, []);
 
-    // Start polling
-    poll();
+  // Monitor status updates from background polling service
+  // The actual polling happens in the background service
+  const monitorTaskStatus = (taskId: string, historyId: string) => {
+    setStatusMessage("Task created, monitoring status...");
+    setCurrentStatus("pending");
+
+    // Clear any existing interval
+    if (monitoringIntervalRef.current) {
+      clearInterval(monitoringIntervalRef.current);
+    }
+
+    // Check status periodically to update UI
+    monitoringIntervalRef.current = setInterval(() => {
+      const historyItem = EligibilityHistoryService.getById(historyId);
+
+      if (!historyItem) {
+        if (monitoringIntervalRef.current) {
+          clearInterval(monitoringIntervalRef.current);
+          monitoringIntervalRef.current = null;
+        }
+        return;
+      }
+
+      // Update UI based on history item status
+      setPollingAttempts(historyItem.pollingAttempts || 0);
+
+      if (historyItem.status === "pending") {
+        setStatusMessage("Navigating Insurance Portal...");
+        setCurrentStatus("pending");
+      } else if (historyItem.status === "processing") {
+        setStatusMessage("Extracting eligibility data from TPA portal...");
+        setCurrentStatus("processing");
+
+        // Update interim results in UI
+        if (historyItem.interimResults) {
+          if (historyItem.interimResults.screenshot) {
+            setInterimScreenshot(historyItem.interimResults.screenshot);
+          }
+          if (historyItem.interimResults.documents) {
+            setInterimDocuments(
+              historyItem.interimResults.documents.map((doc) => ({
+                id: doc.name,
+                tag: doc.type,
+                url: doc.url,
+              })),
+            );
+          }
+        }
+      } else if (historyItem.status === "complete") {
+        setStatusMessage("Eligibility check complete!");
+        setCurrentStatus("complete");
+        setMantysResponse(historyItem.result);
+        setShowResults(true);
+        setIsSubmitting(false);
+        if (monitoringIntervalRef.current) {
+          clearInterval(monitoringIntervalRef.current);
+          monitoringIntervalRef.current = null;
+        }
+      } else if (historyItem.status === "error") {
+        setApiError(historyItem.error || "Eligibility check failed");
+        setIsSubmitting(false);
+        if (monitoringIntervalRef.current) {
+          clearInterval(monitoringIntervalRef.current);
+          monitoringIntervalRef.current = null;
+        }
+      }
+    }, 500); // Check every 500ms for UI updates
   };
 
   const handleSubmit = async () => {
@@ -818,8 +833,27 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       setTaskId(createdTaskId);
       setStatusMessage("Task created, checking status...");
 
-      // Step 2: Start polling for status
-      pollForStatus(createdTaskId);
+      // Add to history
+      const historyItem = EligibilityHistoryService.add({
+        patientId: emiratesId,
+        taskId: createdTaskId,
+        patientName:
+          name ||
+          `${patientData?.firstname || ""} ${patientData?.lastname || ""}`.trim() ||
+          undefined,
+        dateOfBirth: patientData?.dob || undefined,
+        insurancePayer: options,
+        status: "pending",
+        pollingAttempts: 0,
+      });
+      setCurrentHistoryId(historyItem.id);
+
+      // Step 2: Add to background polling service
+      // This will continue polling even if user closes the tab
+      pollingService.addTask(createdTaskId, historyItem.id);
+
+      // Step 3: Monitor status for UI updates (optional - user can close modal)
+      monitorTaskStatus(createdTaskId, historyItem.id);
     } catch (error: any) {
       console.error("Error submitting eligibility check:", error);
       setApiError(
@@ -840,9 +874,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     setInterimScreenshot(null);
     setInterimDocuments([]);
     setCurrentStatus("idle");
+    setCurrentHistoryId(null);
     setStatusMessage("");
     setPollingAttempts(0);
     setTaskId(null);
+
+    // Clear monitoring interval if exists
+    if (monitoringIntervalRef.current) {
+      clearInterval(monitoringIntervalRef.current);
+      monitoringIntervalRef.current = null;
+    }
   };
 
   // ============================================================================
@@ -876,6 +917,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         interimDocuments={interimDocuments}
         pollingAttempts={pollingAttempts}
         maxAttempts={150}
+        viewMode="live"
       />
 
       <div className="space-y-6">
