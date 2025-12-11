@@ -12,7 +12,6 @@ interface PollingTask {
 
 const MAX_ATTEMPTS = 150; // 150 attempts * 2 seconds = 5 minutes
 const POLL_INTERVAL = 2000; // 2 seconds
-const STORAGE_KEY = 'eligibility_polling_tasks';
 
 class EligibilityPollingService {
   private pollingInterval: NodeJS.Timeout | null = null;
@@ -20,28 +19,28 @@ class EligibilityPollingService {
   private activeTasks = new Map<string, PollingTask>();
 
   constructor() {
-    // Load active tasks from localStorage on initialization
+    // Load active tasks from Redis on initialization
     this.loadActiveTasks();
   }
 
   /**
    * Initialize the polling service - call this once at app startup
    */
-  initialize() {
+  async initialize() {
     if (this.pollingInterval) {
       return; // Already initialized
     }
 
     console.log('[PollingService] Initializing background polling service');
 
-    // Load any active tasks from localStorage
-    this.loadActiveTasks();
+    // Load any active tasks from Redis
+    await this.loadActiveTasks();
 
     // Start polling loop
     this.startPolling();
 
     // Resume polling for any active history items
-    this.resumeActivePolls();
+    await this.resumeActivePolls();
   }
 
   /**
@@ -59,7 +58,7 @@ class EligibilityPollingService {
   /**
    * Add a new task to poll
    */
-  addTask(taskId: string, historyId: string) {
+  async addTask(taskId: string, historyId: string) {
     console.log(`[PollingService] Adding task ${taskId} to polling queue`);
 
     const task: PollingTask = {
@@ -70,7 +69,7 @@ class EligibilityPollingService {
     };
 
     this.activeTasks.set(taskId, task);
-    this.saveActiveTasks();
+    await this.saveActiveTasks();
 
     // If polling isn't running, start it
     if (!this.isPolling) {
@@ -81,10 +80,10 @@ class EligibilityPollingService {
   /**
    * Remove a task from polling
    */
-  removeTask(taskId: string) {
+  async removeTask(taskId: string) {
     console.log(`[PollingService] Removing task ${taskId} from polling queue`);
     this.activeTasks.delete(taskId);
-    this.saveActiveTasks();
+    await this.saveActiveTasks();
 
     // Stop polling if no tasks remain
     if (this.activeTasks.size === 0) {
@@ -176,87 +175,98 @@ class EligibilityPollingService {
 
       // Update history based on status
       if (data.status === 'pending') {
-        EligibilityHistoryService.updateByTaskId(task.taskId, {
+        await EligibilityHistoryService.updateByTaskId(task.taskId, {
           status: 'pending',
           pollingAttempts: task.attempts,
         });
+        // Update task attempts for active tasks
+        this.activeTasks.set(task.taskId, task);
+        await this.saveActiveTasks();
       } else if (data.status === 'processing') {
-        EligibilityHistoryService.updateByTaskId(task.taskId, {
+        await EligibilityHistoryService.updateByTaskId(task.taskId, {
           status: 'processing',
           pollingAttempts: task.attempts,
           interimResults: data.interimResults || undefined,
         });
+        // Update task attempts for active tasks
+        this.activeTasks.set(task.taskId, task);
+        await this.saveActiveTasks();
       } else if (data.status === 'complete') {
         console.log(`[PollingService] Task ${task.taskId} completed successfully`);
 
-        EligibilityHistoryService.updateByTaskId(task.taskId, {
+        await EligibilityHistoryService.updateByTaskId(task.taskId, {
           status: 'complete',
           completedAt: new Date().toISOString(),
           result: data.result,
           pollingAttempts: task.attempts,
         });
 
-        // Remove from active tasks
-        this.removeTask(task.taskId);
+        // Remove from active tasks - STOP POLLING
+        await this.removeTask(task.taskId);
+        return; // Exit early to prevent further processing
       } else if (data.status === 'error') {
         console.error(`[PollingService] Task ${task.taskId} failed:`, data.message);
 
-        EligibilityHistoryService.updateByTaskId(task.taskId, {
+        await EligibilityHistoryService.updateByTaskId(task.taskId, {
           status: 'error',
           error: data.message || 'Eligibility check failed',
           completedAt: new Date().toISOString(),
           pollingAttempts: task.attempts,
         });
 
-        // Remove from active tasks
-        this.removeTask(task.taskId);
+        // Remove from active tasks - STOP POLLING
+        await this.removeTask(task.taskId);
+        return; // Exit early to prevent further processing
       }
-
-      // Update task attempts
-      this.activeTasks.set(task.taskId, task);
-      this.saveActiveTasks();
 
       // Check if max attempts reached
       if (task.attempts >= MAX_ATTEMPTS) {
         console.error(`[PollingService] Task ${task.taskId} timed out after ${MAX_ATTEMPTS} attempts`);
 
-        EligibilityHistoryService.updateByTaskId(task.taskId, {
+        await EligibilityHistoryService.updateByTaskId(task.taskId, {
           status: 'error',
           error: 'Eligibility check timed out after 5 minutes. Please try again.',
           completedAt: new Date().toISOString(),
           pollingAttempts: task.attempts,
         });
 
-        // Remove from active tasks
-        this.removeTask(task.taskId);
+        // Remove from active tasks - STOP POLLING
+        await this.removeTask(task.taskId);
+        return; // Exit early to prevent further processing
       }
     } catch (error: any) {
       console.error(`[PollingService] Error polling task ${task.taskId}:`, error);
 
       // Only mark as error if we've tried multiple times
       if (task.attempts >= 3) {
-        EligibilityHistoryService.updateByTaskId(task.taskId, {
+        await EligibilityHistoryService.updateByTaskId(task.taskId, {
           status: 'error',
           error: error.message || 'Failed to check status',
           completedAt: new Date().toISOString(),
           pollingAttempts: task.attempts,
         });
 
-        // Remove from active tasks
-        this.removeTask(task.taskId);
+        // Remove from active tasks - STOP POLLING
+        await this.removeTask(task.taskId);
+        return; // Exit early to prevent further processing
       }
+      // If we haven't hit the error threshold yet, update task attempts
+      this.activeTasks.set(task.taskId, task);
+      await this.saveActiveTasks();
     }
   }
 
   /**
-   * Load active tasks from localStorage
+   * Load active tasks from Redis
    */
-  private loadActiveTasks() {
+  private async loadActiveTasks() {
     try {
-      const data = localStorage.getItem(STORAGE_KEY);
-      if (!data) return;
+      const response = await fetch('/api/eligibility-history/tasks');
+      if (!response.ok) {
+        throw new Error('Failed to load active tasks');
+      }
 
-      const tasks: PollingTask[] = JSON.parse(data);
+      const tasks: PollingTask[] = await response.json();
 
       // Filter out tasks that are too old (> 10 minutes)
       const now = Date.now();
@@ -275,12 +285,20 @@ class EligibilityPollingService {
   }
 
   /**
-   * Save active tasks to localStorage
+   * Save active tasks to Redis
    */
-  private saveActiveTasks() {
+  private async saveActiveTasks() {
     try {
       const tasks = Array.from(this.activeTasks.values());
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+
+      // Save all tasks using a single API call with all tasks
+      for (const task of tasks) {
+        await fetch('/api/eligibility-history/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(task),
+        });
+      }
     } catch (error) {
       console.error('[PollingService] Error saving active tasks:', error);
     }
@@ -290,8 +308,8 @@ class EligibilityPollingService {
    * Resume polling for any active history items
    * Called on app startup to resume any in-progress checks
    */
-  private resumeActivePolls() {
-    const activeItems = EligibilityHistoryService.getActive();
+  private async resumeActivePolls() {
+    const activeItems = await EligibilityHistoryService.getActive();
 
     if (activeItems.length === 0) {
       return;
@@ -299,21 +317,21 @@ class EligibilityPollingService {
 
     console.log(`[PollingService] Resuming polling for ${activeItems.length} active check(s)`);
 
-    activeItems.forEach(item => {
+    for (const item of activeItems) {
       // Only resume if not already being polled
       if (!this.activeTasks.has(item.taskId)) {
-        this.addTask(item.taskId, item.id);
+        await this.addTask(item.taskId, item.id);
       }
-    });
+    }
   }
 
   /**
    * Force refresh all active tasks
    */
-  refreshActiveTasks() {
+  async refreshActiveTasks() {
     console.log('[PollingService] Force refreshing active tasks');
-    this.loadActiveTasks();
-    this.resumeActivePolls();
+    await this.loadActiveTasks();
+    await this.resumeActivePolls();
   }
 }
 

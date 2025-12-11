@@ -26,19 +26,114 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
   const [showDrawer, setShowDrawer] = useState(false);
 
   // Get the selected item from history by ID
-  const selectedItem = selectedItemId
-    ? EligibilityHistoryService.getById(selectedItemId)
-    : null;
+  const [selectedItem, setSelectedItem] = useState<EligibilityHistoryItem | null>(null);
+  const [freshResult, setFreshResult] = useState<any>(null);
+  const [loadingFreshResult, setLoadingFreshResult] = useState(false);
+  const [enrichedPatientId, setEnrichedPatientId] = useState<number | undefined>(undefined);
 
-  const loadHistory = () => {
+  // Load selected item when selectedItemId changes
+  useEffect(() => {
+    const loadSelectedItem = async () => {
+      if (selectedItemId) {
+        const item = await EligibilityHistoryService.getById(selectedItemId);
+        setSelectedItem(item);
+
+        // Try to get patient ID from Redis if we have appointment ID or MPI
+        if (item?.appointmentId || item?.patientMPI) {
+          try {
+            console.log("🔍 Fetching patient context from Redis for:", {
+              appointmentId: item.appointmentId,
+              mpi: item.patientMPI,
+            });
+
+            const contextResponse = await fetch("/api/patient/context", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                appointmentId: item.appointmentId,
+                mpi: item.patientMPI,
+              }),
+            });
+
+            if (contextResponse.ok) {
+              const context = await contextResponse.json();
+              setEnrichedPatientId(context.patientId);
+              console.log("✅ Enriched patient ID from Redis:", context.patientId, "Full context:", context);
+            } else {
+              console.warn("⚠️ Redis context not found, status:", contextResponse.status);
+              const errorData = await contextResponse.json();
+              console.warn("Error details:", errorData);
+              // Reset if not found
+              setEnrichedPatientId(undefined);
+            }
+          } catch (error) {
+            console.error("❌ Could not fetch patient context from Redis:", error);
+            setEnrichedPatientId(undefined);
+          }
+        } else {
+          console.log("⚠️ No appointment ID or MPI available for Redis lookup");
+          // No appointment ID or MPI, clear enriched patient ID
+          setEnrichedPatientId(undefined);
+        }
+
+        // If item is complete, fetch fresh result from API instead of using cached
+        if (item && item.status === 'complete' && item.taskId) {
+          setLoadingFreshResult(true);
+          try {
+            const response = await fetch('/api/mantys/check-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ task_id: item.taskId }),
+            });
+
+            if (response.ok) {
+              const apiResponse = await response.json();
+              console.log('API Response:', apiResponse);
+
+              if (apiResponse.status === 'complete' && apiResponse.result) {
+                // Validate that result has data property
+                if (apiResponse.result.data) {
+                  console.log('Setting fresh result with data:', apiResponse.result);
+                  setFreshResult(apiResponse.result);
+                } else {
+                  console.warn('API result missing data property, using cached result');
+                  setFreshResult(null);
+                }
+              } else {
+                console.warn('API response not complete or missing result');
+                setFreshResult(null);
+              }
+            } else {
+              console.error('API response not OK:', response.status);
+              setFreshResult(null);
+            }
+          } catch (error) {
+            console.error('Error fetching fresh result:', error);
+            // Fall back to cached result if API call fails
+            setFreshResult(null);
+          } finally {
+            setLoadingFreshResult(false);
+          }
+        } else {
+          setFreshResult(null);
+        }
+      } else {
+        setSelectedItem(null);
+        setFreshResult(null);
+      }
+    };
+    loadSelectedItem();
+  }, [selectedItemId]);
+
+  const loadHistory = React.useCallback(async () => {
     let items: EligibilityHistoryItem[] = [];
 
     if (filterStatus === "active") {
-      items = EligibilityHistoryService.getActive();
+      items = await EligibilityHistoryService.getActive();
     } else if (filterStatus === "completed") {
-      items = EligibilityHistoryService.getCompleted();
+      items = await EligibilityHistoryService.getCompleted();
     } else {
-      items = EligibilityHistoryService.getAll();
+      items = await EligibilityHistoryService.getAll();
     }
 
     if (searchQuery) {
@@ -53,11 +148,11 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
     }
 
     setHistoryItems(items);
-  };
+  }, [filterStatus, searchQuery]);
 
   useEffect(() => {
     loadHistory();
-  }, [searchQuery, filterStatus]);
+  }, [loadHistory]);
 
   // Separate effect for auto-refresh that pauses when drawer/modal is open
   useEffect(() => {
@@ -66,12 +161,11 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
     if (!showDrawer && !showModal) {
       const interval = setInterval(() => {
         loadHistory();
-        onRefresh?.();
-      }, 2000);
+      }, 5000); // Increased from 2s to 5s to reduce load
 
       return () => clearInterval(interval);
     }
-  }, [showDrawer, showModal]);
+  }, [showDrawer, showModal, loadHistory]);
 
   // Close drawer/modal if selected item no longer exists in history
   useEffect(() => {
@@ -102,30 +196,33 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
   const handleCloseDrawer = () => {
     setShowDrawer(false);
     setSelectedItemId(null);
+    setFreshResult(null);
+    setEnrichedPatientId(undefined);
   };
 
   const handleCheckAnother = () => {
     setShowDrawer(false);
     setShowModal(false);
     setSelectedItemId(null);
+    setEnrichedPatientId(undefined);
   };
 
-  const handleDelete = (id: string, e: React.MouseEvent) => {
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm("Are you sure you want to delete this eligibility check?")) {
-      EligibilityHistoryService.delete(id);
-      loadHistory();
+      await EligibilityHistoryService.delete(id);
+      await loadHistory();
     }
   };
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     if (
       confirm(
         "Are you sure you want to clear all history? This cannot be undone.",
       )
     ) {
-      EligibilityHistoryService.clearAll();
-      loadHistory();
+      await EligibilityHistoryService.clearAll();
+      await loadHistory();
     }
   };
 
@@ -249,7 +346,16 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
     });
   };
 
-  const activeCount = EligibilityHistoryService.getActive().length;
+  const [activeCount, setActiveCount] = useState(0);
+
+  // Update active count from existing historyItems (no additional API call)
+  useEffect(() => {
+    // Count active items from the already loaded history
+    const count = historyItems.filter(
+      (item) => item.status === "pending" || item.status === "processing"
+    ).length;
+    setActiveCount(count);
+  }, [historyItems]);
 
   return (
     <div className="space-y-4">
@@ -307,31 +413,28 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
         <div className="flex gap-2">
           <button
             onClick={() => setFilterStatus("all")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              filterStatus === "all"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === "all"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
           >
             All
           </button>
           <button
             onClick={() => setFilterStatus("active")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              filterStatus === "active"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === "active"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
           >
             Active
           </button>
           <button
             onClick={() => setFilterStatus("completed")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              filterStatus === "completed"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === "completed"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
           >
             Completed
           </button>
@@ -462,33 +565,51 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
       </div>
 
       {/* Drawer for completed check results */}
-      {showDrawer &&
-        selectedItem?.status === "complete" &&
-        selectedItem?.result && (
-          <Drawer
-            isOpen={showDrawer}
-            onClose={handleCloseDrawer}
-            title={`Eligibility Check Results - ${selectedItem.patientName || selectedItem.patientId}`}
-            size="xl"
-          >
-            <div className="p-6">
+      {showDrawer && selectedItem?.status === "complete" && (
+        <Drawer
+          isOpen={showDrawer}
+          onClose={handleCloseDrawer}
+          title={`Eligibility Check Results - ${selectedItem.patientName || selectedItem.patientId}`}
+          size="xl"
+        >
+          <div className="p-6">
+            {loadingFreshResult ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                  <p className="mt-4 text-gray-600">Loading results...</p>
+                </div>
+              </div>
+            ) : freshResult ? (
+              <MantysResultsDisplay
+                response={freshResult}
+                onClose={handleCloseDrawer}
+                onCheckAnother={handleCheckAnother}
+                screenshot={selectedItem.interimResults?.screenshot || null}
+                patientMPI={selectedItem.patientMPI}
+                patientId={enrichedPatientId || (selectedItem.patientId ? parseInt(selectedItem.patientId) : undefined)}
+                appointmentId={selectedItem.appointmentId}
+                encounterId={selectedItem.encounterId}
+              />
+            ) : selectedItem?.result ? (
               <MantysResultsDisplay
                 response={selectedItem.result}
                 onClose={handleCloseDrawer}
                 onCheckAnother={handleCheckAnother}
                 screenshot={selectedItem.interimResults?.screenshot || null}
                 patientMPI={selectedItem.patientMPI}
-                patientId={
-                  selectedItem.patientId
-                    ? parseInt(selectedItem.patientId)
-                    : undefined
-                }
+                patientId={enrichedPatientId || (selectedItem.patientId ? parseInt(selectedItem.patientId) : undefined)}
                 appointmentId={selectedItem.appointmentId}
                 encounterId={selectedItem.encounterId}
               />
-            </div>
-          </Drawer>
-        )}
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                <p>No results available</p>
+              </div>
+            )}
+          </div>
+        </Drawer>
+      )}
 
       {/* Modal for pending/processing/error checks */}
       {showModal && selectedItem && (

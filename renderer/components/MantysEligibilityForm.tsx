@@ -76,6 +76,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
   // Status Polling State
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [enrichedPatientContext, setEnrichedPatientContext] = useState<PatientData | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [pollingAttempts, setPollingAttempts] = useState(0);
   const [interimScreenshot, setInterimScreenshot] = useState<string | null>(
@@ -728,8 +729,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     }
 
     // Check status periodically to update UI
-    monitoringIntervalRef.current = setInterval(() => {
-      const historyItem = EligibilityHistoryService.getById(historyId);
+    monitoringIntervalRef.current = setInterval(async () => {
+      const historyItem = await EligibilityHistoryService.getById(historyId);
 
       if (!historyItem) {
         if (monitoringIntervalRef.current) {
@@ -799,6 +800,39 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     setCurrentStatus("idle");
 
     try {
+      // If we have appointment ID but not patient ID, fetch from Redis
+      let enrichedPatientData = patientData;
+      if (patientData?.appointment_id && !patientData?.patient_id) {
+        try {
+          setStatusMessage("Fetching patient details...");
+          const contextResponse = await fetch("/api/patient/context", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              appointmentId: patientData.appointment_id,
+              mpi: patientData.mpi,
+            }),
+          });
+
+          if (contextResponse.ok) {
+            const context = await contextResponse.json();
+            enrichedPatientData = {
+              ...patientData,
+              patient_id: context.patientId,
+              appointment_id: context.appointmentId,
+              encounter_id: context.encounterId,
+            };
+            setEnrichedPatientContext(enrichedPatientData);
+            console.log("✅ Enriched patient data from Redis:", enrichedPatientData);
+          }
+        } catch (redisError) {
+          console.warn("⚠️ Could not fetch patient context from Redis:", redisError);
+          // Continue with existing data
+        }
+      }
+
+      setStatusMessage("Creating eligibility check task...");
+
       // Build Mantys payload according to API specification
       const mantysPayload = buildMantysPayload({
         idValue: emiratesId,
@@ -809,13 +843,23 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         payerName: undefined,
       });
 
-      console.log("Submitting eligibility check to Mantys:", mantysPayload);
+      // Add patient metadata for Redis enrichment (use enriched data if available)
+      const payloadWithMetadata = {
+        ...mantysPayload,
+        mpi: enrichedPatientData?.mpi,
+        patientId: enrichedPatientData?.patient_id,
+        patientName: enrichedPatientData ? `${enrichedPatientData.firstname} ${enrichedPatientData.lastname}`.trim() : name || undefined,
+        appointmentId: enrichedPatientData?.appointment_id,
+        encounterId: enrichedPatientData?.encounter_id,
+      };
+
+      console.log("Submitting eligibility check to Mantys:", payloadWithMetadata);
 
       // Step 1: Create the task
       const response = await fetch("/api/mantys/eligibility-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mantysPayload),
+        body: JSON.stringify(payloadWithMetadata),
       });
 
       if (!response.ok) {
@@ -834,27 +878,32 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       setTaskId(createdTaskId);
       setStatusMessage("Task created, checking status...");
 
-      // Add to history
-      const historyItem = EligibilityHistoryService.add({
-        patientId: emiratesId,
+      // Add to history (use enriched data if available)
+      // Store the actual numeric patient ID if available
+      const actualPatientId = enrichedPatientData?.patient_id?.toString();
+
+      const historyItem = await EligibilityHistoryService.add({
+        patientId: actualPatientId || emiratesId, // Use patient ID if available, fall back to Emirates ID
         taskId: createdTaskId,
         patientName:
           name ||
-          `${patientData?.firstname || ""} ${patientData?.lastname || ""}`.trim() ||
+          `${enrichedPatientData?.firstname || ""} ${enrichedPatientData?.lastname || ""}`.trim() ||
           undefined,
-        dateOfBirth: patientData?.dob || undefined,
+        dateOfBirth: enrichedPatientData?.dob || undefined,
         insurancePayer: options,
-        patientMPI: patientData?.mpi || undefined,
-        appointmentId: patientData?.appointment_id || undefined,
-        encounterId: patientData?.encounter_id || undefined,
+        patientMPI: enrichedPatientData?.mpi || undefined,
+        appointmentId: enrichedPatientData?.appointment_id || undefined,
+        encounterId: enrichedPatientData?.encounter_id || undefined,
         status: "pending",
         pollingAttempts: 0,
       });
+
+      console.log("📝 Saved to history with patient ID:", actualPatientId || emiratesId);
       setCurrentHistoryId(historyItem.id);
 
       // Step 2: Add to background polling service
       // This will continue polling even if user closes the tab
-      pollingService.addTask(createdTaskId, historyItem.id);
+      await pollingService.addTask(createdTaskId, historyItem.id);
 
       // Step 3: Monitor status for UI updates (optional - user can close modal)
       monitorTaskStatus(createdTaskId, historyItem.id);
@@ -871,6 +920,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     setShowResults(false);
     setMantysResponse(null);
     setApiError(null);
+    setEnrichedPatientContext(null);
     // Reset form to initial state
     setEmiratesId("");
     setVisitType("OUTPATIENT");
@@ -896,15 +946,18 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
   // If results are available, show the results display
   if (showResults && mantysResponse) {
+    // Use enriched context if available, otherwise use original patientData
+    const contextToUse = enrichedPatientContext || patientData;
+
     return (
       <MantysResultsDisplay
         response={mantysResponse}
         onClose={onClose}
         onCheckAnother={handleCheckAnother}
-        patientMPI={patientData?.mpi}
-        patientId={patientData?.patient_id}
-        appointmentId={patientData?.appointment_id}
-        encounterId={patientData?.encounter_id}
+        patientMPI={contextToUse?.mpi}
+        patientId={contextToUse?.patient_id}
+        appointmentId={contextToUse?.appointment_id}
+        encounterId={contextToUse?.encounter_id}
       />
     );
   }

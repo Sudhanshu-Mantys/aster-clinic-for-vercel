@@ -21,6 +21,8 @@ interface ExtendedEligibilityRequest extends MantysEligibilityRequest {
   mpi?: string;
   patientId?: string | number;
   patientName?: string;
+  appointmentId?: number;
+  encounterId?: number;
 }
 
 const MANTYS_API_BASE_URL =
@@ -60,34 +62,45 @@ export default async function handler(
     }
 
     // Extract patient metadata (not sent to Mantys API)
-    let { mpi, patientId, patientName, ...payload } = requestBody;
+    let { mpi, patientId, patientName, appointmentId, encounterId, ...payload } = requestBody;
 
-    // Try to enrich patient metadata from Redis if MPI or patientId is provided
+    // Try to enrich patient metadata from Redis
+    // Priority: 1) appointmentId, 2) MPI, 3) patientId
     try {
-      if (mpi) {
-        const storedContext =
-          await patientContextRedisService.getPatientContextByMPI(mpi);
+      let storedContext = null;
+
+      // First try by appointment ID (most reliable source from Redis)
+      if (appointmentId) {
+        storedContext = await patientContextRedisService.getPatientContextByAppointmentId(appointmentId);
         if (storedContext) {
-          console.log(
-            `  📥 Retrieved patient context from Redis for MPI: ${mpi}`,
-          );
-          // Enrich with stored data if not already provided
-          patientId = patientId || storedContext.patientId?.toString();
-          patientName = patientName || storedContext.patientName;
+          console.log(`  📥 Retrieved patient context from Redis for Appointment ID: ${appointmentId}`);
         }
-      } else if (patientId) {
-        const storedContext =
-          await patientContextRedisService.getPatientContextByPatientId(
-            Number(patientId),
-          );
+      }
+
+      // Then try by MPI if not found
+      if (!storedContext && mpi) {
+        storedContext = await patientContextRedisService.getPatientContextByMPI(mpi);
         if (storedContext) {
-          console.log(
-            `  📥 Retrieved patient context from Redis for Patient ID: ${patientId}`,
-          );
-          // Enrich with stored data if not already provided
-          mpi = mpi || storedContext.mpi;
-          patientName = patientName || storedContext.patientName;
+          console.log(`  📥 Retrieved patient context from Redis for MPI: ${mpi}`);
         }
+      }
+
+      // Finally try by patient ID if still not found
+      if (!storedContext && patientId) {
+        storedContext = await patientContextRedisService.getPatientContextByPatientId(Number(patientId));
+        if (storedContext) {
+          console.log(`  📥 Retrieved patient context from Redis for Patient ID: ${patientId}`);
+        }
+      }
+
+      // Enrich with stored data if found
+      if (storedContext) {
+        patientId = patientId || storedContext.patientId?.toString();
+        mpi = mpi || storedContext.mpi;
+        patientName = patientName || storedContext.patientName;
+        appointmentId = appointmentId || storedContext.appointmentId;
+        encounterId = encounterId || storedContext.encounterId;
+        console.log(`  ✅ Enriched patient data - Patient ID: ${patientId}, MPI: ${mpi}, Appointment: ${appointmentId}, Encounter: ${encounterId}`);
       }
     } catch (redisError) {
       console.error(
@@ -163,6 +176,23 @@ export default async function handler(
         createdAt: new Date().toISOString(),
       });
       console.log("Step 3: Stored eligibility check in Redis");
+
+      // Also store/update patient context in Redis (important for manual searches)
+      if (mpi && patientId) {
+        try {
+          await patientContextRedisService.storePatientContext({
+            mpi: mpi,
+            patientId: Number(patientId),
+            patientName: patientName || "",
+            appointmentId: appointmentId || undefined,
+            encounterId: encounterId || undefined,
+            lastUpdated: new Date().toISOString(),
+          });
+          console.log(`  ✅ Stored/updated patient context - MPI: ${mpi}, Patient ID: ${patientId}, Appointment: ${appointmentId || 'N/A'}`);
+        } catch (contextError) {
+          console.error("Failed to store patient context (non-fatal):", contextError);
+        }
+      }
     } catch (redisError) {
       console.error("Failed to store in Redis (non-fatal):", redisError);
       // Continue even if Redis fails - don't block the eligibility check

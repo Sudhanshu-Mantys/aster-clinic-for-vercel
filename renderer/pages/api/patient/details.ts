@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { patientContextRedisService } from '../../../lib/redis-patient-context'
 
 /**
  * Next.js API Route - Patient Details Proxy
@@ -87,6 +88,16 @@ export default async function handler(
             body: JSON.stringify(requestBody),
         })
 
+        // Check if response is JSON before parsing
+        const contentType = response.headers.get('content-type')
+        if (!contentType || !contentType.includes('application/json')) {
+            const textResponse = await response.text()
+            console.error('Non-JSON response received:', textResponse.substring(0, 500))
+            return res.status(500).json({
+                error: 'Couldn\'t fetch patient details',
+            })
+        }
+
         // Get the response data
         const data = await response.json()
 
@@ -117,6 +128,32 @@ export default async function handler(
                 error: 'No patient found with this ID',
                 details: data,
             })
+        }
+
+        // Store patient context in Redis if we have the data
+        try {
+            const patientData = data.body.Data[0];
+            if (patientData && patientData.mpi && patientData.patient_id) {
+                const patientName = `${patientData.firstname || ''} ${patientData.lastname || ''}`.trim();
+
+                await patientContextRedisService.storePatientContext({
+                    mpi: patientData.mpi,
+                    patientId: patientData.patient_id,
+                    patientName,
+                    appointmentId: appointmentId || undefined,
+                    encounterId: encounterId || undefined,
+                    phone: patientData.phone,
+                    email: patientData.email,
+                    dob: patientData.dob,
+                    gender: patientData.gender,
+                    lastUpdated: new Date().toISOString(),
+                });
+
+                console.log(`✅ Stored patient context in Redis - Patient ID: ${patientData.patient_id}, MPI: ${patientData.mpi}`);
+            }
+        } catch (redisError) {
+            console.error('⚠️ Failed to store patient context in Redis (non-fatal):', redisError);
+            // Continue even if Redis fails
         }
 
         // Return the successful response

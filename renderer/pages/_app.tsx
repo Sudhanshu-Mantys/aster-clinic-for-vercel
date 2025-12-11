@@ -9,7 +9,9 @@ function MyApp({ Component, pageProps }: AppProps) {
   // Initialize background polling service on app mount
   useEffect(() => {
     console.log("[App] Initializing eligibility polling service");
-    pollingService.initialize();
+    pollingService.initialize().catch(error => {
+      console.error("[App] Error initializing polling service:", error);
+    });
 
     // Cleanup on unmount
     return () => {

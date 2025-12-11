@@ -247,6 +247,16 @@ export default async function handler(
 
         console.log('📥 Response status:', response.status, response.statusText)
 
+        // Check if response is JSON before parsing
+        const contentType = response.headers.get('content-type')
+        if (!contentType || !contentType.includes('application/json')) {
+            const textResponse = await response.text()
+            console.error('Non-JSON response received:', textResponse.substring(0, 500))
+            return res.status(500).json({
+                error: 'Couldn\'t fetch appointments',
+            })
+        }
+
         // Get the response data
         const data = await response.json()
         console.log('📦 Response data:', JSON.stringify(data, null, 2))

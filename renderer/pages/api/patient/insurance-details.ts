@@ -104,6 +104,16 @@ export default async function handler(
             body: JSON.stringify(requestBody),
         })
 
+        // Check if response is JSON before parsing
+        const contentType = response.headers.get('content-type')
+        if (!contentType || !contentType.includes('application/json')) {
+            const textResponse = await response.text()
+            console.error('Non-JSON response received:', textResponse.substring(0, 500))
+            return res.status(500).json({
+                error: 'Couldn\'t fetch insurance details',
+            })
+        }
+
         // Get the response data
         const data = await response.json()
 

@@ -45,9 +45,46 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     [key: string]: number;
   }>({});
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+  const [policySaved, setPolicySaved] = useState(false);
 
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const { data } = response;
+
+  // Guard against undefined data - but check if we have error info first
+  if (!data) {
+    // Check if response has status/message/error_type for better error display
+    const errorMessage = (response as any).message ||
+      (response as any).error_type ||
+      'The eligibility check response is missing data. Please try again.';
+    const responseStatus = (response as any).status;
+
+    console.error('MantysResultsDisplay - Missing data. Full response:', response);
+
+    return (
+      <div className="p-6 bg-red-50 border border-red-200 rounded-lg">
+        <h2 className="text-xl font-semibold text-red-900 mb-2">
+          {responseStatus === 'member_not_found' ? 'Member Not Found' : 'Error: Invalid Response'}
+        </h2>
+        <p className="text-red-700">
+          {errorMessage}
+        </p>
+        {(response as any).tpa && (
+          <p className="text-sm text-gray-600 mt-2">
+            TPA: {(response as any).tpa}
+          </p>
+        )}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+          >
+            Close
+          </button>
+        )}
+      </div>
+    );
+  }
 
   const toggleCopayExpanded = (name: string) => {
     setExpandedCopay(expandedCopay === name ? null : name);
@@ -59,6 +96,96 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
   const handleCloseLifetrenzPreview = () => {
     setShowLifetrenzPreview(false);
+  };
+
+  const handleSavePolicy = async () => {
+    if (!patientId || !encounterId || !appointmentId) {
+      alert(
+        "Missing required patient information (Patient ID, Encounter ID, or Appointment ID). Cannot save policy details.",
+      );
+      return;
+    }
+
+    setSavingPolicy(true);
+
+    try {
+      // Extract policy data from Mantys response
+      const policyData = {
+        policyId: data.patient_info?.policy_id || null,
+        isActive: 1,
+        payerId: data.patient_info?.payer_id || null,
+        insuranceCompanyId: null,
+        networkId: data.policy_network?.network_id || null,
+        siteId: 31, // Default site ID
+        policyNumber: data.patient_info?.patient_id_info?.policy_number || null,
+        insuranceGroupPolicyId: null,
+        encounterid: encounterId,
+        parentInsPolicyId: null,
+        tpaCompanyId: data.patient_info?.tpa_id || null,
+        planName: data.patient_info?.plan_name || null,
+        eligibilityReqId: null,
+        tpaPolicyId: data.patient_info?.patient_id_info?.member_id || null,
+        insRules: null,
+        orgId: null,
+        insuranceMappingId: data.patient_info?.insurance_mapping_id || null,
+        tpaGroupPolicyId: null,
+        apntId: appointmentId,
+        insuranceValidTill: data.policy_end_date || null,
+        orgName: null,
+        tpaValidTill: data.policy_end_date || null,
+        patientId: patientId,
+        insuranceRenewal: null,
+        payerType: 1,
+        insuranceStartDate: data.policy_start_date || null,
+        insurancePolicyId: null,
+        hasTopUpCard: 0,
+        proposerRelation: "Self",
+        createdBy: 13295, // TODO: Get actual user ID
+        empId: null,
+        requestLetter: null,
+        insertType: 2,
+        customerId: 1,
+        type: 1,
+        relationshipId: 26, // Default relationship ID for "Self"
+        priorityPatientApplicable: 0,
+        typeId: 2,
+        DepData: null,
+      };
+
+      console.log("Saving policy data:", policyData);
+
+      const response = await fetch("/api/aster/save-policy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          policyData,
+          patientId,
+          appointmentId,
+          encounterId,
+          payerId: data.patient_info?.payer_id,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        setPolicySaved(true);
+        alert("Policy details saved successfully!");
+        console.log("Policy saved:", result);
+      } else {
+        console.error("Failed to save policy:", result);
+        alert(
+          `Failed to save policy details: ${result.error || "Unknown error"}`,
+        );
+      }
+    } catch (error) {
+      console.error("Error saving policy:", error);
+      alert("An error occurred while saving policy details. See console for details.");
+    } finally {
+      setSavingPolicy(false);
+    }
   };
 
   const handleUploadScreenshots = async () => {
@@ -525,22 +652,93 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
       {/* Policy Information */}
       <Card className="p-5">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
+            </svg>
+            Policy Details
+          </h3>
+          <Button
+            onClick={handleSavePolicy}
+            disabled={savingPolicy || policySaved}
+            className={
+              policySaved
+                ? "bg-green-600 hover:bg-green-700 text-white"
+                : "bg-blue-600 hover:bg-blue-700 text-white"
+            }
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-            />
-          </svg>
-          Policy Details
-        </h3>
+            {savingPolicy ? (
+              <>
+                <svg
+                  className="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                Saving...
+              </>
+            ) : policySaved ? (
+              <>
+                <svg
+                  className="w-4 h-4 mr-2 inline"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 13l4 4L19 7"
+                  />
+                </svg>
+                Policy Saved
+              </>
+            ) : (
+              <>
+                <svg
+                  className="w-4 h-4 mr-2 inline"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                  />
+                </svg>
+                Save Policy
+              </>
+            )}
+          </Button>
+        </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <span className="font-medium text-gray-700">Payer Name:</span>

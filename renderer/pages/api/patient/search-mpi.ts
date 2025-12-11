@@ -169,6 +169,16 @@ export default async function handler(
 
     console.log("📥 Response status:", response.status, response.statusText);
 
+    // Check if response is JSON before parsing
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      const textResponse = await response.text();
+      console.error("Non-JSON response received:", textResponse.substring(0, 500));
+      return res.status(500).json({
+        error: "Couldn't fetch patient details",
+      });
+    }
+
     // Get the response data
     const data = await response.json();
     console.log("📦 Response data:", JSON.stringify(data, null, 2));
@@ -304,6 +314,9 @@ export default async function handler(
           gcc_id: null,
           relationship_type: null,
           associated_nationality_id: null,
+          // CRITICAL: Include appointment_id and encounter_id from the original response
+          appointment_id: appointmentData.appointment_id,
+          encounter_id: appointmentData.encounter_id,
         };
       },
     );
@@ -325,40 +338,41 @@ export default async function handler(
     );
     console.log("Final response:", JSON.stringify(transformedData, null, 2));
 
-    // Store patient context in Redis for each patient/appointment
-    try {
-      for (const appointmentData of data.body.Data) {
-        if (appointmentData.mpi && appointmentData.patient_id) {
-          const nameParts =
-            appointmentData.full_name?.trim().split(/\s+/) || [];
-          const patientName = appointmentData.full_name || "";
+    // Store patient context in Redis in bulk (background task - fire and forget)
+    // EXACTLY like today's appointments API
+    if (data.body?.Data && Array.isArray(data.body.Data)) {
+      const contexts = data.body.Data
+        .filter((appointmentData) => appointmentData.mpi && appointmentData.patient_id)
+        .map((appointmentData) => ({
+          mpi: appointmentData.mpi,
+          patientId: appointmentData.patient_id,
+          patientName: appointmentData.full_name || "",
+          appointmentId: appointmentData.appointment_id,
+          encounterId: appointmentData.encounter_id,
+          phone: appointmentData.mobile_phone,
+          email: appointmentData.email,
+          dob: appointmentData.dob,
+          gender: appointmentData.gender,
+          lastUpdated: new Date().toISOString(),
+        }));
 
-          await patientContextRedisService.storePatientContext({
-            mpi: appointmentData.mpi,
-            patientId: appointmentData.patient_id,
-            patientName,
-            appointmentId: appointmentData.appointment_id,
-            encounterId: appointmentData.encounter_id,
-            phone: appointmentData.mobile_phone,
-            email: appointmentData.email,
-            dob: appointmentData.dob,
-            gender: appointmentData.gender,
-            lastUpdated: new Date().toISOString(),
-          });
+      // Run as background task - don't await
+      patientContextRedisService
+        .storeBulkPatientContexts(contexts)
+        .then(() => {
           console.log(
-            `  📝 Stored patient context for MPI: ${appointmentData.mpi}, Appointment: ${appointmentData.appointment_id || "N/A"}`,
+            `✅ Bulk stored ${contexts.length} patient contexts in Redis (MPI search)`,
           );
-        }
-      }
-    } catch (redisError) {
-      console.error(
-        "⚠️ Failed to store patient context in Redis (non-fatal):",
-        redisError,
-      );
-      // Continue even if Redis fails
+        })
+        .catch((redisError) => {
+          console.error(
+            "⚠️ Failed to bulk store MPI search contexts in Redis (non-fatal):",
+            redisError,
+          );
+        });
     }
 
-    // Return the transformed response
+    // Return the transformed response immediately without waiting for Redis
     return res.status(200).json(transformedData);
   } catch (error) {
     console.error("❌❌❌ PROXY ERROR ❌❌❌");

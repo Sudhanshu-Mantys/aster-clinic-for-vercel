@@ -18,6 +18,21 @@ import {
 export function extractMantysKeyFields(response: MantysEligibilityResponse): MantysKeyFields {
     const { data } = response
 
+    // Guard against undefined data
+    if (!data) {
+        return {
+            network: null,
+            copayDetails: [],
+            memberId: '',
+            isEligible: false,
+            policyStartDate: '',
+            policyEndDate: '',
+            payerName: '',
+            specialRemarks: [],
+            referralDocuments: []
+        }
+    }
+
     // Extract primary network from policy_network.all_networks
     const primaryNetwork = data.policy_network?.all_networks?.[0]?.network || null
 

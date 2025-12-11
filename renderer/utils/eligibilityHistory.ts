@@ -1,4 +1,4 @@
-// Utility for managing eligibility check history in localStorage
+// Utility for managing eligibility check history in Redis
 
 export interface EligibilityHistoryItem {
   id: string; // unique ID for this check
@@ -26,18 +26,32 @@ export interface EligibilityHistoryItem {
   pollingAttempts?: number;
 }
 
-const STORAGE_KEY = "mantys_eligibility_history";
-const MAX_HISTORY_ITEMS = 100; // Limit to prevent localStorage overflow
+// Cache for reducing API calls
+let cachedItems: EligibilityHistoryItem[] | null = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 1000; // 1 second cache
 
 export class EligibilityHistoryService {
   /**
    * Get all history items
    */
-  static getAll(): EligibilityHistoryItem[] {
+  static async getAll(): Promise<EligibilityHistoryItem[]> {
     try {
-      const data = localStorage.getItem(STORAGE_KEY);
-      if (!data) return [];
-      return JSON.parse(data);
+      // Use cache if available and recent
+      if (cachedItems && Date.now() - lastFetchTime < CACHE_DURATION) {
+        return cachedItems;
+      }
+
+      const response = await fetch('/api/eligibility-history');
+      if (!response.ok) {
+        throw new Error('Failed to fetch history');
+      }
+      const items = await response.json();
+
+      cachedItems = items;
+      lastFetchTime = Date.now();
+
+      return items;
     } catch (error) {
       console.error("Error reading eligibility history:", error);
       return [];
@@ -47,120 +61,181 @@ export class EligibilityHistoryService {
   /**
    * Get a specific history item by ID
    */
-  static getById(id: string): EligibilityHistoryItem | null {
-    const items = this.getAll();
-    return items.find((item) => item.id === id) || null;
+  static async getById(id: string): Promise<EligibilityHistoryItem | null> {
+    try {
+      const response = await fetch(`/api/eligibility-history?id=${id}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch history item');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error("Error reading eligibility history item:", error);
+      return null;
+    }
   }
 
   /**
    * Get a history item by task ID
    */
-  static getByTaskId(taskId: string): EligibilityHistoryItem | null {
-    const items = this.getAll();
-    return items.find((item) => item.taskId === taskId) || null;
+  static async getByTaskId(taskId: string): Promise<EligibilityHistoryItem | null> {
+    try {
+      const response = await fetch(`/api/eligibility-history?taskId=${taskId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch history item');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error("Error reading eligibility history item:", error);
+      return null;
+    }
   }
 
   /**
    * Add a new history item
    */
-  static add(
+  static async add(
     item: Omit<EligibilityHistoryItem, "id" | "createdAt">,
-  ): EligibilityHistoryItem {
-    const items = this.getAll();
+  ): Promise<EligibilityHistoryItem> {
+    try {
+      const response = await fetch('/api/eligibility-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      });
 
-    const newItem: EligibilityHistoryItem = {
-      ...item,
-      id: this.generateId(),
-      createdAt: new Date().toISOString(),
-    };
+      if (!response.ok) {
+        throw new Error('Failed to add history item');
+      }
 
-    items.unshift(newItem); // Add to beginning of array
-
-    // Limit history size
-    if (items.length > MAX_HISTORY_ITEMS) {
-      items.splice(MAX_HISTORY_ITEMS);
+      const newItem = await response.json();
+      cachedItems = null; // Invalidate cache
+      return newItem;
+    } catch (error) {
+      console.error("Error adding eligibility history item:", error);
+      throw error;
     }
-
-    this.saveAll(items);
-    return newItem;
   }
 
   /**
    * Update an existing history item
    */
-  static update(id: string, updates: Partial<EligibilityHistoryItem>): void {
-    const items = this.getAll();
-    const index = items.findIndex((item) => item.id === id);
+  static async update(id: string, updates: Partial<EligibilityHistoryItem>): Promise<void> {
+    try {
+      const response = await fetch('/api/eligibility-history', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, updates }),
+      });
 
-    if (index === -1) {
-      console.warn(`History item with id ${id} not found`);
-      return;
+      if (!response.ok) {
+        throw new Error('Failed to update history item');
+      }
+
+      cachedItems = null; // Invalidate cache
+    } catch (error) {
+      console.error("Error updating eligibility history item:", error);
     }
-
-    items[index] = { ...items[index], ...updates };
-    this.saveAll(items);
   }
 
   /**
    * Update by task ID
    */
-  static updateByTaskId(
+  static async updateByTaskId(
     taskId: string,
     updates: Partial<EligibilityHistoryItem>,
-  ): void {
-    const items = this.getAll();
-    const index = items.findIndex((item) => item.taskId === taskId);
+  ): Promise<void> {
+    try {
+      const response = await fetch('/api/eligibility-history', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId, updates }),
+      });
 
-    if (index === -1) {
-      console.warn(`History item with taskId ${taskId} not found`);
-      return;
+      if (!response.ok) {
+        throw new Error('Failed to update history item');
+      }
+
+      cachedItems = null; // Invalidate cache
+    } catch (error) {
+      console.error("Error updating eligibility history item:", error);
     }
-
-    items[index] = { ...items[index], ...updates };
-    this.saveAll(items);
   }
 
   /**
    * Delete a history item
    */
-  static delete(id: string): void {
-    const items = this.getAll();
-    const filtered = items.filter((item) => item.id !== id);
-    this.saveAll(filtered);
+  static async delete(id: string): Promise<void> {
+    try {
+      const response = await fetch(`/api/eligibility-history?id=${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete history item');
+      }
+
+      cachedItems = null; // Invalidate cache
+    } catch (error) {
+      console.error("Error deleting eligibility history item:", error);
+    }
   }
 
   /**
    * Clear all history
    */
-  static clearAll(): void {
-    localStorage.removeItem(STORAGE_KEY);
+  static async clearAll(): Promise<void> {
+    try {
+      const response = await fetch('/api/eligibility-history?clearAll=true', {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to clear history');
+      }
+
+      cachedItems = null; // Invalidate cache
+    } catch (error) {
+      console.error("Error clearing eligibility history:", error);
+    }
   }
 
   /**
    * Get active (pending or processing) checks
    */
-  static getActive(): EligibilityHistoryItem[] {
-    const items = this.getAll();
-    return items.filter(
-      (item) => item.status === "pending" || item.status === "processing",
-    );
+  static async getActive(): Promise<EligibilityHistoryItem[]> {
+    try {
+      const response = await fetch('/api/eligibility-history?status=active');
+      if (!response.ok) {
+        throw new Error('Failed to fetch active history items');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error("Error reading active eligibility history:", error);
+      return [];
+    }
   }
 
   /**
    * Get completed checks
    */
-  static getCompleted(): EligibilityHistoryItem[] {
-    const items = this.getAll();
-    return items.filter(
-      (item) => item.status === "complete" || item.status === "error",
-    );
+  static async getCompleted(): Promise<EligibilityHistoryItem[]> {
+    try {
+      const response = await fetch('/api/eligibility-history?status=completed');
+      if (!response.ok) {
+        throw new Error('Failed to fetch completed history items');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error("Error reading completed eligibility history:", error);
+      return [];
+    }
   }
 
   /**
    * Search history by patient name or ID
    */
-  static search(query: string): EligibilityHistoryItem[] {
-    const items = this.getAll();
+  static async search(query: string): Promise<EligibilityHistoryItem[]> {
+    const items = await this.getAll();
     const lowerQuery = query.toLowerCase();
 
     return items.filter(
@@ -172,72 +247,18 @@ export class EligibilityHistoryService {
   }
 
   /**
-   * Save all items to localStorage
-   */
-  private static saveAll(items: EligibilityHistoryItem[]): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch (error) {
-      console.error("Error saving eligibility history:", error);
-      // If localStorage is full, try removing old items
-      if (error instanceof Error && error.name === "QuotaExceededError") {
-        const reducedItems = items.slice(0, Math.floor(items.length / 2));
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(reducedItems));
-      }
-    }
-  }
-
-  /**
-   * Generate a unique ID
-   */
-  private static generateId(): string {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  /**
-   * Clean up old completed items (older than 30 days)
-   */
-  static cleanup(daysToKeep: number = 30): void {
-    const items = this.getAll();
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-
-    const filtered = items.filter((item) => {
-      // Always keep active items
-      if (item.status === "pending" || item.status === "processing") {
-        return true;
-      }
-
-      // Keep completed items within the cutoff date
-      const itemDate = new Date(item.createdAt);
-      return itemDate > cutoffDate;
-    });
-
-    this.saveAll(filtered);
-  }
-
-  /**
    * Export history as JSON (for backup/download)
    */
-  static export(): string {
-    const items = this.getAll();
+  static async export(): Promise<string> {
+    const items = await this.getAll();
     return JSON.stringify(items, null, 2);
   }
 
   /**
-   * Import history from JSON
+   * Invalidate cache manually
    */
-  static import(jsonData: string): boolean {
-    try {
-      const items = JSON.parse(jsonData);
-      if (!Array.isArray(items)) {
-        throw new Error("Invalid data format");
-      }
-      this.saveAll(items);
-      return true;
-    } catch (error) {
-      console.error("Error importing history:", error);
-      return false;
-    }
+  static invalidateCache(): void {
+    cachedItems = null;
+    lastFetchTime = 0;
   }
 }
