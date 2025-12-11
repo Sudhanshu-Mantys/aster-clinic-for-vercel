@@ -182,38 +182,40 @@ export default async function handler(
 
     console.log("✅ API response OK, RecordCount:", data.body?.RecordCount);
 
-    // Store patient context in Redis for each appointment
-    try {
-      if (data.body?.Data && Array.isArray(data.body.Data)) {
-        for (const appointmentData of data.body.Data) {
-          if (appointmentData.mpi && appointmentData.patient_id) {
-            await patientContextRedisService.storePatientContext({
-              mpi: appointmentData.mpi,
-              patientId: appointmentData.patient_id,
-              patientName: appointmentData.full_name || "",
-              appointmentId: appointmentData.appointment_id,
-              encounterId: appointmentData.encounter_id,
-              phone: appointmentData.mobile_phone,
-              email: appointmentData.email,
-              dob: appointmentData.dob,
-              gender: appointmentData.gender,
-              lastUpdated: new Date().toISOString(),
-            });
-            console.log(
-              `  📝 Stored context for appointment: ${appointmentData.appointment_id}, MPI: ${appointmentData.mpi}`,
-            );
-          }
-        }
-      }
-    } catch (redisError) {
-      console.error(
-        "⚠️ Failed to store appointment context in Redis (non-fatal):",
-        redisError,
-      );
-      // Continue even if Redis fails
+    // Store patient context in Redis in bulk (background task - fire and forget)
+    if (data.body?.Data && Array.isArray(data.body.Data)) {
+      const contexts = data.body.Data
+        .filter((appointmentData) => appointmentData.mpi && appointmentData.patient_id)
+        .map((appointmentData) => ({
+          mpi: appointmentData.mpi,
+          patientId: appointmentData.patient_id,
+          patientName: appointmentData.full_name || "",
+          appointmentId: appointmentData.appointment_id,
+          encounterId: appointmentData.encounter_id,
+          phone: appointmentData.mobile_phone,
+          email: appointmentData.email,
+          dob: appointmentData.dob,
+          gender: appointmentData.gender,
+          lastUpdated: new Date().toISOString(),
+        }));
+
+      // Run as background task - don't await
+      patientContextRedisService
+        .storeBulkPatientContexts(contexts)
+        .then(() => {
+          console.log(
+            `✅ Bulk stored ${contexts.length} patient contexts in Redis`,
+          );
+        })
+        .catch((redisError) => {
+          console.error(
+            "⚠️ Failed to bulk store appointment contexts in Redis (non-fatal):",
+            redisError,
+          );
+        });
     }
 
-    // Return the appointments even if there are none (let the frontend handle empty state)
+    // Return the appointments immediately without waiting for Redis
     return res.status(200).json(data);
   } catch (error) {
     console.error("❌❌❌ PROXY ERROR ❌❌❌");

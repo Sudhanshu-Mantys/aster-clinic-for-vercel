@@ -85,6 +85,35 @@ export class PatientContextRedisService {
   }
 
   /**
+   * Store multiple patient contexts in bulk using a single pipeline
+   */
+  async storeBulkPatientContexts(contexts: PatientContext[]): Promise<void> {
+    if (contexts.length === 0) {
+      return;
+    }
+
+    const pipeline = this.redis.pipeline();
+
+    for (const context of contexts) {
+      // Store by MPI
+      const mpiKey = `patient:mpi:${context.mpi}`;
+      pipeline.setex(mpiKey, this.TTL, JSON.stringify(context));
+
+      // Store by patient ID
+      const patientIdKey = `patient:id:${context.patientId}`;
+      pipeline.setex(patientIdKey, this.TTL, JSON.stringify(context));
+
+      // If appointment ID exists, store by appointment ID
+      if (context.appointmentId) {
+        const appointmentKey = `appointment:${context.appointmentId}`;
+        pipeline.setex(appointmentKey, this.TTL, JSON.stringify(context));
+      }
+    }
+
+    await pipeline.exec();
+  }
+
+  /**
    * Get patient context by MPI
    */
   async getPatientContextByMPI(mpi: string): Promise<PatientContext | null> {
