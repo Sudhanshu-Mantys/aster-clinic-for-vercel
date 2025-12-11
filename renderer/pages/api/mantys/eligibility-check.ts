@@ -9,6 +9,7 @@ import {
   MantysCreateTaskResponse,
 } from "../../../types/mantys";
 import { eligibilityRedisService } from "../../../lib/redis-eligibility-mapping";
+import { patientContextRedisService } from "../../../lib/redis-patient-context";
 
 interface TaskCreatedResponse {
   task_id: string;
@@ -65,7 +66,7 @@ export default async function handler(
     try {
       if (mpi) {
         const storedContext =
-          await eligibilityRedisService.getPatientContextByMPI(mpi);
+          await patientContextRedisService.getPatientContextByMPI(mpi);
         if (storedContext) {
           console.log(
             `  📥 Retrieved patient context from Redis for MPI: ${mpi}`,
@@ -76,7 +77,7 @@ export default async function handler(
         }
       } else if (patientId) {
         const storedContext =
-          await eligibilityRedisService.getPatientContextByPatientId(
+          await patientContextRedisService.getPatientContextByPatientId(
             Number(patientId),
           );
         if (storedContext) {
