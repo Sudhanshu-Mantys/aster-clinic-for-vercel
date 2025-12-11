@@ -147,12 +147,23 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         AXA: "INS010",
         ADNIC: "INS017",
         Mednet: "TPA036",
+        Oman: "INS012",
       };
 
+      // Check both tpa_name and insurance_name for mapping
       const tpaName = insuranceData.tpa_name;
-      const mappedTpa = Object.entries(tpaMapping).find(([key]) =>
-        tpaName.toLowerCase().includes(key.toLowerCase()),
-      );
+      const insuranceName = insuranceData.insurance_name;
+
+      const mappedTpa = Object.entries(tpaMapping).find(([key]) => {
+        const keyLower = key.toLowerCase();
+        if (tpaName && tpaName.toLowerCase().includes(keyLower)) {
+          return true;
+        }
+        if (insuranceName && insuranceName.toLowerCase().includes(keyLower)) {
+          return true;
+        }
+        return false;
+      });
 
       if (mappedTpa) {
         setOptions(mappedTpa[1]);

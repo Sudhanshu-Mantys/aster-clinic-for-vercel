@@ -23,37 +23,85 @@ export default async function handler(
     console.log('Step 1: Fetching existing insurance details for patient:', patientId);
 
     // Step 1: Fetch existing insurance details to get the policy ID
-    const insuranceResponse = await fetch(`${API_BASE_URL}/claim/patient/insurance/details/get`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        head: {
-          reqtime: new Date().toDateString(),
-          srvseqno: "",
-          reqtype: "POST"
-        },
-        body: {
-          apntId: appointmentId || null,
-          patientId: patientId,
-          encounterId: encounterId || 0,
-          customerId: 1,
-          primaryInsPolicyId: null,
-          siteId: 31,
-          isDiscard: 0,
-          hasTopUpCard: 0,
-        }
-      })
-    });
+    // Try with different parameter combinations since manual searches might not have appointment/encounter
+    let insuranceData = null;
+    let insuranceResponse = null;
 
-    const insuranceData = await insuranceResponse.json();
+    // First attempt: with all IDs if available
+    if (appointmentId && encounterId) {
+      console.log('  Trying with appointment and encounter IDs...');
+      insuranceResponse = await fetch(`${API_BASE_URL}/claim/insurance/details/replicate/get`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Referer': 'app:/TrendEHR.swf',
+          'x-flash-version': '32,0,0,182',
+          'Accept-Encoding': 'gzip,deflate',
+          'User-Agent': 'Mozilla/5.0 (Windows; U; en-US) AppleWebKit/533.19.4 (KHTML, like Gecko) AdobeAIR/32.0',
+        },
+        body: JSON.stringify({
+          head: {
+            reqtime: new Date().toDateString(),
+            srvseqno: "",
+            reqtype: "POST"
+          },
+          body: {
+            apntId: appointmentId,
+            patientId: patientId,
+            encounterId: encounterId,
+            customerId: 1,
+            primaryInsPolicyId: null,
+            siteId: 31,
+            isDiscard: 0,
+            hasTopUpCard: 0,
+          }
+        })
+      });
+
+      insuranceData = await insuranceResponse.json();
+      console.log('  Response:', insuranceData.head?.StatusValue);
+    }
+
+    // Second attempt: without appointment/encounter IDs (for manual searches)
+    if (!insuranceData?.body?.Data) {
+      console.log('  Trying with patient ID only...');
+      insuranceResponse = await fetch(`${API_BASE_URL}/claim/insurance/details/replicate/get`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Referer': 'app:/TrendEHR.swf',
+          'x-flash-version': '32,0,0,182',
+          'Accept-Encoding': 'gzip,deflate',
+          'User-Agent': 'Mozilla/5.0 (Windows; U; en-US) AppleWebKit/533.19.4 (KHTML, like Gecko) AdobeAIR/32.0',
+        },
+        body: JSON.stringify({
+          head: {
+            reqtime: new Date().toDateString(),
+            srvseqno: "",
+            reqtype: "POST"
+          },
+          body: {
+            apntId: null,
+            patientId: patientId,
+            encounterId: 0,
+            customerId: 1,
+            primaryInsPolicyId: null,
+            siteId: 31,
+            isDiscard: 0,
+            hasTopUpCard: 0,
+          }
+        })
+      });
+
+      insuranceData = await insuranceResponse.json();
+    }
+
     console.log('Insurance data fetched:', JSON.stringify(insuranceData, null, 2));
 
-    if (!insuranceResponse.ok || !insuranceData.body?.Data) {
-      console.error('Failed to fetch insurance details');
-      return res.status(400).json({
-        error: 'Could not fetch existing insurance details',
+    if (!insuranceData?.body?.Data || insuranceData.body.Data.length === 0) {
+      console.error('No insurance policies found for patient');
+      return res.status(404).json({
+        error: 'No insurance policies found for this patient. Please ensure the patient has active insurance in Aster.',
         details: insuranceData,
       });
     }
@@ -90,10 +138,18 @@ export default async function handler(
       tpaName: existingPolicy.tpa_name,
     });
 
-    // Step 3: Update the policy data with the existing policy ID
+    // Step 3: Update the policy data with the existing policy ID and payerId
+    // Remove payerId from policyData to ensure we use the one from existing policy
+    const { payerId: _, ...policyDataWithoutPayerId } = policyData;
+
     const updatedPolicyData = {
-      ...policyData,
+      ...policyDataWithoutPayerId,
       policyId: existingPolicy.patient_insurance_tpa_policy_id,
+      payerId: existingPolicy.payer_id, // Use payerId from existing Aster policy
+      // Add "-mantys" suffix to member ID for testing
+      tpaPolicyId: policyDataWithoutPayerId.tpaPolicyId
+        ? `${policyDataWithoutPayerId.tpaPolicyId}-mantys`
+        : null,
     };
 
     // Step 4: Prepare the request for Aster API
