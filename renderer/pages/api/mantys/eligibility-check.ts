@@ -59,7 +59,42 @@ export default async function handler(
     }
 
     // Extract patient metadata (not sent to Mantys API)
-    const { mpi, patientId, patientName, ...payload } = requestBody;
+    let { mpi, patientId, patientName, ...payload } = requestBody;
+
+    // Try to enrich patient metadata from Redis if MPI or patientId is provided
+    try {
+      if (mpi) {
+        const storedContext =
+          await eligibilityRedisService.getPatientContextByMPI(mpi);
+        if (storedContext) {
+          console.log(
+            `  📥 Retrieved patient context from Redis for MPI: ${mpi}`,
+          );
+          // Enrich with stored data if not already provided
+          patientId = patientId || storedContext.patientId?.toString();
+          patientName = patientName || storedContext.patientName;
+        }
+      } else if (patientId) {
+        const storedContext =
+          await eligibilityRedisService.getPatientContextByPatientId(
+            Number(patientId),
+          );
+        if (storedContext) {
+          console.log(
+            `  📥 Retrieved patient context from Redis for Patient ID: ${patientId}`,
+          );
+          // Enrich with stored data if not already provided
+          mpi = mpi || storedContext.mpi;
+          patientName = patientName || storedContext.patientName;
+        }
+      }
+    } catch (redisError) {
+      console.error(
+        "⚠️ Failed to retrieve patient context from Redis (non-fatal):",
+        redisError,
+      );
+      // Continue even if Redis fails
+    }
 
     console.log(
       "Step 1: Creating Mantys task...",

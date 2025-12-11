@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getAuthorizationHeader } from "../../../lib/jwt-token";
+import { patientContextRedisService } from "../../../lib/redis-patient-context";
 
 /**
  * Next.js API Route - Today's Appointments
@@ -181,6 +181,37 @@ export default async function handler(
     }
 
     console.log("✅ API response OK, RecordCount:", data.body?.RecordCount);
+
+    // Store patient context in Redis for each appointment
+    try {
+      if (data.body?.Data && Array.isArray(data.body.Data)) {
+        for (const appointmentData of data.body.Data) {
+          if (appointmentData.mpi && appointmentData.patient_id) {
+            await patientContextRedisService.storePatientContext({
+              mpi: appointmentData.mpi,
+              patientId: appointmentData.patient_id,
+              patientName: appointmentData.full_name || "",
+              appointmentId: appointmentData.appointment_id,
+              encounterId: appointmentData.encounter_id,
+              phone: appointmentData.mobile_phone,
+              email: appointmentData.email,
+              dob: appointmentData.dob,
+              gender: appointmentData.gender,
+              lastUpdated: new Date().toISOString(),
+            });
+            console.log(
+              `  📝 Stored context for appointment: ${appointmentData.appointment_id}, MPI: ${appointmentData.mpi}`,
+            );
+          }
+        }
+      }
+    } catch (redisError) {
+      console.error(
+        "⚠️ Failed to store appointment context in Redis (non-fatal):",
+        redisError,
+      );
+      // Continue even if Redis fails
+    }
 
     // Return the appointments even if there are none (let the frontend handle empty state)
     return res.status(200).json(data);

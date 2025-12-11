@@ -155,6 +155,8 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       gender: apt.gender || "",
       phone: apt.mobile_phone || "",
       email: apt.email || "",
+      appointment_id: apt.appointment_id,
+      encounter_id: (apt as any).encounter_id, // May be in the data
     } as PatientData;
   };
 

@@ -150,18 +150,16 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     <div className="space-y-6 pb-6">
       {/* Eligibility Status Header */}
       <div
-        className={`rounded-lg p-6 ${
-          keyFields.isEligible
-            ? "bg-green-50 border border-green-200"
-            : "bg-red-50 border border-red-200"
-        }`}
+        className={`rounded-lg p-6 ${keyFields.isEligible
+          ? "bg-green-50 border border-green-200"
+          : "bg-red-50 border border-red-200"
+          }`}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div
-              className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                keyFields.isEligible ? "bg-green-500" : "bg-red-500"
-              }`}
+              className={`w-12 h-12 rounded-full flex items-center justify-center ${keyFields.isEligible ? "bg-green-500" : "bg-red-500"
+                }`}
             >
               {keyFields.isEligible ? (
                 <svg
@@ -338,22 +336,20 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                       href={doc.s3_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={`flex items-center gap-3 p-3 border rounded-lg transition ${
-                        isUploaded
-                          ? "bg-green-50 border-green-300"
-                          : progress === -1
-                            ? "bg-red-50 border-red-300"
-                            : "bg-blue-50 hover:bg-blue-100 border-blue-200"
-                      }`}
+                      className={`flex items-center gap-3 p-3 border rounded-lg transition ${isUploaded
+                        ? "bg-green-50 border-green-300"
+                        : progress === -1
+                          ? "bg-red-50 border-red-300"
+                          : "bg-blue-50 hover:bg-blue-100 border-blue-200"
+                        }`}
                     >
                       <svg
-                        className={`w-5 h-5 ${
-                          isUploaded
-                            ? "text-green-600"
-                            : progress === -1
-                              ? "text-red-600"
-                              : "text-blue-600"
-                        }`}
+                        className={`w-5 h-5 ${isUploaded
+                          ? "text-green-600"
+                          : progress === -1
+                            ? "text-red-600"
+                            : "text-blue-600"
+                          }`}
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -383,25 +379,23 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                       </svg>
                       <div className="flex-1">
                         <div
-                          className={`font-medium ${
-                            isUploaded
-                              ? "text-green-900"
-                              : progress === -1
-                                ? "text-red-900"
-                                : "text-blue-900"
-                          }`}
+                          className={`font-medium ${isUploaded
+                            ? "text-green-900"
+                            : progress === -1
+                              ? "text-red-900"
+                              : "text-blue-900"
+                            }`}
                         >
                           {doc.tag}
                         </div>
                         {doc.id && (
                           <div
-                            className={`text-xs ${
-                              isUploaded
-                                ? "text-green-700"
-                                : progress === -1
-                                  ? "text-red-700"
-                                  : "text-blue-700"
-                            }`}
+                            className={`text-xs ${isUploaded
+                              ? "text-green-700"
+                              : progress === -1
+                                ? "text-red-700"
+                                : "text-blue-700"
+                              }`}
                           >
                             ID: {doc.id}
                           </div>
@@ -418,13 +412,12 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                         )}
                       </div>
                       <svg
-                        className={`w-4 h-4 ${
-                          isUploaded
-                            ? "text-green-600"
-                            : progress === -1
-                              ? "text-red-600"
-                              : "text-blue-600"
-                        }`}
+                        className={`w-4 h-4 ${isUploaded
+                          ? "text-green-600"
+                          : progress === -1
+                            ? "text-red-600"
+                            : "text-blue-600"
+                          }`}
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -811,27 +804,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       </Card>
 
       {/* Action Buttons */}
-      <div className="sticky bottom-0 bg-white pb-4 border-t border-gray-200 pt-4 space-y-3">
-        <Button
-          onClick={handleSendToLifetrenz}
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-        >
-          <svg
-            className="w-4 h-4 mr-2 inline"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-            />
-          </svg>
-          Send Data Back to Lifetrenz
-        </Button>
-
+      <div className="sticky bottom-0 bg-white pb-4 border-t border-gray-200 pt-4">
         <div className="flex gap-3">
           {onCheckAnother && (
             <Button

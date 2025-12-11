@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
+import { patientContextRedisService } from "../../../lib/redis-patient-context";
 
 /**
  * Next.js API Route - MPI Search Proxy
@@ -323,6 +324,39 @@ export default async function handler(
       "patients",
     );
     console.log("Final response:", JSON.stringify(transformedData, null, 2));
+
+    // Store patient context in Redis for each patient/appointment
+    try {
+      for (const appointmentData of data.body.Data) {
+        if (appointmentData.mpi && appointmentData.patient_id) {
+          const nameParts =
+            appointmentData.full_name?.trim().split(/\s+/) || [];
+          const patientName = appointmentData.full_name || "";
+
+          await patientContextRedisService.storePatientContext({
+            mpi: appointmentData.mpi,
+            patientId: appointmentData.patient_id,
+            patientName,
+            appointmentId: appointmentData.appointment_id,
+            encounterId: appointmentData.encounter_id,
+            phone: appointmentData.mobile_phone,
+            email: appointmentData.email,
+            dob: appointmentData.dob,
+            gender: appointmentData.gender,
+            lastUpdated: new Date().toISOString(),
+          });
+          console.log(
+            `  📝 Stored patient context for MPI: ${appointmentData.mpi}, Appointment: ${appointmentData.appointment_id || "N/A"}`,
+          );
+        }
+      }
+    } catch (redisError) {
+      console.error(
+        "⚠️ Failed to store patient context in Redis (non-fatal):",
+        redisError,
+      );
+      // Continue even if Redis fails
+    }
 
     // Return the transformed response
     return res.status(200).json(transformedData);

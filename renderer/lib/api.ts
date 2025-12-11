@@ -72,6 +72,8 @@ export interface PatientData {
   gcc_id: string | null;
   relationship_type: string | null;
   associated_nationality_id: number | null;
+  appointment_id?: number;
+  encounter_id?: number;
 }
 
 interface PatientDetailsResponse {
