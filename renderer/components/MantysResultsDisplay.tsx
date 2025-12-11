@@ -99,9 +99,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   };
 
   const handleSavePolicy = async () => {
-    if (!patientId || !encounterId || !appointmentId) {
+    if (!patientId || !appointmentId) {
       alert(
-        "Missing required patient information (Patient ID, Encounter ID, or Appointment ID). Cannot save policy details.",
+        "Missing required patient information (Patient ID or Appointment ID). Cannot save policy details.",
       );
       return;
     }
@@ -119,7 +119,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         siteId: 31, // Default site ID
         policyNumber: data.patient_info?.patient_id_info?.policy_number || null,
         insuranceGroupPolicyId: null,
-        encounterid: encounterId,
+        encounterid: encounterId || 0,
         parentInsPolicyId: null,
         tpaCompanyId: data.patient_info?.tpa_id || null,
         planName: data.patient_info?.plan_name || null,
@@ -198,9 +198,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     }
 
     // Use provided IDs or show error if not available
-    if (!patientId || !encounterId || !appointmentId) {
+    // Note: encounterId defaults to 0 if not provided (standard in Aster API)
+    if (!patientId || !appointmentId) {
       alert(
-        "Missing required patient information (Patient ID, Encounter ID, or Appointment ID). Please ensure these are available before uploading.",
+        "Missing required patient information (Patient ID or Appointment ID). Please ensure these are available before uploading.",
       );
       setUploadingFiles(false);
       return;
@@ -225,7 +226,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
         const uploadRequest = {
           patientId,
-          encounterId,
+          encounterId: encounterId || 0, // Default to 0 if not provided
           appointmentId,
           insTpaPatId,
           fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,

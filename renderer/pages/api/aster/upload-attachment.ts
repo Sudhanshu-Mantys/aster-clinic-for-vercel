@@ -213,8 +213,8 @@ export default async function handler(
     if (!uploadRequest.patientId) {
       return res.status(400).json({ error: "patientId is required" });
     }
-    if (!uploadRequest.encounterId) {
-      return res.status(400).json({ error: "encounterId is required" });
+    if (uploadRequest.encounterId === undefined || uploadRequest.encounterId === null) {
+      return res.status(400).json({ error: "encounterId is required (use 0 if not available)" });
     }
     if (!uploadRequest.appointmentId) {
       return res.status(400).json({ error: "appointmentId is required" });
