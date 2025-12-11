@@ -145,6 +145,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         "Daman Thiqa": "TPA023",
         AXA: "INS010",
         ADNIC: "INS017",
+        Mednet: "TPA036",
       };
 
       const tpaName = insuranceData.tpa_name;
@@ -843,6 +844,9 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           undefined,
         dateOfBirth: patientData?.dob || undefined,
         insurancePayer: options,
+        patientMPI: patientData?.mpi || undefined,
+        appointmentId: patientData?.appointment_id || undefined,
+        encounterId: patientData?.encounter_id || undefined,
         status: "pending",
         pollingAttempts: 0,
       });
@@ -897,6 +901,10 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         response={mantysResponse}
         onClose={onClose}
         onCheckAnother={handleCheckAnother}
+        patientMPI={patientData?.mpi}
+        patientId={patientData?.patient_id}
+        appointmentId={patientData?.appointment_id}
+        encounterId={patientData?.encounter_id}
       />
     );
   }

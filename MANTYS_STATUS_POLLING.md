@@ -152,3 +152,4 @@ To test the implementation:
 3. `/renderer/components/MantysEligibilityForm.tsx` - Frontend polling
 4. `/renderer/types/mantys.ts` - Type definitions updated
 
+

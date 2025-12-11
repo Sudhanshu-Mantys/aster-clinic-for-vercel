@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { Badge } from "./ui/badge";
 import { InsuranceData, PatientData } from "../lib/api";
 import { MantysEligibilityForm } from "./MantysEligibilityForm";
-import { LifetrenzDataPreview } from "./LifetrenzDataPreview";
 import { Button } from "./ui/button";
 import { Sidebar } from "./ui/sidebar";
 
@@ -28,18 +27,10 @@ export const InsuranceDetailsSection: React.FC<
   const [selectedInsuranceForEligibility, setSelectedInsuranceForEligibility] =
     useState<InsuranceData | null>(null);
   const [showEligibilitySidebar, setShowEligibilitySidebar] = useState(false);
-  const [selectedInsuranceForLifetrenz, setSelectedInsuranceForLifetrenz] =
-    useState<InsuranceData | null>(null);
-  const [showLifetrenzPreview, setShowLifetrenzPreview] = useState(false);
 
   const handleCheckEligibility = (insurance: InsuranceData) => {
     setSelectedInsuranceForEligibility(insurance);
     setShowEligibilitySidebar(true);
-  };
-
-  const handleSendToLifetrenz = (insurance: InsuranceData) => {
-    setSelectedInsuranceForLifetrenz(insurance);
-    setShowLifetrenzPreview(true);
   };
 
   const handleSearchAcrossAllTPAs = () => {
@@ -53,11 +44,6 @@ export const InsuranceDetailsSection: React.FC<
     setShowEligibilitySidebar(false);
     // Delay clearing the selected insurance to allow sidebar animation to complete
     setTimeout(() => setSelectedInsuranceForEligibility(null), 300);
-  };
-
-  const handleCloseLifetrenzPreview = () => {
-    setShowLifetrenzPreview(false);
-    setTimeout(() => setSelectedInsuranceForLifetrenz(null), 300);
   };
 
   return (
@@ -349,35 +335,15 @@ export const InsuranceDetailsSection: React.FC<
                       </div>
                     )}
 
-                    {/* Check Eligibility and Send to Lifetrenz Buttons */}
+                    {/* Check Eligibility Button */}
                     {insurance.insurance_status?.toLowerCase() === "active" && (
-                      <div className="pt-3 border-t border-blue-200 mt-3 space-y-2">
+                      <div className="pt-3 border-t border-blue-200 mt-3">
                         <Button
                           onClick={() => handleCheckEligibility(insurance)}
                           className="w-full bg-green-600 hover:bg-green-700 text-white"
                           size="sm"
                         >
                           ✓ Check Eligibility with Mantys
-                        </Button>
-                        <Button
-                          onClick={() => handleSendToLifetrenz(insurance)}
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                          size="sm"
-                        >
-                          <svg
-                            className="w-4 h-4 mr-2 inline"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                            />
-                          </svg>
-                          Send Data Back to Lifetrenz
                         </Button>
                       </div>
                     )}
@@ -405,22 +371,6 @@ export const InsuranceDetailsSection: React.FC<
           insuranceData={selectedInsuranceForEligibility}
           onClose={handleCloseSidebar}
         />
-      </Sidebar>
-
-      {/* Lifetrenz Data Preview in Sidebar */}
-      <Sidebar
-        isOpen={showLifetrenzPreview}
-        onClose={handleCloseLifetrenzPreview}
-        title="Send Data to Lifetrenz"
-        width="700px"
-      >
-        {selectedInsuranceForLifetrenz && (
-          <LifetrenzDataPreview
-            insuranceData={selectedInsuranceForLifetrenz}
-            patientData={patientData}
-            onClose={handleCloseLifetrenzPreview}
-          />
-        )}
       </Sidebar>
     </div>
   );

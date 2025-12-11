@@ -28,6 +28,7 @@ import { DashboardHeader } from "../components/DashboardHeader";
 import { PrefillEligibilityForm } from "../components/PrefillEligibilityForm";
 import { RequestHistoryTab } from "../components/RequestHistoryTab";
 import { ProfileTab } from "../components/ProfileTab";
+import { TodaysAppointmentsList } from "../components/TodaysAppointmentsList";
 
 export default function DashboardPage() {
   const { user, logout, isLoading, teams, switchTeam } = useAuth();
@@ -310,6 +311,9 @@ export default function DashboardPage() {
           <Tabs defaultValue="new-requests" className="w-full">
             <TabsList className="w-full justify-start">
               <TabsTrigger value="new-requests">New Requests</TabsTrigger>
+              <TabsTrigger value="todays-appointments">
+                Today's Appointments
+              </TabsTrigger>
               {/*<TabsTrigger value="all-history">All History</TabsTrigger>*/}
               <TabsTrigger value="profile">Profile</TabsTrigger>
             </TabsList>
@@ -374,12 +378,33 @@ export default function DashboardPage() {
                             </Card>*/}
             </TabsContent>
 
-            {/* Tab 2: All History */}
+            {/* Tab 2: Today's Appointments */}
+            <TabsContent value="todays-appointments" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Today's Appointments</CardTitle>
+                  <CardDescription>
+                    View all appointments scheduled for{" "}
+                    {new Date().toLocaleDateString("en-US", {
+                      weekday: "long",
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                    })}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <TodaysAppointmentsList />
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Tab 3: All History */}
             <TabsContent value="all-history" className="space-y-4">
               <RequestHistoryTab requests={allHistory} />
             </TabsContent>
 
-            {/* Tab 3: Profile */}
+            {/* Tab 4: Profile */}
             <TabsContent value="profile" className="space-y-4">
               <ProfileTab
                 user={user}

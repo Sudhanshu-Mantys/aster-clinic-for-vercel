@@ -7,7 +7,10 @@ export interface EligibilityHistoryItem {
   patientName?: string;
   dateOfBirth?: string;
   insurancePayer?: string;
-  status: 'pending' | 'processing' | 'complete' | 'error';
+  patientMPI?: string;
+  appointmentId?: number;
+  encounterId?: number;
+  status: "pending" | "processing" | "complete" | "error";
   createdAt: string;
   completedAt?: string;
   result?: any;
@@ -23,7 +26,7 @@ export interface EligibilityHistoryItem {
   pollingAttempts?: number;
 }
 
-const STORAGE_KEY = 'mantys_eligibility_history';
+const STORAGE_KEY = "mantys_eligibility_history";
 const MAX_HISTORY_ITEMS = 100; // Limit to prevent localStorage overflow
 
 export class EligibilityHistoryService {
@@ -36,7 +39,7 @@ export class EligibilityHistoryService {
       if (!data) return [];
       return JSON.parse(data);
     } catch (error) {
-      console.error('Error reading eligibility history:', error);
+      console.error("Error reading eligibility history:", error);
       return [];
     }
   }
@@ -46,7 +49,7 @@ export class EligibilityHistoryService {
    */
   static getById(id: string): EligibilityHistoryItem | null {
     const items = this.getAll();
-    return items.find(item => item.id === id) || null;
+    return items.find((item) => item.id === id) || null;
   }
 
   /**
@@ -54,13 +57,15 @@ export class EligibilityHistoryService {
    */
   static getByTaskId(taskId: string): EligibilityHistoryItem | null {
     const items = this.getAll();
-    return items.find(item => item.taskId === taskId) || null;
+    return items.find((item) => item.taskId === taskId) || null;
   }
 
   /**
    * Add a new history item
    */
-  static add(item: Omit<EligibilityHistoryItem, 'id' | 'createdAt'>): EligibilityHistoryItem {
+  static add(
+    item: Omit<EligibilityHistoryItem, "id" | "createdAt">,
+  ): EligibilityHistoryItem {
     const items = this.getAll();
 
     const newItem: EligibilityHistoryItem = {
@@ -85,7 +90,7 @@ export class EligibilityHistoryService {
    */
   static update(id: string, updates: Partial<EligibilityHistoryItem>): void {
     const items = this.getAll();
-    const index = items.findIndex(item => item.id === id);
+    const index = items.findIndex((item) => item.id === id);
 
     if (index === -1) {
       console.warn(`History item with id ${id} not found`);
@@ -99,9 +104,12 @@ export class EligibilityHistoryService {
   /**
    * Update by task ID
    */
-  static updateByTaskId(taskId: string, updates: Partial<EligibilityHistoryItem>): void {
+  static updateByTaskId(
+    taskId: string,
+    updates: Partial<EligibilityHistoryItem>,
+  ): void {
     const items = this.getAll();
-    const index = items.findIndex(item => item.taskId === taskId);
+    const index = items.findIndex((item) => item.taskId === taskId);
 
     if (index === -1) {
       console.warn(`History item with taskId ${taskId} not found`);
@@ -117,7 +125,7 @@ export class EligibilityHistoryService {
    */
   static delete(id: string): void {
     const items = this.getAll();
-    const filtered = items.filter(item => item.id !== id);
+    const filtered = items.filter((item) => item.id !== id);
     this.saveAll(filtered);
   }
 
@@ -133,8 +141,8 @@ export class EligibilityHistoryService {
    */
   static getActive(): EligibilityHistoryItem[] {
     const items = this.getAll();
-    return items.filter(item =>
-      item.status === 'pending' || item.status === 'processing'
+    return items.filter(
+      (item) => item.status === "pending" || item.status === "processing",
     );
   }
 
@@ -143,8 +151,8 @@ export class EligibilityHistoryService {
    */
   static getCompleted(): EligibilityHistoryItem[] {
     const items = this.getAll();
-    return items.filter(item =>
-      item.status === 'complete' || item.status === 'error'
+    return items.filter(
+      (item) => item.status === "complete" || item.status === "error",
     );
   }
 
@@ -155,10 +163,11 @@ export class EligibilityHistoryService {
     const items = this.getAll();
     const lowerQuery = query.toLowerCase();
 
-    return items.filter(item =>
-      item.patientId.toLowerCase().includes(lowerQuery) ||
-      item.patientName?.toLowerCase().includes(lowerQuery) ||
-      item.insurancePayer?.toLowerCase().includes(lowerQuery)
+    return items.filter(
+      (item) =>
+        item.patientId.toLowerCase().includes(lowerQuery) ||
+        item.patientName?.toLowerCase().includes(lowerQuery) ||
+        item.insurancePayer?.toLowerCase().includes(lowerQuery),
     );
   }
 
@@ -169,9 +178,9 @@ export class EligibilityHistoryService {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
     } catch (error) {
-      console.error('Error saving eligibility history:', error);
+      console.error("Error saving eligibility history:", error);
       // If localStorage is full, try removing old items
-      if (error instanceof Error && error.name === 'QuotaExceededError') {
+      if (error instanceof Error && error.name === "QuotaExceededError") {
         const reducedItems = items.slice(0, Math.floor(items.length / 2));
         localStorage.setItem(STORAGE_KEY, JSON.stringify(reducedItems));
       }
@@ -193,9 +202,9 @@ export class EligibilityHistoryService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
-    const filtered = items.filter(item => {
+    const filtered = items.filter((item) => {
       // Always keep active items
-      if (item.status === 'pending' || item.status === 'processing') {
+      if (item.status === "pending" || item.status === "processing") {
         return true;
       }
 
@@ -222,12 +231,12 @@ export class EligibilityHistoryService {
     try {
       const items = JSON.parse(jsonData);
       if (!Array.isArray(items)) {
-        throw new Error('Invalid data format');
+        throw new Error("Invalid data format");
       }
       this.saveAll(items);
       return true;
     } catch (error) {
-      console.error('Error importing history:', error);
+      console.error("Error importing history:", error);
       return false;
     }
   }

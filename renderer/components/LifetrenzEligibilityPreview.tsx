@@ -20,31 +20,33 @@ export const LifetrenzEligibilityPreview: React.FC<
     // Insurance Card Details
     insuranceCard: {
       cardNumber:
-        data.patient_info.patient_id_info.tpa_member_id ||
-        data.patient_info.patient_id_info.policy_number ||
+        data.patient_info?.patient_id_info?.tpa_member_id ||
+        data.patient_info?.patient_id_info?.policy_number ||
         "",
-      receiverId: data.patient_info.patient_id_info.client_number || "",
-      payerName: data.policy_network.payer_name || keyFields.payerName,
+      receiverId: data.patient_info?.patient_id_info?.client_number || "",
+      payerName: data.policy_network?.payer_name || keyFields.payerName,
       network:
-        keyFields.network || data.policy_network.all_networks[0]?.network || "",
-      plan:
-        data.policy_network.policy_plan_name ||
-        data.policy_network.package_name ||
+        keyFields.network ||
+        data.policy_network?.all_networks?.[0]?.network ||
         "",
-      policyNumber: data.patient_info.patient_id_info.policy_number || "",
-      corporateName: data.policy_network.sponsor_id || "",
+      plan:
+        data.policy_network?.policy_plan_name ||
+        data.policy_network?.package_name ||
+        "",
+      policyNumber: data.patient_info?.patient_id_info?.policy_number || "",
+      corporateName: data.policy_network?.sponsor_id || "",
     },
     // Policy Dates
     dates: {
-      startDate: data.policy_network.start_date || keyFields.policyStartDate,
+      startDate: data.policy_network?.start_date || keyFields.policyStartDate,
       lastRenewalDate: "", // Not available in Mantys response
-      expiryDate: data.policy_network.valid_upto || keyFields.policyEndDate,
+      expiryDate: data.policy_network?.valid_upto || keyFields.policyEndDate,
       rateCard: "", // Not available in Mantys response
     },
     // Patient Payable / Copay Details
     patientPayable: {
       copayDetails: data.copay_details_to_fill || [],
-      deductible: data.copay_analysis.waiting_period ? "Yes" : "No",
+      deductible: data.copay_analysis?.waiting_period ? "Yes" : "No",
     },
     // Additional metadata
     metadata: {
@@ -371,12 +373,12 @@ export const LifetrenzEligibilityPreview: React.FC<
               </svg>
               <div>
                 <h4 className="font-semibold text-yellow-900 text-sm">
-                  API Integration Pending
+                  API connection is intentionally blocked
                 </h4>
                 <p className="text-yellow-800 text-xs mt-1">
-                  The Lifetrenz API integration is not yet complete. The "Send
-                  to Lifetrenz" button is currently disabled. Once the API is
-                  ready, this insurance data will be sent automatically.
+                  The Lifetrenz API connection is intentionally blocked for now
+                  to avoid impacting production data or real patient records in
+                  Lifetrenz.
                 </p>
               </div>
             </div>

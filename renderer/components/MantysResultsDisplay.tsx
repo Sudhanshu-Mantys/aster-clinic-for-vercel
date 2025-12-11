@@ -21,6 +21,10 @@ interface MantysResultsDisplayProps {
   onClose?: () => void;
   onCheckAnother?: () => void;
   screenshot?: string | null;
+  patientMPI?: string;
+  patientId?: number;
+  appointmentId?: number;
+  encounterId?: number;
 }
 
 export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
@@ -28,10 +32,19 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   onClose,
   onCheckAnother,
   screenshot,
+  patientMPI,
+  patientId,
+  appointmentId,
+  encounterId,
 }) => {
   const [expandedCopay, setExpandedCopay] = useState<string | null>(null);
   const [showRawJson, setShowRawJson] = useState(false);
   const [showLifetrenzPreview, setShowLifetrenzPreview] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState<boolean>(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    [key: string]: number;
+  }>({});
+  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
 
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const { data } = response;
@@ -46,6 +59,91 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
   const handleCloseLifetrenzPreview = () => {
     setShowLifetrenzPreview(false);
+  };
+
+  const handleUploadScreenshots = async () => {
+    if (
+      !keyFields.referralDocuments ||
+      keyFields.referralDocuments.length === 0
+    ) {
+      alert("No referral documents to upload");
+      return;
+    }
+
+    // Use provided IDs or show error if not available
+    if (!patientId || !encounterId || !appointmentId) {
+      alert(
+        "Missing required patient information (Patient ID, Encounter ID, or Appointment ID). Please ensure these are available before uploading.",
+      );
+      setUploadingFiles(false);
+      return;
+    }
+
+    const insTpaPatId = 8402049; // TODO: Get actual insurance TPA patient ID from response
+
+    setUploadingFiles(true);
+    const newUploadProgress: { [key: string]: number } = {};
+    const newUploadedFiles: string[] = [];
+
+    try {
+      // Upload each referral document
+      for (let i = 0; i < keyFields.referralDocuments.length; i++) {
+        const doc = keyFields.referralDocuments[i];
+        const progressKey = `${doc.tag}_${i}`;
+
+        newUploadProgress[progressKey] = 0;
+        setUploadProgress({ ...newUploadProgress });
+
+        console.log(`Uploading ${doc.tag}...`);
+
+        const uploadRequest = {
+          patientId,
+          encounterId,
+          appointmentId,
+          insTpaPatId,
+          fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,
+          fileUrl: doc.s3_url,
+        };
+
+        const response = await fetch("/api/aster/upload-attachment", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(uploadRequest),
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          newUploadProgress[progressKey] = 100;
+          newUploadedFiles.push(doc.tag);
+          console.log(`✅ Uploaded ${doc.tag} successfully`);
+        } else {
+          console.error(`❌ Failed to upload ${doc.tag}:`, result.error);
+          newUploadProgress[progressKey] = -1; // Mark as failed
+        }
+
+        setUploadProgress({ ...newUploadProgress });
+      }
+
+      setUploadedFiles(newUploadedFiles);
+
+      if (newUploadedFiles.length === keyFields.referralDocuments.length) {
+        alert(
+          `All ${newUploadedFiles.length} documents uploaded successfully!`,
+        );
+      } else {
+        alert(
+          `Uploaded ${newUploadedFiles.length} out of ${keyFields.referralDocuments.length} documents. Check console for errors.`,
+        );
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      alert("Failed to upload documents. See console for details.");
+    } finally {
+      setUploadingFiles(false);
+    }
   };
 
   return (
@@ -158,6 +256,204 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         </Card>
       )}
 
+      {/* Referral Documents */}
+      {keyFields.referralDocuments &&
+        keyFields.referralDocuments.length > 0 && (
+          <Card className="p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                  />
+                </svg>
+                Referral Documents
+              </h3>
+              <Button
+                onClick={handleUploadScreenshots}
+                disabled={uploadingFiles}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {uploadingFiles ? (
+                  <>
+                    <svg
+                      className="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      className="w-4 h-4 mr-2 inline"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                      />
+                    </svg>
+                    Upload Screenshots
+                  </>
+                )}
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {keyFields.referralDocuments.map((doc, idx) => {
+                const progressKey = `${doc.tag}_${idx}`;
+                const progress = uploadProgress[progressKey];
+                const isUploaded = uploadedFiles.includes(doc.tag);
+
+                return (
+                  <div key={idx} className="relative">
+                    <a
+                      href={doc.s3_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`flex items-center gap-3 p-3 border rounded-lg transition ${
+                        isUploaded
+                          ? "bg-green-50 border-green-300"
+                          : progress === -1
+                            ? "bg-red-50 border-red-300"
+                            : "bg-blue-50 hover:bg-blue-100 border-blue-200"
+                      }`}
+                    >
+                      <svg
+                        className={`w-5 h-5 ${
+                          isUploaded
+                            ? "text-green-600"
+                            : progress === -1
+                              ? "text-red-600"
+                              : "text-blue-600"
+                        }`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        {isUploaded ? (
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        ) : progress === -1 ? (
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        ) : (
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M15 13l-3 3m0 0l-3-3m3 3V8m0 13a9 9 0 110-18 9 9 0 010 18z"
+                          />
+                        )}
+                      </svg>
+                      <div className="flex-1">
+                        <div
+                          className={`font-medium ${
+                            isUploaded
+                              ? "text-green-900"
+                              : progress === -1
+                                ? "text-red-900"
+                                : "text-blue-900"
+                          }`}
+                        >
+                          {doc.tag}
+                        </div>
+                        {doc.id && (
+                          <div
+                            className={`text-xs ${
+                              isUploaded
+                                ? "text-green-700"
+                                : progress === -1
+                                  ? "text-red-700"
+                                  : "text-blue-700"
+                            }`}
+                          >
+                            ID: {doc.id}
+                          </div>
+                        )}
+                        {isUploaded && (
+                          <div className="text-xs text-green-700 font-medium mt-1">
+                            ✓ Uploaded to Aster
+                          </div>
+                        )}
+                        {progress === -1 && (
+                          <div className="text-xs text-red-700 font-medium mt-1">
+                            ✗ Upload failed
+                          </div>
+                        )}
+                      </div>
+                      <svg
+                        className={`w-4 h-4 ${
+                          isUploaded
+                            ? "text-green-600"
+                            : progress === -1
+                              ? "text-red-600"
+                              : "text-blue-600"
+                        }`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                        />
+                      </svg>
+                    </a>
+                    {progress !== undefined &&
+                      progress >= 0 &&
+                      progress < 100 && (
+                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-200 rounded-b-lg overflow-hidden">
+                          <div
+                            className="h-full bg-blue-600 transition-all duration-300"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                      )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
       {/* Patient Information */}
       <Card className="p-5">
         <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
@@ -177,6 +473,30 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           Patient Information
         </h3>
         <div className="grid grid-cols-2 gap-4 text-sm">
+          {patientMPI && (
+            <div>
+              <span className="font-medium text-gray-700">MPI:</span>
+              <p className="text-gray-900 mt-1 font-mono">{patientMPI}</p>
+            </div>
+          )}
+          {patientId && (
+            <div>
+              <span className="font-medium text-gray-700">Patient ID:</span>
+              <p className="text-gray-900 mt-1 font-mono">{patientId}</p>
+            </div>
+          )}
+          {appointmentId && (
+            <div>
+              <span className="font-medium text-gray-700">Appointment ID:</span>
+              <p className="text-gray-900 mt-1 font-mono">{appointmentId}</p>
+            </div>
+          )}
+          {encounterId && (
+            <div>
+              <span className="font-medium text-gray-700">Encounter ID:</span>
+              <p className="text-gray-900 mt-1 font-mono">{encounterId}</p>
+            </div>
+          )}
           <div>
             <span className="font-medium text-gray-700">Policy Holder:</span>
             <p className="text-gray-900 mt-1">{data.policy_holder_name}</p>
@@ -444,73 +764,6 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           </ul>
         </Card>
       )}
-
-      {/* Referral Documents */}
-      {keyFields.referralDocuments &&
-        keyFields.referralDocuments.length > 0 && (
-          <Card className="p-5">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-                />
-              </svg>
-              Referral Documents
-            </h3>
-            <div className="space-y-2">
-              {keyFields.referralDocuments.map((doc, idx) => (
-                <a
-                  key={idx}
-                  href={doc.s3_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 p-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition"
-                >
-                  <svg
-                    className="w-5 h-5 text-blue-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 13l-3 3m0 0l-3-3m3 3V8m0 13a9 9 0 110-18 9 9 0 010 18z"
-                    />
-                  </svg>
-                  <div className="flex-1">
-                    <div className="font-medium text-blue-900">{doc.tag}</div>
-                    {doc.id && (
-                      <div className="text-xs text-blue-700">ID: {doc.id}</div>
-                    )}
-                  </div>
-                  <svg
-                    className="w-4 h-4 text-blue-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                    />
-                  </svg>
-                </a>
-              ))}
-            </div>
-          </Card>
-        )}
 
       {/* Raw JSON Toggle */}
       <Card className="p-5">
