@@ -119,6 +119,7 @@ export interface PatientInfo {
         policy_number: string
         tpa_member_id: string
         reference_number: string
+        member_id?: string
     }
     policy_holder_dob: string
     policy_holder_name: string
@@ -129,6 +130,11 @@ export interface PatientInfo {
     policy_holder_relationship: string | null
     policy_holder_date_of_birth: string
     policy_primary_dha_member_id: string
+    policy_id?: string | null
+    payer_id?: string | null
+    tpa_id?: string | null
+    plan_name?: string | null
+    insurance_mapping_id?: string | null
 }
 
 export interface PolicyNetwork {
@@ -150,6 +156,7 @@ export interface PolicyNetwork {
     payer_name_as_in_text: string
     policy_authority_citation: string
     work_site_covered_citations: string | null
+    network_id?: string | null
 }
 
 export interface Benefit {
@@ -206,6 +213,8 @@ export interface MantysResponseData {
     copay_details_to_fill: CopayDetailsToFill[]
     policy_holder_emirates_id: string
     was_identified_by_aggregator: boolean
+    policy_start_date?: string | null
+    policy_end_date?: string | null
 }
 
 // Create Task Response

@@ -1,5 +1,6 @@
 /**
- * API endpoint to save/replicate patient insurance policy details to Aster
+ * API endpoint to fetch existing patient insurance policy details from Aster
+ * Returns the current policy without making any updates
  */
 import { NextApiRequest, NextApiResponse } from 'next';
 
@@ -20,6 +21,7 @@ export default async function handler(
       return res.status(400).json({ error: 'Policy data and patient ID are required' });
     }
 
+    console.log('Incoming policyData:', JSON.stringify(policyData, null, 2));
     console.log('Step 1: Fetching existing insurance details for patient:', patientId);
 
     // Step 1: Fetch existing insurance details to get the policy ID
@@ -138,76 +140,15 @@ export default async function handler(
       tpaName: existingPolicy.tpa_name,
     });
 
-    // Step 3: Update the policy data with the existing policy ID and payerId
-    // Remove payerId from policyData to ensure we use the one from existing policy
-    const { payerId: _, ...policyDataWithoutPayerId } = policyData;
-
-    const updatedPolicyData = {
-      ...policyDataWithoutPayerId,
-      policyId: existingPolicy.patient_insurance_tpa_policy_id,
-      payerId: existingPolicy.payer_id, // Use payerId from existing Aster policy
-      // Add "-mantys" suffix to member ID for testing
-      tpaPolicyId: policyDataWithoutPayerId.tpaPolicyId
-        ? `${policyDataWithoutPayerId.tpaPolicyId}-mantys`
-        : null,
-    };
-
-    // Step 4: Prepare the request for Aster API
-    const requestBody = {
-      head: {
-        reqtime: new Date().toDateString(),
-        srvseqno: "",
-        reqtype: "POST"
-      },
-      body: updatedPolicyData
-    };
-
-    console.log('Step 3: Sending policy update to Aster:', JSON.stringify(requestBody, null, 2));
-
-    // Make request to Aster API
-    const response = await fetch(
-      'https://aster-clinics-dev.mantys.org/SCMS/web/app.php/claim/update/patient/insurace/details/replicate',
-      {
-        method: 'POST',
-        headers: {
-          'Referer': 'app:/TrendEHR.swf',
-          'Accept': 'text/xml, application/xml, application/xhtml+xml, text/html;q=0.9, text/plain;q=0.8, text/css, image/png, image/jpeg, image/gif;q=0.8, application/x-shockwave-flash, video/mp4;q=0.9, flv-application/octet-stream;q=0.8, video/x-flv;q=0.7, audio/mp4, application/futuresplash, */*;q=0.5, application/x-mpegURL',
-          'x-flash-version': '32,0,0,182',
-          'Content-type': 'application/json',
-          'srvseqno': '""',
-          'api-key': '""',
-          'Accept-Encoding': 'gzip,deflate',
-          'User-Agent': 'Mozilla/5.0 (Windows; U; en-US) AppleWebKit/533.19.4 (KHTML, like Gecko) AdobeAIR/32.0',
-          'Connection': 'Keep-Alive',
-        },
-        body: JSON.stringify(requestBody),
-      }
-    );
-
-    const responseText = await response.text();
-    console.log('Aster API response:', responseText);
-
-    let responseData;
-    try {
-      responseData = JSON.parse(responseText);
-    } catch (e) {
-      responseData = { raw: responseText };
-    }
-
-    if (!response.ok) {
-      console.error('Aster API error:', response.status, responseData);
-      return res.status(response.status).json({
-        error: 'Failed to save policy details',
-        details: responseData,
-      });
-    }
+    // Step 3: Return the existing policy without making any updates
+    console.log('Returning existing policy without updates');
 
     return res.status(200).json({
       success: true,
-      data: responseData,
+      data: existingPolicy,
     });
   } catch (error) {
-    console.error('Error saving policy details:', error);
+    console.error('Error fetching policy details:', error);
     return res.status(500).json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error',
