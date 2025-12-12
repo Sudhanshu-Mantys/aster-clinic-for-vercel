@@ -727,23 +727,88 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
       setUploadedFiles(newUploadedFiles);
 
+      console.log("📊 Upload summary:", {
+        uploadedFilesCount: newUploadedFiles.length,
+        totalDocumentsCount: keyFields.referralDocuments.length,
+        uploadedFiles: newUploadedFiles,
+        allDocuments: keyFields.referralDocuments.map(d => d.tag),
+      });
+
       // If all files uploaded successfully, save the eligibility order details
       if (newUploadedFiles.length === keyFields.referralDocuments.length) {
         console.log("✅ All files uploaded. Now saving eligibility order details...");
+        console.log("📋 Debug info:", {
+          tpaConfig: tpaConfig ? {
+            ins_code: tpaConfig.ins_code,
+            hospital_insurance_mapping_id: tpaConfig.hospital_insurance_mapping_id,
+          } : null,
+          patient_info_insurance_mapping_id: data.patient_info?.insurance_mapping_id,
+          response_tpa: response.tpa,
+          selectedClinicId,
+        });
 
         try {
-          // Get insurance mapping ID from patient info
-          const insuranceMappingId = data.patient_info?.insurance_mapping_id;
+          // If tpaConfig is not loaded, try to load it now
+          let currentTpaConfig = tpaConfig;
+          if (!currentTpaConfig && selectedClinicId && response.tpa) {
+            console.log("⚠️ TPA config not loaded, attempting to load now...");
+            try {
+              const configResponse = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
+              if (configResponse.ok) {
+                const configData = await configResponse.json();
+                if (configData.configs && Array.isArray(configData.configs)) {
+                  currentTpaConfig = configData.configs.find(
+                    (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
+                  );
+                  if (currentTpaConfig) {
+                    console.log("✅ Loaded TPA config on-demand:", {
+                      ins_code: currentTpaConfig.ins_code,
+                      hospital_insurance_mapping_id: currentTpaConfig.hospital_insurance_mapping_id,
+                    });
+                  }
+                }
+              }
+            } catch (loadError) {
+              console.error("❌ Failed to load TPA config on-demand:", loadError);
+            }
+          }
+
+          // Get insurance mapping ID from config (preferred) or Mantys response
+          const insuranceMappingId = currentTpaConfig?.hospital_insurance_mapping_id
+            ? currentTpaConfig.hospital_insurance_mapping_id
+            : (data.patient_info?.insurance_mapping_id ? parseInt(data.patient_info.insurance_mapping_id, 10) : null);
+
+          console.log("🔍 Insurance Mapping ID lookup:", {
+            fromTpaConfig: currentTpaConfig?.hospital_insurance_mapping_id,
+            fromPatientInfo: data.patient_info?.insurance_mapping_id,
+            finalValue: insuranceMappingId,
+          });
 
           if (!insuranceMappingId) {
             console.warn("⚠️ No insurance mapping ID found. Skipping eligibility order save.");
+            console.warn("💡 To fix this, ensure TPA config has hospital_insurance_mapping_id set for TPA:", response.tpa);
             alert(
-              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nNote: Could not save eligibility order details (missing insurance mapping ID).`,
+              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nNote: Could not save eligibility order details (missing insurance mapping ID).\n\nPlease check TPA configuration for: ${response.tpa || 'Unknown TPA'}`,
             );
             return;
           }
 
+          // Use insTpaPatId for insuranceMappingId in ordObj (not hospital_insurance_mapping_id)
+          // But we still need hospital_insurance_mapping_id for the main body
+          const insTpaPatIdForOrder = 8402049; // This should match the insTpaPatId used in uploads
+
           // Call the save eligibility order API
+          console.log("📤 Calling save-eligibility-order API with:", {
+            patientId: finalPatientId,
+            appointmentId: finalAppointmentId,
+            encounterId: finalEncounterId,
+            insuranceMappingId, // hospital_insurance_mapping_id for main body
+            insTpaPatId: insTpaPatIdForOrder, // insTpaPatId for ordObj
+            physicianId: 11260,
+            vendorId: 24,
+            siteId: 31,
+          });
+
           const orderResponse = await fetch("/api/aster/save-eligibility-order", {
             method: "POST",
             headers: {
@@ -752,7 +817,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             body: JSON.stringify({
               patientId: finalPatientId,
               appointmentId: finalAppointmentId,
-              insuranceMappingId,
+              encounterId: finalEncounterId,
+              insuranceMappingId, // hospital_insurance_mapping_id for main body
+              insTpaPatId: insTpaPatIdForOrder, // insTpaPatId for ordObj.insuranceMappingId
               physicianId: 11260, // Default physician ID
               authorizationNumber: "",
               authorizationName: "",
@@ -762,17 +829,63 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             }),
           });
 
+          console.log("📥 Save order API response status:", orderResponse.status);
+
           const orderResult = await orderResponse.json();
+          console.log("📥 Save order API response data:", orderResult);
 
           if (orderResponse.ok) {
             console.log("✅ Eligibility order saved successfully:", orderResult);
-            alert(
-              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nEligibility order details saved to Aster.`,
-            );
+
+            // Extract reqid from response - check both possible response structures
+            const reqId = orderResult?.data?.body?.Data?.[0]?.reqid ||
+              orderResult?.body?.Data?.[0]?.reqid ||
+              null;
+
+            const statusText = orderResult?.data?.body?.Data?.[0]?.status_text ||
+              orderResult?.body?.Data?.[0]?.status_text ||
+              "Eligibility Details Captured Successfully";
+
+            const successMessage = reqId
+              ? `✅ SUCCESS!\n\nAll ${newUploadedFiles.length} documents uploaded successfully!\n\nEligibility order saved to Aster.\n\n📋 Request ID: ${reqId}\n📝 Status: ${statusText}\n\nYou can view this order in Aster's eligibility system.`
+              : `✅ SUCCESS!\n\nAll ${newUploadedFiles.length} documents uploaded successfully!\n\nEligibility order details saved to Aster.\n\nStatus: ${statusText}`;
+
+            console.log("📋 Order saved with details:", {
+              reqId,
+              statusText,
+              patientId: finalPatientId,
+              appointmentId: finalAppointmentId,
+              insuranceMappingId,
+              fullResponse: orderResult,
+            });
+
+            alert(successMessage);
+
+            // Trigger a custom event to notify other components (like eligibility history)
+            // The order is saved in Aster, so it should be visible in Aster's UI
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('eligibilityOrderSaved', {
+                detail: {
+                  reqId,
+                  patientId: finalPatientId,
+                  appointmentId: finalAppointmentId,
+                  insuranceMappingId,
+                  statusText,
+                }
+              }));
+              console.log("📢 Dispatched eligibilityOrderSaved event with reqId:", reqId);
+            }
           } else {
-            console.error("❌ Failed to save eligibility order:", orderResult.error);
+            console.error("❌ Failed to save eligibility order:", {
+              status: orderResponse.status,
+              error: orderResult.error,
+              details: orderResult.details,
+              fullResponse: orderResult,
+            });
+            const errorMessage = orderResult.error || orderResult.message || "Unknown error";
+            const errorDetails = orderResult.details ? `\n\nDetails: ${JSON.stringify(orderResult.details)}` : "";
             alert(
-              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nWarning: Failed to save eligibility order details: ${orderResult.error || "Unknown error"}`,
+              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nWarning: Failed to save eligibility order details.\n\nError: ${errorMessage}${errorDetails}\n\nPlease check the browser console for more details.`,
             );
           }
         } catch (orderError) {
@@ -1620,47 +1733,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                 />
               </div>
 
-              {/* Network */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Network <span className="text-red-600">*</span>
-                </label>
-                <Select
-                  value={
-                    selectedNetwork
-                      ? {
-                        value: selectedNetwork,
-                        label: selectedNetwork,
-                      }
-                      : null
-                  }
-                  onChange={(selected) => setSelectedNetwork(selected?.value || null)}
-                  options={(() => {
-                    const networkMap = new Map<string, string>();
-                    data.policy_network?.all_networks?.forEach((n: any) => {
-                      const value = n.network_value || n.network;
-                      const label = `${n.network_value || n.network}${n.network_name_as_in_text ? ` (${n.network_name_as_in_text})` : ""}`;
-                      if (value) networkMap.set(value, label);
-                    });
-                    networksConfig.forEach((n: any) => {
-                      if (n.name && !networkMap.has(n.name)) {
-                        networkMap.set(n.name, n.name);
-                      }
-                    });
-                    return Array.from(networkMap.entries()).map(([value, label]) => ({
-                      value,
-                      label,
-                    }));
-                  })()}
-                  placeholder="Select network"
-                  isSearchable
-                />
-              </div>
-
               {/* Plan */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Plan
+                  Plan <span className="text-red-600">*</span>
                 </label>
                 <Select
                   value={
@@ -1677,16 +1753,20 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                     if (plan) setRateCard(plan.plan_code || "");
                   }}
                   options={(() => {
+                    // If we have a selected network (from Mantys response), filter plans by mappings
+                    // Otherwise show all plans
                     if (selectedNetwork && planMappings.length > 0) {
                       const mappedPlanIds = planMappings
                         .filter((m: any) => m.mantys_network_name === selectedNetwork)
                         .map((m: any) => m.lt_plan_id);
-                      return plansConfig
-                        .filter((plan: any) => mappedPlanIds.includes(plan.plan_id))
-                        .map((plan: any) => ({
-                          value: plan.plan_id,
-                          label: `${plan.plan_id} - ${plan.insurance_plan_name}`,
-                        }));
+                      if (mappedPlanIds.length > 0) {
+                        return plansConfig
+                          .filter((plan: any) => mappedPlanIds.includes(plan.plan_id))
+                          .map((plan: any) => ({
+                            value: plan.plan_id,
+                            label: `${plan.plan_id} - ${plan.insurance_plan_name}`,
+                          }));
+                      }
                     }
                     return plansConfig.map((plan: any) => ({
                       value: plan.plan_id,
@@ -1911,7 +1991,6 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                     <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Card #</th>
                     <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Receiver</th>
                     <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Payer</th>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Network</th>
                     <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Plan</th>
                     <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Expiry Date</th>
                     <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Status</th>
@@ -1923,7 +2002,6 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                     <td className="py-2 px-3">{memberId || "-"}</td>
                     <td className="py-2 px-3">{receiverId || "-"}</td>
                     <td className="py-2 px-3">{selectedPayer?.ins_tpa_name || "-"}</td>
-                    <td className="py-2 px-3">{selectedNetwork || "-"}</td>
                     <td className="py-2 px-3">{selectedPlan ? `${selectedPlan.plan_id} - ${selectedPlan.insurance_plan_name}` : "-"}</td>
                     <td className="py-2 px-3">{expiryDate ? new Date(expiryDate).toLocaleDateString('en-GB') : "-"}</td>
                     <td className="py-2 px-3">
@@ -1947,7 +2025,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             </Button>
             <Button
               onClick={handleConfirmSavePolicy}
-              disabled={savingPolicy || !selectedNetwork}
+              disabled={savingPolicy || !selectedPlan}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {savingPolicy ? (

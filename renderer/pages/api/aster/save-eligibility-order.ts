@@ -9,7 +9,9 @@ const API_BASE_URL = 'https://aster-clinics-dev.mantys.org/SCMS/web/app.php';
 interface SaveEligibilityOrderRequest {
     patientId: number;
     appointmentId: number;
-    insuranceMappingId: number;
+    encounterId?: number;
+    insuranceMappingId: number; // hospital_insurance_mapping_id for main body
+    insTpaPatId?: number; // insTpaPatId for ordObj.insuranceMappingId
     physicianId?: number;
     authorizationNumber?: string;
     authorizationName?: string;
@@ -63,7 +65,10 @@ export default async function handler(
         const authDate = requestData.authDate || formatDateForAster(today);
         const authExpDate = requestData.authExpDate || formatDateForAster(today);
 
-        // Build the request payload matching the curl structure
+        // Build the request payload matching the working format
+        // Use insTpaPatId for ordObj.insuranceMappingId (not hospital_insurance_mapping_id)
+        const ordObjInsuranceMappingId = requestData.insTpaPatId || requestData.insuranceMappingId;
+
         const payload = {
             head: {
                 reqtime: today.toDateString(), // e.g., "Fri Dec 12 2025"
@@ -93,11 +98,11 @@ export default async function handler(
                     {
                         reqPatientId: requestData.patientId,
                         authNumber: null,
-                        encId: null,
+                        encId: requestData.encounterId || null, // Use encounterId
                         eprescId: null,
                         authNetPayable: null,
                         authPatPayable: null,
-                        insuranceMappingId: requestData.insuranceMappingId,
+                        insuranceMappingId: ordObjInsuranceMappingId, // Use insTpaPatId, not hospital_insurance_mapping_id
                         orderId: null,
                         authPayerPayable: null,
                         reqPhyId: requestData.physicianId || 11260,
