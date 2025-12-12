@@ -218,11 +218,11 @@ export const ExtractionProgressModal: React.FC<
                     clipRule="evenodd"
                   />
                 </svg>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <h4 className="text-sm font-semibold text-blue-900 mb-1">
                     What's Happening?
                   </h4>
-                  <ul className="text-sm text-blue-800 space-y-1">
+                  <ul className="text-sm text-blue-800 space-y-1 break-words">
                     <li>• Connecting to insurance provider portal</li>
                     <li>
                       • Authenticating and navigating to eligibility section
@@ -250,11 +250,11 @@ export const ExtractionProgressModal: React.FC<
                     clipRule="evenodd"
                   />
                 </svg>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <h4 className="text-sm font-semibold text-yellow-900 mb-1">
                     Starting Process
                   </h4>
-                  <p className="text-sm text-yellow-800">
+                  <p className="text-sm text-yellow-800 break-words">
                     Connecting to the insurance portal and preparing to extract eligibility information.
                   </p>
                 </div>
@@ -277,13 +277,13 @@ export const ExtractionProgressModal: React.FC<
                     clipRule="evenodd"
                   />
                 </svg>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <h4 className="text-sm font-semibold text-green-900 mb-1">
                     {viewMode === "history"
                       ? "Eligibility Check Completed"
                       : "Eligibility Check Complete!"}
                   </h4>
-                  <p className="text-sm text-green-800">
+                  <p className="text-sm text-green-800 break-words">
                     {viewMode === "history"
                       ? "This eligibility check was successfully completed. Review the extracted data above."
                       : "Successfully retrieved eligibility information from the insurance provider. You can now review the results."}
@@ -308,11 +308,11 @@ export const ExtractionProgressModal: React.FC<
                     clipRule="evenodd"
                   />
                 </svg>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <h4 className="text-sm font-semibold text-red-900 mb-1">
                     Check Failed
                   </h4>
-                  <p className="text-sm text-red-800">{errorMessage}</p>
+                  <p className="text-sm text-red-800 break-words">{errorMessage}</p>
                 </div>
               </div>
             </div>

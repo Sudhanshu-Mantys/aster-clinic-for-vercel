@@ -47,13 +47,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* Sidebar */}
             <div
-                className={`fixed top-0 right-0 h-full bg-white shadow-2xl transition-transform duration-300 ease-in-out z-50 flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'
+                className={`fixed inset-y-0 right-0 bg-white shadow-2xl transition-transform duration-300 ease-in-out z-50 flex flex-col min-w-0 ${isOpen ? 'translate-x-0' : 'translate-x-full'
                     }`}
-                style={{ width: width, maxWidth: '100vw' }}
+                style={{ 
+                    width: width, 
+                    maxWidth: `min(100vw, ${width})`,
+                }}
             >
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <h2 className="text-lg font-semibold text-gray-900">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+                    <h2 className="text-lg font-semibold text-gray-900 truncate pr-4">
                         {title || 'Sidebar'}
                     </h2>
                     <Button
@@ -79,7 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto px-6 py-4">
+                <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
                     {children}
                 </div>
             </div>

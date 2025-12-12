@@ -175,31 +175,43 @@ class EligibilityPollingService {
 
       // Update history based on status
       if (data.status === 'pending') {
-        await EligibilityHistoryService.updateByTaskId(task.taskId, {
-          status: 'pending',
-          pollingAttempts: task.attempts,
-        });
+        try {
+          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+            status: 'pending',
+            pollingAttempts: task.attempts,
+          });
+        } catch (error: any) {
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        }
         // Update task attempts for active tasks
         this.activeTasks.set(task.taskId, task);
         await this.saveActiveTasks();
       } else if (data.status === 'processing') {
-        await EligibilityHistoryService.updateByTaskId(task.taskId, {
-          status: 'processing',
-          pollingAttempts: task.attempts,
-          interimResults: data.interimResults || undefined,
-        });
+        try {
+          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+            status: 'processing',
+            pollingAttempts: task.attempts,
+            interimResults: data.interimResults || undefined,
+          });
+        } catch (error: any) {
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        }
         // Update task attempts for active tasks
         this.activeTasks.set(task.taskId, task);
         await this.saveActiveTasks();
       } else if (data.status === 'complete') {
         console.log(`[PollingService] Task ${task.taskId} completed successfully`);
 
-        await EligibilityHistoryService.updateByTaskId(task.taskId, {
-          status: 'complete',
-          completedAt: new Date().toISOString(),
-          result: data.result,
-          pollingAttempts: task.attempts,
-        });
+        try {
+          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+            status: 'complete',
+            completedAt: new Date().toISOString(),
+            result: data.result,
+            pollingAttempts: task.attempts,
+          });
+        } catch (error: any) {
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        }
 
         // Remove from active tasks - STOP POLLING
         await this.removeTask(task.taskId);
@@ -207,12 +219,16 @@ class EligibilityPollingService {
       } else if (data.status === 'error') {
         console.error(`[PollingService] Task ${task.taskId} failed:`, data.message);
 
-        await EligibilityHistoryService.updateByTaskId(task.taskId, {
-          status: 'error',
-          error: data.message || 'Eligibility check failed',
-          completedAt: new Date().toISOString(),
-          pollingAttempts: task.attempts,
-        });
+        try {
+          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+            status: 'error',
+            error: data.message || 'Eligibility check failed',
+            completedAt: new Date().toISOString(),
+            pollingAttempts: task.attempts,
+          });
+        } catch (error: any) {
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        }
 
         // Remove from active tasks - STOP POLLING
         await this.removeTask(task.taskId);
@@ -223,12 +239,16 @@ class EligibilityPollingService {
       if (task.attempts >= MAX_ATTEMPTS) {
         console.error(`[PollingService] Task ${task.taskId} timed out after ${MAX_ATTEMPTS} attempts`);
 
-        await EligibilityHistoryService.updateByTaskId(task.taskId, {
-          status: 'error',
-          error: 'Eligibility check timed out after 5 minutes. Please try again.',
-          completedAt: new Date().toISOString(),
-          pollingAttempts: task.attempts,
-        });
+        try {
+          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+            status: 'error',
+            error: 'Eligibility check timed out after 5 minutes. Please try again.',
+            completedAt: new Date().toISOString(),
+            pollingAttempts: task.attempts,
+          });
+        } catch (error: any) {
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        }
 
         // Remove from active tasks - STOP POLLING
         await this.removeTask(task.taskId);
@@ -239,12 +259,16 @@ class EligibilityPollingService {
 
       // Only mark as error if we've tried multiple times
       if (task.attempts >= 3) {
-        await EligibilityHistoryService.updateByTaskId(task.taskId, {
-          status: 'error',
-          error: error.message || 'Failed to check status',
-          completedAt: new Date().toISOString(),
-          pollingAttempts: task.attempts,
-        });
+        try {
+          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+            status: 'error',
+            error: error.message || 'Failed to check status',
+            completedAt: new Date().toISOString(),
+            pollingAttempts: task.attempts,
+          });
+        } catch (updateError: any) {
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, updateError.message);
+        }
 
         // Remove from active tasks - STOP POLLING
         await this.removeTask(task.taskId);

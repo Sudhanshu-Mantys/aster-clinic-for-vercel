@@ -16,6 +16,8 @@ import { Card } from "./ui/card";
 import { Sidebar } from "./ui/sidebar";
 import { LifetrenzEligibilityPreview } from "./LifetrenzEligibilityPreview";
 import { useAuth } from "../contexts/AuthContext";
+import { Modal } from "./ui/modal";
+import Select from "react-select";
 
 interface MantysResultsDisplayProps {
   response: MantysEligibilityResponse;
@@ -50,10 +52,96 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [policySaved, setPolicySaved] = useState(false);
   const [tpaConfig, setTpaConfig] = useState<any>(null);
   const [plansConfig, setPlansConfig] = useState<any[]>([]);
+  const [networksConfig, setNetworksConfig] = useState<any[]>([]);
+  const [planMappings, setPlanMappings] = useState<any[]>([]);
+  const [payersConfig, setPayersConfig] = useState<any[]>([]);
+  const [showSavePolicyModal, setShowSavePolicyModal] = useState(false);
+  const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
+
+  // Editable form fields
+  const [memberId, setMemberId] = useState<string>("");
+  const [receiverId, setReceiverId] = useState<string>("");
+  const [selectedPayer, setSelectedPayer] = useState<any | null>(null);
+  const [startDate, setStartDate] = useState<string>("");
+  const [lastRenewalDate, setLastRenewalDate] = useState<string>("");
+  const [expiryDate, setExpiryDate] = useState<string>("");
+  const [rateCard, setRateCard] = useState<string>("");
+  const [hasDeductible, setHasDeductible] = useState<boolean>(false);
+  const [deductibleFlat, setDeductibleFlat] = useState<string>("");
+  const [deductibleMax, setDeductibleMax] = useState<string>("");
+  const [hasCopay, setHasCopay] = useState<boolean>(false);
+  const [chargeGroups, setChargeGroups] = useState<Array<{
+    name: string;
+    flat: string;
+    percent: string;
+    max: string;
+  }>>([]);
 
   // Get user and clinic context
   const { user } = useAuth();
   const selectedClinicId = user?.selected_team_id || null;
+
+  // Enriched patient context (fetched from Redis if props are missing)
+  const [enrichedPatientId, setEnrichedPatientId] = useState<number | undefined>(patientId);
+  const [enrichedAppointmentId, setEnrichedAppointmentId] = useState<number | undefined>(appointmentId);
+  const [enrichedEncounterId, setEnrichedEncounterId] = useState<number | undefined>(encounterId);
+
+  // Fetch patient context from Redis if patientId or appointmentId are missing
+  useEffect(() => {
+    const fetchPatientContext = async () => {
+      // If we already have both IDs, no need to fetch
+      if (patientId && appointmentId) {
+        setEnrichedPatientId(patientId);
+        setEnrichedAppointmentId(appointmentId);
+        setEnrichedEncounterId(encounterId);
+        return;
+      }
+
+      // Try to fetch from Redis using available identifiers
+      if (patientMPI || appointmentId || patientId) {
+        try {
+          console.log("🔍 Fetching patient context from Redis for upload:", {
+            appointmentId,
+            patientId,
+            mpi: patientMPI,
+          });
+
+          const contextResponse = await fetch("/api/patient/context", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              appointmentId: appointmentId,
+              patientId: patientId,
+              mpi: patientMPI,
+            }),
+          });
+
+          if (contextResponse.ok) {
+            const context = await contextResponse.json();
+            console.log("✅ Enriched patient context from Redis:", context);
+
+            // Only update if we got valid values
+            if (context.patientId) {
+              setEnrichedPatientId(context.patientId);
+            }
+            if (context.appointmentId) {
+              setEnrichedAppointmentId(context.appointmentId);
+            }
+            if (context.encounterId !== undefined) {
+              setEnrichedEncounterId(context.encounterId);
+            }
+          } else {
+            console.warn("⚠️ Redis context not found, status:", contextResponse.status);
+          }
+        } catch (error) {
+          console.error("❌ Could not fetch patient context from Redis:", error);
+        }
+      }
+    };
+
+    fetchPatientContext();
+  }, [patientMPI, appointmentId, patientId, encounterId]);
 
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const { data } = response;
@@ -95,9 +183,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               });
               setTpaConfig(config);
 
-              // Load plans for this TPA to map plan name to plan code
+              // Load plans, networks, and plan mappings for this TPA
               const tpaInsCode = config.ins_code || response.tpa;
               try {
+                // Load plans
                 const plansResponse = await fetch(`/api/clinic-config/plans?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
                 if (plansResponse.ok) {
                   const plansData = await plansResponse.json();
@@ -113,8 +202,38 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                     console.log("✅ Loaded plans config:", plans.length, "plans for TPA:", tpaInsCode);
                   }
                 }
-              } catch (plansError) {
-                console.error("❌ Failed to load plans config:", plansError);
+
+                // Load networks
+                const networksResponse = await fetch(`/api/clinic-config/mantys-networks?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
+                if (networksResponse.ok) {
+                  const networksData = await networksResponse.json();
+                  if (networksData.networks && Array.isArray(networksData.networks)) {
+                    setNetworksConfig(networksData.networks);
+                    console.log("✅ Loaded networks config:", networksData.networks.length, "networks for TPA:", tpaInsCode);
+                  }
+                }
+
+                // Load plan mappings
+                const mappingsResponse = await fetch(`/api/clinic-config/plan-mappings?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
+                if (mappingsResponse.ok) {
+                  const mappingsData = await mappingsResponse.json();
+                  if (mappingsData.mappings && Array.isArray(mappingsData.mappings)) {
+                    setPlanMappings(mappingsData.mappings);
+                    console.log("✅ Loaded plan mappings:", mappingsData.mappings.length, "mappings for TPA:", tpaInsCode);
+                  }
+                }
+
+                // Load payers
+                const payersResponse = await fetch(`/api/clinic-config/payers?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
+                if (payersResponse.ok) {
+                  const payersData = await payersResponse.json();
+                  if (payersData.payers && Array.isArray(payersData.payers)) {
+                    setPayersConfig(payersData.payers);
+                    console.log("✅ Loaded payers config:", payersData.payers.length, "payers for TPA:", tpaInsCode);
+                  }
+                }
+              } catch (error) {
+                console.error("❌ Failed to load config data:", error);
               }
             } else {
               console.log("⚠️ No TPA config found for:", response.tpa);
@@ -128,6 +247,93 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
     loadTPAConfig();
   }, [selectedClinicId, response.tpa]);
+
+  // Auto-select plan when network is selected based on plan-network mappings
+  useEffect(() => {
+    if (!selectedNetwork || planMappings.length === 0 || plansConfig.length === 0) {
+      return;
+    }
+
+    // Find mappings for the selected network (try multiple matching strategies)
+    let networkMappings: any[] = [];
+
+    // Strategy 1: Direct match by network name
+    networkMappings = planMappings.filter(
+      (m: any) => m.mantys_network_name === selectedNetwork
+    );
+
+    // Strategy 2: Try to match by network value from Mantys response
+    if (networkMappings.length === 0) {
+      const mantysNetwork = data.policy_network?.all_networks?.find(
+        (n: any) => n.network_value === selectedNetwork || n.network === selectedNetwork
+      );
+      if (mantysNetwork) {
+        // Try network name as in text
+        if (mantysNetwork.network_name_as_in_text) {
+          const textMappings = planMappings.filter(
+            (m: any) => m.mantys_network_name === mantysNetwork.network_name_as_in_text
+          );
+          if (textMappings.length > 0) {
+            networkMappings = textMappings;
+          }
+        }
+        // Try network value
+        if (networkMappings.length === 0 && mantysNetwork.network_value) {
+          const valueMappings = planMappings.filter(
+            (m: any) => m.mantys_network_name === mantysNetwork.network_value
+          );
+          if (valueMappings.length > 0) {
+            networkMappings = valueMappings;
+          }
+        }
+        // Try network code
+        if (networkMappings.length === 0 && mantysNetwork.network) {
+          const codeMappings = planMappings.filter(
+            (m: any) => m.mantys_network_name === mantysNetwork.network
+          );
+          if (codeMappings.length > 0) {
+            networkMappings = codeMappings;
+          }
+        }
+      }
+    }
+
+    // Strategy 3: Case-insensitive partial match
+    if (networkMappings.length === 0) {
+      const selectedNetworkLower = selectedNetwork.toLowerCase();
+      networkMappings = planMappings.filter((m: any) => {
+        const mappingNetworkLower = (m.mantys_network_name || "").toLowerCase();
+        return mappingNetworkLower === selectedNetworkLower ||
+          mappingNetworkLower.includes(selectedNetworkLower) ||
+          selectedNetworkLower.includes(mappingNetworkLower);
+      });
+    }
+
+    if (networkMappings.length > 0) {
+      // Prefer default mapping, otherwise use first one
+      const defaultMapping = networkMappings.find((m: any) => m.is_default);
+      const mappingToUse = defaultMapping || networkMappings[0];
+
+      // Find the plan from config
+      const mappedPlan = plansConfig.find(
+        (p: any) => p.plan_id === mappingToUse.lt_plan_id
+      );
+
+      if (mappedPlan && (!selectedPlan || selectedPlan.plan_id !== mappedPlan.plan_id)) {
+        console.log("✅ Auto-selected plan from network mapping:", {
+          network: selectedNetwork,
+          planId: mappedPlan.plan_id,
+          planName: mappedPlan.insurance_plan_name,
+          planCode: mappedPlan.plan_code,
+          isDefault: mappingToUse.is_default,
+          mappingNetworkName: mappingToUse.mantys_network_name,
+        });
+        setSelectedPlan(mappedPlan);
+      }
+    } else {
+      console.log("⚠️ No plan mapping found for network:", selectedNetwork);
+    }
+  }, [selectedNetwork, planMappings, plansConfig, data.policy_network]);
 
   // Guard against undefined data - but check if we have error info first
   if (!data) {
@@ -176,8 +382,140 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     setShowLifetrenzPreview(false);
   };
 
-  const handleSavePolicy = async () => {
-    if (!patientId || !appointmentId) {
+  const handleSavePolicy = () => {
+    const finalPatientId = enrichedPatientId || patientId;
+    const finalAppointmentId = enrichedAppointmentId || appointmentId;
+
+    if (!finalPatientId || !finalAppointmentId) {
+      alert(
+        "Missing required patient information (Patient ID or Appointment ID). Cannot save policy details.",
+      );
+      return;
+    }
+
+    // Initialize form fields from Mantys response
+    setMemberId(data.patient_info?.patient_id_info?.member_id || data.patient_info?.policy_primary_member_id || "");
+    setReceiverId(tpaConfig?.tpa_name || response.tpa || "");
+
+    // Set default selections based on Mantys response
+    if (data.policy_network?.all_networks && data.policy_network.all_networks.length > 0) {
+      const firstNetwork = data.policy_network.all_networks[0];
+      setSelectedNetwork(firstNetwork.network_value || firstNetwork.network || null);
+    }
+
+    // Try to find matching plan from Mantys response
+    const planNameFromMantys = data.patient_info?.plan_name;
+    if (planNameFromMantys && plansConfig.length > 0) {
+      const matchingPlan = plansConfig.find((plan: any) => {
+        const planName = plan.insurance_plan_name?.toLowerCase() || "";
+        const mantysPlanName = planNameFromMantys.toLowerCase();
+        return planName === mantysPlanName || planName.includes(mantysPlanName) || mantysPlanName.includes(planName);
+      });
+      if (matchingPlan) {
+        setSelectedPlan(matchingPlan);
+        setRateCard(matchingPlan.plan_code || "");
+      }
+    }
+
+    // Set dates
+    if (data.policy_start_date) {
+      const startDateObj = new Date(data.policy_start_date);
+      setStartDate(startDateObj.toISOString().split('T')[0]);
+    }
+    if (data.policy_end_date) {
+      const expiryDateObj = new Date(data.policy_end_date);
+      setExpiryDate(expiryDateObj.toISOString().split('T')[0]);
+    }
+
+    // Map copay details to charge groups
+    const copayDetails = data.copay_details_to_fill?.[0]; // Use first copay detail (usually Outpatient)
+    if (copayDetails?.values_to_fill) {
+      const chargeGroupsData: Array<{ name: string; flat: string; percent: string; max: string }> = [];
+      const values = copayDetails.values_to_fill;
+
+      // Map charge groups
+      if (values.LAB) {
+        chargeGroupsData.push({
+          name: "Laboratory",
+          flat: values.LAB.copay || "0",
+          percent: "0",
+          max: values.LAB._maxDeductible || values.LAB.deductible || "0",
+        });
+      }
+      if (values.MEDICINES) {
+        chargeGroupsData.push({
+          name: "Medicine",
+          flat: values.MEDICINES.copay || "0",
+          percent: "0",
+          max: values.MEDICINES._maxDeductible || values.MEDICINES.deductible || "0",
+        });
+      }
+      if (values.RADIOLOGY) {
+        chargeGroupsData.push({
+          name: "Radiology",
+          flat: values.RADIOLOGY.copay || "0",
+          percent: "0",
+          max: values.RADIOLOGY._maxDeductible || values.RADIOLOGY.deductible || "0",
+        });
+      }
+      if (values.CONSULTATION) {
+        chargeGroupsData.push({
+          name: "Consultation",
+          flat: values.CONSULTATION.copay || "0",
+          percent: "0",
+          max: values.CONSULTATION._maxDeductible || values.CONSULTATION.deductible || "0",
+        });
+      }
+      if (values.PROCEDURE) {
+        chargeGroupsData.push({
+          name: "Procedure",
+          flat: values.PROCEDURE.copay || "0",
+          percent: "0",
+          max: values.PROCEDURE._maxDeductible || values.PROCEDURE.deductible || "0",
+        });
+      }
+      if (values["DENTAL CONSULTATION & PROCEDURE"]) {
+        chargeGroupsData.push({
+          name: "Dental",
+          flat: values["DENTAL CONSULTATION & PROCEDURE"].copay || "0",
+          percent: "0",
+          max: values["DENTAL CONSULTATION & PROCEDURE"]._maxDeductible || values["DENTAL CONSULTATION & PROCEDURE"].deductible || "0",
+        });
+      }
+
+      setChargeGroups(chargeGroupsData);
+
+      // Set deductible and copay flags
+      const hasAnyDeductible = chargeGroupsData.some(cg => parseFloat(cg.max) > 0);
+      const hasAnyCopay = chargeGroupsData.some(cg => parseFloat(cg.flat) > 0);
+      setHasDeductible(hasAnyDeductible);
+      setHasCopay(hasAnyCopay);
+
+      // Set deductible values (use max from charge groups or first deductible)
+      if (hasAnyDeductible) {
+        const maxDeductible = chargeGroupsData.find(cg => parseFloat(cg.max) > 0)?.max || "0";
+        setDeductibleMax(maxDeductible);
+        setDeductibleFlat(chargeGroupsData.find(cg => parseFloat(cg.flat) > 0)?.flat || "0");
+      }
+    }
+
+    // Try to find payer from config
+    if (payersConfig.length > 0 && data.patient_info?.payer_id) {
+      const matchingPayer = payersConfig.find((p: any) => p.reciever_payer_id === data.patient_info.payer_id);
+      if (matchingPayer) {
+        setSelectedPayer(matchingPayer);
+      }
+    }
+
+    setShowSavePolicyModal(true);
+  };
+
+  const handleConfirmSavePolicy = async () => {
+    const finalPatientId = enrichedPatientId || patientId;
+    const finalAppointmentId = enrichedAppointmentId || appointmentId;
+    const finalEncounterId = enrichedEncounterId || encounterId;
+
+    if (!finalPatientId || !finalAppointmentId) {
       alert(
         "Missing required patient information (Patient ID or Appointment ID). Cannot save policy details.",
       );
@@ -185,6 +523,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     }
 
     setSavingPolicy(true);
+    setShowSavePolicyModal(false);
 
     try {
       // Get config values with fallbacks to defaults
@@ -200,22 +539,38 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         ? tpaConfig.hospital_insurance_mapping_id
         : (data.patient_info?.insurance_mapping_id ? parseInt(data.patient_info.insurance_mapping_id, 10) : null);
 
-      // Map plan name from Mantys to plan code from config
-      const planNameFromMantys = data.patient_info?.plan_name;
+      // Use selected plan or try to find matching plan
       let planCodeFromConfig: string | null = null;
-      if (planNameFromMantys && plansConfig.length > 0) {
-        // Try to find matching plan by name (case-insensitive, partial match)
-        const matchingPlan = plansConfig.find((plan: any) => {
-          const planName = plan.insurance_plan_name?.toLowerCase() || "";
-          const mantysPlanName = planNameFromMantys.toLowerCase();
-          return planName === mantysPlanName || planName.includes(mantysPlanName) || mantysPlanName.includes(planName);
-        });
-        if (matchingPlan?.plan_code) {
-          planCodeFromConfig = matchingPlan.plan_code;
-          console.log("✅ Mapped plan name to plan code:", planNameFromMantys, "->", planCodeFromConfig);
-        } else {
-          console.log("⚠️ No plan code found for plan name:", planNameFromMantys);
+      let planIdFromConfig: number | null = null;
+      if (selectedPlan) {
+        planCodeFromConfig = selectedPlan.plan_code || null;
+        planIdFromConfig = selectedPlan.plan_id || null;
+      } else {
+        // Fallback: try to find matching plan by name
+        const planNameFromMantys = data.patient_info?.plan_name;
+        if (planNameFromMantys && plansConfig.length > 0) {
+          const matchingPlan = plansConfig.find((plan: any) => {
+            const planName = plan.insurance_plan_name?.toLowerCase() || "";
+            const mantysPlanName = planNameFromMantys.toLowerCase();
+            return planName === mantysPlanName || planName.includes(mantysPlanName) || mantysPlanName.includes(planName);
+          });
+          if (matchingPlan) {
+            planCodeFromConfig = matchingPlan.plan_code || null;
+            planIdFromConfig = matchingPlan.plan_id || null;
+          }
         }
+      }
+
+      // Get network ID from selected network or Mantys response
+      let networkIdToUse: string | null = null;
+      if (selectedNetwork) {
+        // Try to find network ID from Mantys response networks
+        const networkFromMantys = data.policy_network?.all_networks?.find(
+          (n: any) => n.network_value === selectedNetwork || n.network === selectedNetwork
+        );
+        networkIdToUse = networkFromMantys?.network || data.policy_network?.network_id || selectedNetwork;
+      } else {
+        networkIdToUse = data.policy_network?.network_id || null;
       }
 
       // Extract policy data from Mantys response, using config values
@@ -224,26 +579,27 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         isActive: 1,
         payerId: data.patient_info?.payer_id || null,
         insuranceCompanyId: null,
-        networkId: data.policy_network?.network_id || null,
+        networkId: networkIdToUse,
         siteId: siteId, // From config or default
         policyNumber: data.patient_info?.patient_id_info?.policy_number || null,
         insuranceGroupPolicyId: null,
-        encounterid: encounterId || 0,
+        encounterid: finalEncounterId || 0,
         parentInsPolicyId: null,
         tpaCompanyId: data.patient_info?.tpa_id || null,
-        planName: data.patient_info?.plan_name || null,
+        planName: selectedPlan?.insurance_plan_name || data.patient_info?.plan_name || null,
         planCode: planCodeFromConfig, // From config mapping
+        planId: planIdFromConfig, // From config
         eligibilityReqId: null,
         tpaPolicyId: data.patient_info?.patient_id_info?.member_id || null,
         insRules: null,
         orgId: null,
         insuranceMappingId: insuranceMappingId, // From config (preferred) or Mantys response
         tpaGroupPolicyId: null,
-        apntId: appointmentId,
+        apntId: finalAppointmentId,
         insuranceValidTill: data.policy_end_date || null,
         orgName: null,
         tpaValidTill: data.policy_end_date || null,
-        patientId: patientId,
+        patientId: finalPatientId,
         insuranceRenewal: null,
         payerType: ltOtherConfig.payerType || 1, // From config or default
         insuranceStartDate: data.policy_start_date || null,
@@ -271,9 +627,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         },
         body: JSON.stringify({
           policyData,
-          patientId,
-          appointmentId,
-          encounterId,
+          patientId: finalPatientId,
+          appointmentId: finalAppointmentId,
+          encounterId: finalEncounterId,
           payerId: data.patient_info?.payer_id,
         }),
       });
@@ -307,9 +663,13 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       return;
     }
 
-    // Use provided IDs or show error if not available
+    // Use enriched IDs (from props or Redis) or show error if not available
     // Note: encounterId defaults to 0 if not provided (standard in Aster API)
-    if (!patientId || !appointmentId) {
+    const finalPatientId = enrichedPatientId || patientId;
+    const finalAppointmentId = enrichedAppointmentId || appointmentId;
+    const finalEncounterId = enrichedEncounterId || encounterId;
+
+    if (!finalPatientId || !finalAppointmentId) {
       alert(
         "Missing required patient information (Patient ID or Appointment ID). Please ensure these are available before uploading.",
       );
@@ -335,9 +695,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         console.log(`Uploading ${doc.tag}...`);
 
         const uploadRequest = {
-          patientId,
-          encounterId: encounterId || 0, // Default to 0 if not provided
-          appointmentId,
+          patientId: finalPatientId,
+          encounterId: finalEncounterId || 0, // Default to 0 if not provided
+          appointmentId: finalAppointmentId,
           insTpaPatId,
           fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,
           fileUrl: doc.s3_url,
@@ -390,8 +750,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              patientId,
-              appointmentId,
+              patientId: finalPatientId,
+              appointmentId: finalAppointmentId,
               insuranceMappingId,
               physicianId: 11260, // Default physician ID
               authorizationNumber: "",
@@ -760,16 +1120,16 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               <p className="text-gray-900 mt-1 font-mono">{patientMPI}</p>
             </div>
           )}
-          {patientId && (
+          {(enrichedPatientId || patientId) && (
             <div>
               <span className="font-medium text-gray-700">Patient ID:</span>
-              <p className="text-gray-900 mt-1 font-mono">{patientId}</p>
+              <p className="text-gray-900 mt-1 font-mono">{enrichedPatientId || patientId}</p>
             </div>
           )}
-          {appointmentId && (
+          {(enrichedAppointmentId || appointmentId) && (
             <div>
               <span className="font-medium text-gray-700">Appointment ID:</span>
-              <p className="text-gray-900 mt-1 font-mono">{appointmentId}</p>
+              <p className="text-gray-900 mt-1 font-mono">{enrichedAppointmentId || appointmentId}</p>
             </div>
           )}
           {encounterId && (
@@ -1193,6 +1553,434 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           onClose={handleCloseLifetrenzPreview}
         />
       </Sidebar>
+
+      {/* Save Policy Preview Modal */}
+      <Modal
+        isOpen={showSavePolicyModal}
+        onClose={() => setShowSavePolicyModal(false)}
+        title="Insurance Detail - Save Policy"
+      >
+        <div className="p-6 space-y-6 max-h-[85vh] overflow-y-auto">
+          {/* Insurance Policy Information Section */}
+          <div className="border-b pb-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Insurance Policy Information</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {/* Insurance Card # (Member ID) */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Insurance Card # (Member ID) <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={memberId}
+                  onChange={(e) => setMemberId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  placeholder="Enter member ID"
+                />
+              </div>
+
+              {/* Receiver ID */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Receiver ID <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={receiverId}
+                  onChange={(e) => setReceiverId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  placeholder="Enter receiver ID"
+                />
+              </div>
+
+              {/* Payer */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Payer <span className="text-red-600">*</span>
+                </label>
+                <Select
+                  value={
+                    selectedPayer
+                      ? {
+                        value: selectedPayer.reciever_payer_id,
+                        label: selectedPayer.ins_tpa_name,
+                      }
+                      : null
+                  }
+                  onChange={(selected) => {
+                    const payer = payersConfig.find((p: any) => p.reciever_payer_id === selected?.value);
+                    setSelectedPayer(payer || null);
+                  }}
+                  options={payersConfig.map((payer: any) => ({
+                    value: payer.reciever_payer_id,
+                    label: payer.ins_tpa_name,
+                  }))}
+                  placeholder="Select payer"
+                  isSearchable
+                />
+              </div>
+
+              {/* Network */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Network <span className="text-red-600">*</span>
+                </label>
+                <Select
+                  value={
+                    selectedNetwork
+                      ? {
+                        value: selectedNetwork,
+                        label: selectedNetwork,
+                      }
+                      : null
+                  }
+                  onChange={(selected) => setSelectedNetwork(selected?.value || null)}
+                  options={(() => {
+                    const networkMap = new Map<string, string>();
+                    data.policy_network?.all_networks?.forEach((n: any) => {
+                      const value = n.network_value || n.network;
+                      const label = `${n.network_value || n.network}${n.network_name_as_in_text ? ` (${n.network_name_as_in_text})` : ""}`;
+                      if (value) networkMap.set(value, label);
+                    });
+                    networksConfig.forEach((n: any) => {
+                      if (n.name && !networkMap.has(n.name)) {
+                        networkMap.set(n.name, n.name);
+                      }
+                    });
+                    return Array.from(networkMap.entries()).map(([value, label]) => ({
+                      value,
+                      label,
+                    }));
+                  })()}
+                  placeholder="Select network"
+                  isSearchable
+                />
+              </div>
+
+              {/* Plan */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Plan
+                </label>
+                <Select
+                  value={
+                    selectedPlan
+                      ? {
+                        value: selectedPlan.plan_id,
+                        label: `${selectedPlan.plan_id} - ${selectedPlan.insurance_plan_name}`,
+                      }
+                      : null
+                  }
+                  onChange={(selected) => {
+                    const plan = plansConfig.find((p: any) => p.plan_id === selected?.value);
+                    setSelectedPlan(plan || null);
+                    if (plan) setRateCard(plan.plan_code || "");
+                  }}
+                  options={(() => {
+                    if (selectedNetwork && planMappings.length > 0) {
+                      const mappedPlanIds = planMappings
+                        .filter((m: any) => m.mantys_network_name === selectedNetwork)
+                        .map((m: any) => m.lt_plan_id);
+                      return plansConfig
+                        .filter((plan: any) => mappedPlanIds.includes(plan.plan_id))
+                        .map((plan: any) => ({
+                          value: plan.plan_id,
+                          label: `${plan.plan_id} - ${plan.insurance_plan_name}`,
+                        }));
+                    }
+                    return plansConfig.map((plan: any) => ({
+                      value: plan.plan_id,
+                      label: `${plan.plan_id} - ${plan.insurance_plan_name}`,
+                    }));
+                  })()}
+                  placeholder="Select plan"
+                  isSearchable
+                />
+              </div>
+
+              {/* Rate Card */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Rate Card
+                </label>
+                <input
+                  type="text"
+                  value={rateCard}
+                  onChange={(e) => setRateCard(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  placeholder="Enter rate card"
+                />
+              </div>
+
+              {/* Start Date */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Start Date (DD/MM/YYYY)
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                />
+              </div>
+
+              {/* Last Renewal Date */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Last Renewal Date (DD/MM/YYYY)
+                </label>
+                <input
+                  type="date"
+                  value={lastRenewalDate}
+                  onChange={(e) => setLastRenewalDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                />
+              </div>
+
+              {/* Expiry Date */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Expiry Date (DD/MM/YYYY) <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={expiryDate}
+                  onChange={(e) => setExpiryDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Patient Payable Section */}
+          <div className="border-b pb-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Patient Payable</h3>
+
+            {/* Deductible */}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Deductible</label>
+              <div className="flex items-center gap-4 mb-2">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={hasDeductible}
+                    onChange={() => setHasDeductible(true)}
+                    className="w-4 h-4"
+                  />
+                  <span>Yes</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={!hasDeductible}
+                    onChange={() => setHasDeductible(false)}
+                    className="w-4 h-4"
+                  />
+                  <span>No</span>
+                </label>
+              </div>
+              {hasDeductible && (
+                <div className="grid grid-cols-2 gap-4 mt-2">
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Flat *</label>
+                    <input
+                      type="number"
+                      value={deductibleFlat}
+                      onChange={(e) => setDeductibleFlat(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Max</label>
+                    <input
+                      type="number"
+                      value={deductibleMax}
+                      onChange={(e) => setDeductibleMax(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* CoPay */}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">CoPay</label>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={hasCopay}
+                    onChange={() => setHasCopay(true)}
+                    className="w-4 h-4"
+                  />
+                  <span>Yes</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={!hasCopay}
+                    onChange={() => setHasCopay(false)}
+                    className="w-4 h-4"
+                  />
+                  <span>No</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Charge Group Table */}
+            {hasCopay && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Charge Group</label>
+                <div className="border border-gray-300 rounded-md overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Charge Group</th>
+                        <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Flat</th>
+                        <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">%</th>
+                        <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Max</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {chargeGroups.map((cg, idx) => (
+                        <tr key={idx} className="border-b">
+                          <td className="py-2 px-3">{cg.name}</td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="number"
+                              value={cg.flat}
+                              onChange={(e) => {
+                                const updated = [...chargeGroups];
+                                updated[idx].flat = e.target.value;
+                                setChargeGroups(updated);
+                              }}
+                              className="w-full border border-gray-300 rounded p-1 text-xs"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="number"
+                              value={cg.percent}
+                              onChange={(e) => {
+                                const updated = [...chargeGroups];
+                                updated[idx].percent = e.target.value;
+                                setChargeGroups(updated);
+                              }}
+                              className="w-full border border-gray-300 rounded p-1 text-xs"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="number"
+                              value={cg.max}
+                              onChange={(e) => {
+                                const updated = [...chargeGroups];
+                                updated[idx].max = e.target.value;
+                                setChargeGroups(updated);
+                              }}
+                              className="w-full border border-gray-300 rounded p-1 text-xs"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                      {chargeGroups.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="py-4 px-3 text-center text-gray-500 text-sm">
+                            No charge groups configured. Copay details will be populated from Mantys response.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Primary Insurance Holder Details Summary */}
+          <div className="border-b pb-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Primary Insurance Holder Details</h3>
+            <div className="border border-gray-300 rounded-md overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Card #</th>
+                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Receiver</th>
+                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Payer</th>
+                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Network</th>
+                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Plan</th>
+                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Expiry Date</th>
+                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Status</th>
+                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Relation</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="py-2 px-3">{memberId || "-"}</td>
+                    <td className="py-2 px-3">{receiverId || "-"}</td>
+                    <td className="py-2 px-3">{selectedPayer?.ins_tpa_name || "-"}</td>
+                    <td className="py-2 px-3">{selectedNetwork || "-"}</td>
+                    <td className="py-2 px-3">{selectedPlan ? `${selectedPlan.plan_id} - ${selectedPlan.insurance_plan_name}` : "-"}</td>
+                    <td className="py-2 px-3">{expiryDate ? new Date(expiryDate).toLocaleDateString('en-GB') : "-"}</td>
+                    <td className="py-2 px-3">
+                      <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">Active</span>
+                    </td>
+                    <td className="py-2 px-3">Self</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-end gap-3 border-t pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowSavePolicyModal(false)}
+              disabled={savingPolicy}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmSavePolicy}
+              disabled={savingPolicy || !selectedNetwork}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {savingPolicy ? (
+                <>
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  Saving...
+                </>
+              ) : (
+                "Update Insurance Details"
+              )}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

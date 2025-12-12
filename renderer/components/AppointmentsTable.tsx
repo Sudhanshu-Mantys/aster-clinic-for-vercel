@@ -47,31 +47,46 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                     return true;
                 });
 
-                // Map MPI to eligibility status
+                // Map MPI to eligibility status with priority: success > processing > error
+                // First pass: collect all statuses for each MPI
+                const mpiStatuses: { [mpi: string]: Set<'success' | 'error' | 'processing'> } = {};
+
                 todayEligibilityChecks.forEach((item: any) => {
                     if (item.patientMPI) {
+                        const mpi = item.patientMPI;
+                        if (!mpiStatuses[mpi]) {
+                            mpiStatuses[mpi] = new Set();
+                        }
+
+                        // Determine this item's status
                         if (item.status === 'error') {
-                            // Error status = red dot
-                            statusMap[item.patientMPI] = 'error';
+                            mpiStatuses[mpi].add('error');
                         } else if (item.status === 'pending' || item.status === 'processing') {
-                            // Processing status = yellow dot
-                            statusMap[item.patientMPI] = 'processing';
+                            mpiStatuses[mpi].add('processing');
                         } else if (item.status === 'complete') {
                             if (item.result && item.result.data) {
-                                // Check if eligible - result.data.is_eligible should be true
                                 const resultData = item.result.data;
                                 if (resultData.is_eligible === true) {
-                                    // Success = green dot
-                                    statusMap[item.patientMPI] = 'success';
+                                    mpiStatuses[mpi].add('success');
                                 } else {
-                                    // Complete but not eligible = red dot
-                                    statusMap[item.patientMPI] = 'error';
+                                    mpiStatuses[mpi].add('error');
                                 }
                             } else {
-                                // Complete but no data = error (red dot)
-                                statusMap[item.patientMPI] = 'error';
+                                mpiStatuses[mpi].add('error');
                             }
                         }
+                    }
+                });
+
+                // Second pass: apply priority (success > processing > error)
+                Object.keys(mpiStatuses).forEach((mpi) => {
+                    const statuses = mpiStatuses[mpi];
+                    if (statuses.has('success')) {
+                        statusMap[mpi] = 'success';
+                    } else if (statuses.has('processing')) {
+                        statusMap[mpi] = 'processing';
+                    } else if (statuses.has('error')) {
+                        statusMap[mpi] = 'error';
                     }
                 });
 

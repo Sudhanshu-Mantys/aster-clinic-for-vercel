@@ -152,12 +152,35 @@ export class EligibilityHistoryService {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to update history item');
+        // If item not found (404), log but don't throw - item may have been deleted
+        if (response.status === 404) {
+          console.warn(`[EligibilityHistory] History item with taskId ${taskId} not found. Skipping update.`);
+          return;
+        }
+
+        // Try to get error message from response
+        let errorMessage = `Failed to update history item: ${response.status} ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          if (errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } catch {
+          // If JSON parsing fails, use the default message
+        }
+
+        console.error(`[EligibilityHistory] Update failed:`, errorMessage);
+        throw new Error(errorMessage);
       }
 
       cachedItems = null; // Invalidate cache
-    } catch (error) {
-      console.error("Error updating eligibility history item:", error);
+    } catch (error: any) {
+      // Only log if it's not a 404 (which we already handled)
+      if (error.message && !error.message.includes('not found')) {
+        console.error("[EligibilityHistory] Error updating eligibility history item:", error);
+      }
+      // Re-throw to allow caller to handle if needed
+      throw error;
     }
   }
 

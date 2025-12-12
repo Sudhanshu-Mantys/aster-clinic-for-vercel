@@ -42,11 +42,11 @@ export const Drawer: React.FC<DrawerProps> = ({
   if (!isOpen) return null;
 
   const sizeClasses = {
-    sm: "max-w-md",
-    md: "max-w-lg",
-    lg: "max-w-2xl",
-    xl: "max-w-4xl",
-    full: "max-w-full",
+    sm: "w-full max-w-md",
+    md: "w-full max-w-lg",
+    lg: "w-full max-w-2xl",
+    xl: "w-full max-w-4xl",
+    full: "w-full",
   };
 
   const drawer = (
@@ -60,17 +60,20 @@ export const Drawer: React.FC<DrawerProps> = ({
 
       {/* Drawer */}
       <div
-        className={`fixed inset-y-0 right-0 ${sizeClasses[size]} w-full bg-white shadow-xl z-50 flex flex-col transform transition-transform duration-300 ease-in-out`}
+        className={`fixed inset-y-0 right-0 ${sizeClasses[size]} min-w-0 bg-white shadow-xl z-50 flex flex-col transform transition-transform duration-300 ease-in-out`}
+        style={{
+          maxWidth: size === 'full' ? '100vw' : `min(100vw, ${size === 'xl' ? '56rem' : size === 'lg' ? '42rem' : size === 'md' ? '32rem' : '28rem'})`,
+        }}
         role="dialog"
         aria-modal="true"
       >
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0 bg-white">
+            <h2 className="text-xl font-semibold text-gray-900 truncate pr-4">{title}</h2>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded-md hover:bg-gray-100"
+              className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded-md hover:bg-gray-100 flex-shrink-0"
               aria-label="Close drawer"
             >
               <svg
@@ -91,7 +94,7 @@ export const Drawer: React.FC<DrawerProps> = ({
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className="flex-1 overflow-y-auto min-h-0">{children}</div>
       </div>
     </>
   );
