@@ -1,14 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { getClinicIdFromQuery } from '../_helpers'
-import { 
+import {
     getPlanMappingsByTPA,
     getAllPlanMappings,
     setPlanMapping,
     deletePlanMapping,
     setDefaultMapping,
+    unsetDefaultMapping,
     bulkImportMappings,
     generateId,
-    type PlanNetworkMapping 
+    type PlanNetworkMapping
 } from '../../../../lib/redis-config-store'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -45,7 +46,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
                     m.is_default ? 'true' : 'false'
                 ].join(','))
             ]
-            
+
             res.setHeader('Content-Type', 'text/csv')
             res.setHeader('Content-Disposition', `attachment; filename="plan-mappings-${clinicId}-${Date.now()}.csv"`)
             return res.status(200).send(csvRows.join('\n'))
@@ -79,7 +80,11 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
             return res.status(201).json({
                 message: 'Bulk import completed',
                 imported: result.imported,
-                errors: result.errors
+                errors: result.errors,
+                defaults_fixed: result.defaults_fixed,
+                note: result.defaults_fixed > 0
+                    ? `${result.defaults_fixed} duplicate default(s) were automatically fixed (only 1 default allowed per Mantys network)`
+                    : undefined
             })
         } catch (error: any) {
             console.error('Error bulk importing mappings:', error)
@@ -122,8 +127,8 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         }
 
         await setPlanMapping(clinicId, mapping)
-        
-        // If this is set as default, unset other defaults for the same plan
+
+        // If this is set as default, unset other defaults for the same Mantys network
         if (is_default === true) {
             await setDefaultMapping(clinicId, tpa_ins_code, mapping.id)
         }
@@ -145,7 +150,7 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse) {
     const clinicId = getClinicIdFromQuery(req)
     if (!clinicId) return res.status(400).json({ error: 'clinic_id is required' })
 
-    const { tpa_ins_code, mapping_id, set_default } = req.query
+    const { tpa_ins_code, mapping_id, set_default, unset_default } = req.query
 
     if (!tpa_ins_code || typeof tpa_ins_code !== 'string') {
         return res.status(400).json({ error: 'tpa_ins_code is required' })
@@ -164,6 +169,21 @@ async function handlePut(req: NextApiRequest, res: NextApiResponse) {
             console.error('Error setting default mapping:', error)
             return res.status(500).json({
                 error: 'Failed to set default mapping',
+                details: error.message
+            })
+        }
+    }
+
+    if (unset_default === 'true') {
+        try {
+            await unsetDefaultMapping(clinicId, tpa_ins_code, mapping_id)
+            return res.status(200).json({
+                message: 'Default mapping unset successfully'
+            })
+        } catch (error: any) {
+            console.error('Error unsetting default mapping:', error)
+            return res.status(500).json({
+                error: 'Failed to unset default mapping',
                 details: error.message
             })
         }

@@ -1005,7 +1005,8 @@ export async function deletePlanMapping(clinicId: string, tpaInsCode: string, ma
 }
 
 /**
- * Set default mapping for a plan (unset other defaults for the same plan)
+ * Set default mapping for a Mantys network (unset other defaults for the same network)
+ * Only one default mapping is allowed per Mantys network
  */
 export async function setDefaultMapping(clinicId: string, tpaInsCode: string, mappingId: string): Promise<void> {
     try {
@@ -1022,10 +1023,10 @@ export async function setDefaultMapping(clinicId: string, tpaInsCode: string, ma
         // Get all mappings for this TPA
         const allMappings = await getPlanMappingsByTPA(clinicId, tpaInsCode)
 
-        // Unset defaults for the same plan
+        // Unset defaults for the same Mantys network (only one default per network)
         const pipeline = redis.pipeline()
         for (const m of allMappings) {
-            if (m.lt_plan_id === mapping.lt_plan_id && m.id !== mappingId && m.is_default) {
+            if (m.mantys_network_name === mapping.mantys_network_name && m.id !== mappingId && m.is_default) {
                 const key = `clinic:plan_mapping:${clinicId}:${tpaInsCode}:${m.id}`
                 const updated = { ...m, is_default: false, updated_at: new Date().toISOString() }
                 pipeline.set(key, JSON.stringify(updated))
@@ -1044,16 +1045,43 @@ export async function setDefaultMapping(clinicId: string, tpaInsCode: string, ma
 }
 
 /**
- * Bulk import mappings
+ * Unset default mapping for a Mantys network
  */
-export async function bulkImportMappings(clinicId: string, mappings: PlanNetworkMapping[]): Promise<{ imported: number; errors: number }> {
+export async function unsetDefaultMapping(clinicId: string, tpaInsCode: string, mappingId: string): Promise<void> {
+    try {
+        const redis = await getRedisClient()
+        const mappingKey = `clinic:plan_mapping:${clinicId}:${tpaInsCode}:${mappingId}`
+        const mappingData = await redis.get(mappingKey)
+
+        if (!mappingData) {
+            throw new Error('Mapping not found')
+        }
+
+        const mapping: PlanNetworkMapping = JSON.parse(mappingData)
+
+        // Unset this mapping's default status
+        const updated = { ...mapping, is_default: false, updated_at: new Date().toISOString() }
+        await redis.set(mappingKey, JSON.stringify(updated))
+    } catch (error) {
+        console.error('Error unsetting default mapping:', error)
+        throw error
+    }
+}
+
+/**
+ * Bulk import mappings
+ * Ensures only one default per Mantys network
+ */
+export async function bulkImportMappings(clinicId: string, mappings: PlanNetworkMapping[]): Promise<{ imported: number; errors: number; defaults_fixed: number }> {
     let imported = 0
     let errors = 0
+    let defaultsFixed = 0
 
     try {
         const redis = await getRedisClient()
-        const pipeline = redis.pipeline()
 
+        // First, validate and normalize mappings
+        const validMappings: PlanNetworkMapping[] = []
         for (const mapping of mappings) {
             try {
                 if (!mapping.tpa_ins_code || !mapping.lt_plan_id || !mapping.mantys_network_name) {
@@ -1062,25 +1090,101 @@ export async function bulkImportMappings(clinicId: string, mappings: PlanNetwork
                 }
 
                 const id = mapping.id || generateId()
-                const key = `clinic:plan_mapping:${clinicId}:${mapping.tpa_ins_code}:${id}`
-                const mappingData: PlanNetworkMapping = {
+                validMappings.push({
                     ...mapping,
                     id,
                     clinic_id: clinicId,
                     updated_at: new Date().toISOString(),
                     created_at: mapping.created_at || new Date().toISOString()
-                }
-
-                pipeline.set(key, JSON.stringify(mappingData))
-                imported++
+                })
             } catch (error) {
                 console.error('Error processing mapping:', mapping, error)
                 errors++
             }
         }
 
+        // Group by TPA and network to enforce one default per network
+        const networkDefaults: Record<string, PlanNetworkMapping[]> = {}
+        for (const mapping of validMappings) {
+            if (mapping.is_default) {
+                const key = `${mapping.tpa_ins_code}:${mapping.mantys_network_name}`
+                if (!networkDefaults[key]) {
+                    networkDefaults[key] = []
+                }
+                networkDefaults[key].push(mapping)
+            }
+        }
+
+        // For each network with multiple defaults, keep only the first one
+        for (const key in networkDefaults) {
+            const defaults = networkDefaults[key]
+            if (defaults.length > 1) {
+                // Keep the first one, unset the rest
+                for (let i = 1; i < defaults.length; i++) {
+                    defaults[i].is_default = false
+                    defaultsFixed++
+                }
+            }
+        }
+
+        // Import all mappings
+        const pipeline = redis.pipeline()
+        for (const mapping of validMappings) {
+            const key = `clinic:plan_mapping:${clinicId}:${mapping.tpa_ins_code}:${mapping.id}`
+            pipeline.set(key, JSON.stringify(mapping))
+            imported++
+        }
+
         await pipeline.exec()
-        return { imported, errors }
+
+        // Final cleanup: check existing mappings in database and ensure no network has multiple defaults
+        // Group new mappings by TPA and network to see which networks will have new defaults
+        const newDefaultsByNetwork: Record<string, PlanNetworkMapping> = {}
+        for (const mapping of validMappings) {
+            if (mapping.is_default) {
+                const key = `${mapping.tpa_ins_code}:${mapping.mantys_network_name}`
+                // Keep the first default we encounter for each network
+                if (!newDefaultsByNetwork[key]) {
+                    newDefaultsByNetwork[key] = mapping
+                }
+            }
+        }
+
+        // For each TPA that has new defaults, check existing mappings and unset conflicting defaults
+        const tpaSet = new Set(validMappings.map(m => m.tpa_ins_code))
+        const cleanupPipeline = redis.pipeline()
+        let cleanupNeeded = false
+
+        for (const tpaInsCode of Array.from(tpaSet)) {
+            // Get all existing mappings for this TPA
+            const existingMappings = await getPlanMappingsByTPA(clinicId, tpaInsCode)
+
+            // For each network that will have a new default, unset existing defaults
+            for (const key in newDefaultsByNetwork) {
+                const [tpa, networkName] = key.split(':')
+                if (tpa === tpaInsCode) {
+                    const newDefault = newDefaultsByNetwork[key]
+                    // Find existing defaults for this network (excluding the new one we just imported)
+                    for (const existing of existingMappings) {
+                        if (existing.mantys_network_name === networkName &&
+                            existing.is_default &&
+                            existing.id !== newDefault.id) {
+                            const existingKey = `clinic:plan_mapping:${clinicId}:${tpaInsCode}:${existing.id}`
+                            const updated = { ...existing, is_default: false, updated_at: new Date().toISOString() }
+                            cleanupPipeline.set(existingKey, JSON.stringify(updated))
+                            cleanupNeeded = true
+                            defaultsFixed++
+                        }
+                    }
+                }
+            }
+        }
+
+        if (cleanupNeeded) {
+            await cleanupPipeline.exec()
+        }
+
+        return { imported, errors, defaults_fixed: defaultsFixed }
     } catch (error) {
         console.error('Error bulk importing mappings:', error)
         throw error

@@ -1,10 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { getClinicIdFromQuery } from '../_helpers'
-import { 
-    getMantysNetworksByTPA, 
-    setMantysNetworksByTPA, 
+import {
+    getMantysNetworksByTPA,
+    setMantysNetworksByTPA,
     getTPAsWithMantysNetworks,
-    type MantysNetwork 
+    type MantysNetwork
 } from '../../../../lib/redis-config-store'
 
 // Hardcoded Mantys network mappings
@@ -324,8 +324,8 @@ async function handleImportFromMapping(
         // Get networks from hardcoded mapping
         const networkNames = FULL_NETWORK_NAME_MAPPINGS[tpaInsCode]
         if (!networkNames || networkNames.length === 0) {
-            return res.status(404).json({ 
-                error: `No Mantys networks found in mapping for TPA: ${tpaInsCode}` 
+            return res.status(404).json({
+                error: `No Mantys networks found in mapping for TPA: ${tpaInsCode}`
             })
         }
 

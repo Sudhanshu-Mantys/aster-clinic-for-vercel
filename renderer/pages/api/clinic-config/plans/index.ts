@@ -1,12 +1,13 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { getClinicIdFromQuery } from '../_helpers'
-import { 
-    getPlansByTPA, 
-    setPlansByTPA, 
-    getTPAsWithPlans, 
-    getTPAConfigByCode, 
+import {
+    getPlansByTPA,
+    setPlansByTPA,
+    getTPAsWithPlans,
+    getTPAConfigByCode,
     getClinicConfig,
-    type LTPlan 
+    getMantysNetworksByTPA,
+    type LTPlan
 } from '../../../../lib/redis-config-store'
 
 // Use tunnel by default (safer, works from any network)
@@ -25,11 +26,88 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     const clinicId = getClinicIdFromQuery(req)
     if (!clinicId) return res.status(400).json({ error: 'clinic_id is required' })
 
-    const { tpa_ins_code, fetch_from_api } = req.query
+    const { tpa_ins_code, fetch_from_api, export_format } = req.query
 
     // If fetching from API for a specific TPA
     if (fetch_from_api === 'true' && tpa_ins_code && typeof tpa_ins_code === 'string') {
         return handleFetchFromAPI(req, res, clinicId, tpa_ins_code)
+    }
+
+    // Export plans as template for mapping
+    if (export_format === 'mapping_template' && tpa_ins_code && typeof tpa_ins_code === 'string') {
+        const plans = await getPlansByTPA(clinicId, tpa_ins_code)
+        const networks = await getMantysNetworksByTPA(clinicId, tpa_ins_code)
+        const availableNetworks = networks.map(n => n.name)
+
+        // Create template with plan details and empty mapping fields
+        const template = plans.map(plan => ({
+            tpa_ins_code: tpa_ins_code,
+            lt_plan_id: plan.plan_id,
+            lt_plan_name: plan.insurance_plan_name,
+            lt_plan_code: plan.plan_code,
+            mantys_network_name: '', // Empty - to be filled in (must match one of the available_networks)
+            is_default: false // Set to true for the default mapping of each plan
+        }))
+
+        // Create sample entries showing how to fill it out
+        const sampleEntries = plans.length > 0 ? [
+            {
+                tpa_ins_code: tpa_ins_code,
+                lt_plan_id: plans[0].plan_id,
+                lt_plan_name: plans[0].insurance_plan_name,
+                lt_plan_code: plans[0].plan_code,
+                mantys_network_name: availableNetworks[0] || 'EXAMPLE_NETWORK',
+                is_default: true
+            },
+            ...(plans.length > 1 && availableNetworks.length > 1 ? [{
+                tpa_ins_code: tpa_ins_code,
+                lt_plan_id: plans[0].plan_id, // Same plan, different network (many-to-many example)
+                lt_plan_name: plans[0].insurance_plan_name,
+                lt_plan_code: plans[0].plan_code,
+                mantys_network_name: availableNetworks[1] || 'EXAMPLE_NETWORK_2',
+                is_default: false
+            }] : []),
+            ...(plans.length > 1 ? [{
+                tpa_ins_code: tpa_ins_code,
+                lt_plan_id: plans[1].plan_id,
+                lt_plan_name: plans[1].insurance_plan_name,
+                lt_plan_code: plans[1].plan_code,
+                mantys_network_name: availableNetworks[0] || 'EXAMPLE_NETWORK',
+                is_default: true
+            }] : [])
+        ] : []
+
+        return res.status(200).json({
+            tpa_ins_code,
+            tpa_name: 'TPA Name', // Will be filled by frontend if needed
+            plans_count: plans.length,
+            available_networks: availableNetworks,
+            instructions: [
+                'INSTRUCTIONS FOR FILLING OUT MAPPINGS:',
+                '1. Fill in the "mantys_network_name" field for each plan entry.',
+                '2. The mantys_network_name MUST match exactly one of the networks listed in "available_networks" above.',
+                '3. For many-to-many mappings: Create multiple entries with the same lt_plan_id but different mantys_network_name values.',
+                '4. Set "is_default" to true for ONE mapping per plan (the default network for that plan).',
+                '5. You can delete entries you don\'t want to map (plans without mappings will be skipped).',
+                '6. After filling, send back the entire JSON object with the "mappings" array filled in.',
+                '',
+                'EXAMPLE:',
+                '- Plan "RN3 (PCP) – NEXTCARE" can map to both "RN3" and "PCP" networks (create 2 entries).',
+                '- Mantys "Restricted Network" can map to multiple LT plans like "RN - NAS" and "RN (LAND MARK GROUP - NLGIC) -NAS" (create separate entries for each).',
+                '',
+                'RETURN FORMAT:',
+                'Send back this JSON with the "mappings" array filled in. You can either:',
+                '- Replace the "template" array with your filled "mappings" array, OR',
+                '- Keep the structure and just fill in the mantys_network_name fields in the template array.'
+            ],
+            sample_entries: sampleEntries,
+            template: template,
+            // Expected return format
+            expected_return_format: {
+                tpa_ins_code: tpa_ins_code,
+                mappings: sampleEntries // This is what should be returned - array of filled mappings
+            }
+        })
     }
 
     // If requesting plans for a specific TPA

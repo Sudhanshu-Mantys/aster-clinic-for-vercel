@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
 import { useAuth } from '../contexts/AuthContext'
@@ -961,6 +961,10 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
         is_default: false
     })
     const [importJson, setImportJson] = useState('')
+    const [dropdownOpen, setDropdownOpen] = useState<Record<string, boolean>>({})
+    const dropdownRefs = useRef<Record<string, HTMLDivElement | null>>({})
+    const [defaultDropdownOpen, setDefaultDropdownOpen] = useState<Record<string, boolean>>({})
+    const [collapsedTPAs, setCollapsedTPAs] = useState<Record<string, boolean>>({})
 
     useEffect(() => {
         loadTPAs()
@@ -968,6 +972,36 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
         loadNetworks()
         loadMappings()
     }, [clinicId])
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            // Handle TPA dropdowns
+            Object.keys(dropdownOpen).forEach((tpaInsCode) => {
+                if (dropdownOpen[tpaInsCode] && dropdownRefs.current[tpaInsCode] && !dropdownRefs.current[tpaInsCode]?.contains(event.target as Node)) {
+                    setDropdownOpen(prev => ({ ...prev, [tpaInsCode]: false }))
+                }
+            })
+
+            // Handle default dropdowns
+            Object.keys(defaultDropdownOpen).forEach((mappingId) => {
+                if (defaultDropdownOpen[mappingId]) {
+                    const element = document.querySelector(`[data-default-dropdown="${mappingId}"]`)
+                    if (element && !element.contains(event.target as Node)) {
+                        setDefaultDropdownOpen(prev => ({ ...prev, [mappingId]: false }))
+                    }
+                }
+            })
+        }
+
+        if (Object.values(dropdownOpen).some(open => open) || Object.values(defaultDropdownOpen).some(open => open)) {
+            document.addEventListener('mousedown', handleClickOutside)
+        }
+
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside)
+        }
+    }, [dropdownOpen, defaultDropdownOpen])
 
     const loadTPAs = async () => {
         try {
@@ -1141,6 +1175,24 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
     }
 
     const handleSetDefault = async (tpaInsCode: string, mappingId: string) => {
+        // Find the mapping to get the network name
+        const mapping = mappingsByTPA[tpaInsCode]?.find(m => m.id === mappingId)
+        if (!mapping) {
+            alert('Mapping not found')
+            return
+        }
+
+        // Check if there's already a default for this network
+        const existingDefault = mappingsByTPA[tpaInsCode]?.find(
+            m => m.mantys_network_name === mapping.mantys_network_name && m.is_default && m.id !== mappingId
+        )
+
+        if (existingDefault) {
+            if (!confirm(`There is already a default mapping for "${mapping.mantys_network_name}" (Plan: ${existingDefault.lt_plan_name}). Setting this as default will replace it. Continue?`)) {
+                return
+            }
+        }
+
         try {
             const response = await fetch(
                 `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}&set_default=true`,
@@ -1149,13 +1201,115 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
 
             if (response.ok) {
                 await loadMappings()
-                alert('Default mapping set successfully')
+                alert(`Default mapping set successfully for "${mapping.mantys_network_name}"`)
             } else {
-                alert('Failed to set default mapping')
+                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
+                alert(`Failed to set default mapping: ${error.error || 'Unknown error'}`)
             }
         } catch (error) {
             console.error('Failed to set default mapping:', error)
             alert('Failed to set default mapping')
+        }
+    }
+
+    const handleUnsetDefault = async (tpaInsCode: string, mappingId: string) => {
+        // Find the mapping to get the network name
+        const mapping = mappingsByTPA[tpaInsCode]?.find(m => m.id === mappingId)
+        if (!mapping) {
+            alert('Mapping not found')
+            return
+        }
+
+        if (!confirm(`Are you sure you want to unset the default for "${mapping.mantys_network_name}"?`)) {
+            return
+        }
+
+        try {
+            const response = await fetch(
+                `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}&unset_default=true`,
+                { method: 'PUT' }
+            )
+
+            if (response.ok) {
+                await loadMappings()
+                alert(`Default mapping unset successfully for "${mapping.mantys_network_name}"`)
+            } else {
+                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
+                alert(`Failed to unset default mapping: ${error.error || 'Unknown error'}`)
+            }
+        } catch (error) {
+            console.error('Failed to unset default mapping:', error)
+            alert('Failed to unset default mapping')
+        }
+    }
+
+    const handleExportPlansTemplate = async (tpaInsCode: string) => {
+        try {
+            const plansResponse = await fetch(
+                `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=mapping_template`
+            )
+
+            if (!plansResponse.ok) {
+                alert('Failed to export plans template')
+                return
+            }
+
+            const plansData = await plansResponse.json()
+            const tpaName = getTPAName(tpaInsCode)
+            const mappings = mappingsByTPA[tpaInsCode] || []
+
+            // Fetch mappings if they exist
+            let mappingsData = null
+            if (mappings.length > 0) {
+                try {
+                    const mappingsResponse = await fetch(
+                        `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=json`
+                    )
+                    if (mappingsResponse.ok) {
+                        mappingsData = await mappingsResponse.json()
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch mappings for export:', error)
+                }
+            }
+
+            // Create a comprehensive export format with all information
+            const exportData = {
+                tpa_ins_code: plansData.tpa_ins_code,
+                tpa_name: tpaName,
+                plans_count: plansData.plans_count,
+                available_networks: plansData.available_networks || [],
+                instructions: plansData.instructions || [],
+                sample_entries: plansData.sample_entries || [],
+                template: plansData.template || [],
+                expected_return_format: plansData.expected_return_format || {
+                    tpa_ins_code: plansData.tpa_ins_code,
+                    mappings: mappingsData?.mappings || []
+                },
+                ...(mappingsData?.mappings && mappingsData.mappings.length > 0 && {
+                    current_mappings: mappingsData.mappings
+                })
+            }
+
+            const jsonString = JSON.stringify(exportData, null, 2)
+            const blob = new Blob([jsonString], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `plan-mapping-template-${tpaInsCode}-${Date.now()}.json`
+            a.click()
+            URL.revokeObjectURL(url)
+
+            // Also copy to clipboard for easy sharing
+            const mappingsCount = mappingsData?.mappings?.length || 0
+            navigator.clipboard.writeText(jsonString).then(() => {
+                alert(`✅ Template exported and copied to clipboard!\n\n📋 TPA: ${tpaName} (${tpaInsCode})\n📊 Plans: ${plansData.plans_count}\n🌐 Available Networks: ${plansData.available_networks?.length || 0}${mappingsCount > 0 ? `\n🔗 Current Mappings: ${mappingsCount}` : ''}\n\nShare this JSON on Slack for mapping.`)
+            }).catch(() => {
+                alert(`✅ Template exported!\n\n📋 TPA: ${tpaName} (${tpaInsCode})\n📊 Plans: ${plansData.plans_count}\n🌐 Available Networks: ${plansData.available_networks?.length || 0}${mappingsCount > 0 ? `\n🔗 Current Mappings: ${mappingsCount}` : ''}`)
+            })
+        } catch (error) {
+            console.error('Failed to export plans template:', error)
+            alert('Failed to export plans template')
         }
     }
 
@@ -1203,7 +1357,40 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
             // Try to parse as JSON
             try {
                 const parsed = JSON.parse(importJson)
-                mappings = Array.isArray(parsed) ? parsed : parsed.mappings || []
+                // Handle different formats:
+                // 1. Array of mappings directly
+                // 2. Object with mappings array (from expected_return_format)
+                // 3. Object with template array (from export - filter empty ones)
+                // 4. Object with expected_return_format.mappings
+                if (Array.isArray(parsed)) {
+                    mappings = parsed
+                } else if (parsed.mappings && Array.isArray(parsed.mappings)) {
+                    mappings = parsed.mappings
+                } else if (parsed.expected_return_format && parsed.expected_return_format.mappings && Array.isArray(parsed.expected_return_format.mappings)) {
+                    mappings = parsed.expected_return_format.mappings
+                } else if (parsed.template && Array.isArray(parsed.template)) {
+                    mappings = parsed.template
+                } else {
+                    mappings = []
+                }
+
+                // Filter out entries without mantys_network_name (empty templates)
+                mappings = mappings.filter(m => m.mantys_network_name && m.mantys_network_name.trim() !== '')
+
+                // Validate network names against available networks if provided
+                if (parsed.available_networks && Array.isArray(parsed.available_networks)) {
+                    const invalidNetworks = mappings.filter(m => !parsed.available_networks.includes(m.mantys_network_name))
+                    if (invalidNetworks.length > 0) {
+                        const invalidNames = Array.from(new Set(invalidNetworks.map(m => m.mantys_network_name)))
+                        alert(`Warning: Some network names don't match available networks:\n${invalidNames.join(', ')}\n\nAvailable networks: ${parsed.available_networks.join(', ')}\n\nProceeding with import, but please verify.`)
+                    }
+                }
+
+                // Ensure all mappings have the correct tpa_ins_code
+                mappings = mappings.map(m => ({
+                    ...m,
+                    tpa_ins_code: m.tpa_ins_code || selectedTPA
+                }))
             } catch {
                 // Try to parse as CSV
                 const lines = importJson.trim().split('\n')
@@ -1222,11 +1409,11 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                         mantys_network_name: mapping.mantys_network_name,
                         is_default: mapping.is_default === 'true' || mapping.is_default === true
                     } as PlanNetworkMapping
-                }).filter(m => m.lt_plan_id && m.mantys_network_name)
+                }).filter(m => m.lt_plan_id && m.mantys_network_name && m.mantys_network_name.trim() !== '')
             }
 
             if (mappings.length === 0) {
-                alert('No valid mappings found in the import data')
+                alert('No valid mappings found in the import data. Make sure mantys_network_name fields are filled in.')
                 return
             }
 
@@ -1245,7 +1432,15 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                 setShowImportModal(false)
                 setImportJson('')
                 setSelectedTPA(null)
-                alert(`Successfully imported ${data.imported} mapping(s). ${data.errors > 0 ? `${data.errors} error(s).` : ''}`)
+
+                let message = `Successfully imported ${data.imported} mapping(s).`
+                if (data.errors > 0) {
+                    message += ` ${data.errors} error(s).`
+                }
+                if (data.defaults_fixed > 0) {
+                    message += `\n\nNote: ${data.defaults_fixed} duplicate default(s) were automatically fixed (only 1 default allowed per Mantys network).`
+                }
+                alert(message)
             } else {
                 const error = await response.json().catch(() => ({ error: 'Unknown error' }))
                 alert(`Failed to import mappings: ${error.error || 'Unknown error'}`)
@@ -1316,54 +1511,71 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                             <div key={tpaInsCode} className="border border-gray-200 rounded-lg overflow-hidden">
                                 <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                                     <div className="flex items-center justify-between">
-                                        <div>
-                                            <h3 className="text-lg font-semibold text-gray-900">{tpaName}</h3>
-                                            <p className="text-sm text-gray-600 font-mono mt-1">Ins Code: {tpaInsCode}</p>
+                                        <div className="flex items-center gap-3 flex-1">
+                                            <button
+                                                onClick={() => setCollapsedTPAs(prev => ({ ...prev, [tpaInsCode]: !prev[tpaInsCode] }))}
+                                                className="p-1 hover:bg-gray-200 rounded transition-colors"
+                                                aria-label={collapsedTPAs[tpaInsCode] ? 'Expand' : 'Collapse'}
+                                            >
+                                                <svg
+                                                    className={`w-5 h-5 text-gray-600 transition-transform ${collapsedTPAs[tpaInsCode] ? '' : 'rotate-90'}`}
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                </svg>
+                                            </button>
+                                            <div>
+                                                <h3 className="text-lg font-semibold text-gray-900">{tpaName}</h3>
+                                                <p className="text-sm text-gray-600 font-mono mt-1">Ins Code: {tpaInsCode}</p>
+                                            </div>
                                         </div>
-                                        <div className="flex gap-2">
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => handleFetchPlansFromAPI(tpaInsCode)}
-                                                disabled={isFetching}
-                                            >
-                                                {isFetching ? 'Fetching...' : 'Fetch LT Plans'}
-                                            </Button>
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => handleImportNetworks(tpaInsCode)}
-                                                disabled={isImporting}
-                                            >
-                                                {isImporting ? 'Importing...' : 'Import Mantys Networks'}
-                                            </Button>
-                                            {plans.length > 0 && networks.length > 0 && (
+                                        <div className="flex gap-2 items-center flex-wrap">
+                                            {/* Show Fetch LT Plans as standalone if no plans exist */}
+                                            {plans.length === 0 && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => handleFetchPlansFromAPI(tpaInsCode)}
+                                                    disabled={isFetching}
+                                                >
+                                                    {isFetching ? 'Fetching...' : 'Fetch LT Plans'}
+                                                </Button>
+                                            )}
+                                            {/* Show Import Mantys Networks as standalone if no networks exist */}
+                                            {networks.length === 0 && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => handleImportNetworks(tpaInsCode)}
+                                                    disabled={isImporting}
+                                                >
+                                                    {isImporting ? 'Importing...' : 'Import Mantys Networks'}
+                                                </Button>
+                                            )}
+                                            {/* Show Export Plans Template when plans exist */}
+                                            {plans.length > 0 && (
                                                 <>
                                                     <Button
-                                                        variant="default"
+                                                        variant="outline"
                                                         size="sm"
-                                                        onClick={() => {
-                                                            setSelectedTPA(tpaInsCode)
-                                                            setShowMappingModal(true)
-                                                        }}
+                                                        onClick={() => handleExportPlansTemplate(tpaInsCode)}
+                                                        title="Export plans template and mappings to share on Slack"
                                                     >
-                                                        Create Mapping
+                                                        Export Plans Template
                                                     </Button>
-                                                    {mappings.length > 0 && (
+                                                    {networks.length > 0 && (
                                                         <>
                                                             <Button
-                                                                variant="outline"
+                                                                variant="default"
                                                                 size="sm"
-                                                                onClick={() => handleExportMappings(tpaInsCode, 'json')}
+                                                                onClick={() => {
+                                                                    setSelectedTPA(tpaInsCode)
+                                                                    setShowMappingModal(true)
+                                                                }}
                                                             >
-                                                                Export JSON
-                                                            </Button>
-                                                            <Button
-                                                                variant="outline"
-                                                                size="sm"
-                                                                onClick={() => handleExportMappings(tpaInsCode, 'csv')}
-                                                            >
-                                                                Export CSV
+                                                                Create Mapping
                                                             </Button>
                                                             <Button
                                                                 variant="outline"
@@ -1373,129 +1585,218 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                                     setShowImportModal(true)
                                                                 }}
                                                             >
-                                                                Import
+                                                                Import Mappings
                                                             </Button>
                                                         </>
                                                     )}
                                                 </>
                                             )}
+                                            {/* Dropdown button - only show if there are items to put in dropdown */}
+                                            {(plans.length > 0 || networks.length > 0) && (
+                                                <div className="relative" ref={(el) => { dropdownRefs.current[tpaInsCode] = el }}>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => setDropdownOpen(prev => ({ ...prev, [tpaInsCode]: !prev[tpaInsCode] }))}
+                                                    >
+                                                        <svg
+                                                            className="w-4 h-4 mr-1"
+                                                            fill="none"
+                                                            viewBox="0 0 24 24"
+                                                            stroke="currentColor"
+                                                        >
+                                                            <path
+                                                                strokeLinecap="round"
+                                                                strokeLinejoin="round"
+                                                                strokeWidth={2}
+                                                                d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
+                                                            />
+                                                        </svg>
+                                                        More
+                                                    </Button>
+                                                    {dropdownOpen[tpaInsCode] && (
+                                                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-50">
+                                                            <div className="py-1">
+                                                                {/* Put Fetch LT Plans in dropdown if plans exist */}
+                                                                {plans.length > 0 && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            handleFetchPlansFromAPI(tpaInsCode)
+                                                                            setDropdownOpen(prev => ({ ...prev, [tpaInsCode]: false }))
+                                                                        }}
+                                                                        disabled={isFetching}
+                                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                    >
+                                                                        {isFetching ? 'Fetching...' : 'Fetch LT Plans'}
+                                                                    </button>
+                                                                )}
+                                                                {/* Put Import Mantys Networks in dropdown if networks exist */}
+                                                                {networks.length > 0 && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            handleImportNetworks(tpaInsCode)
+                                                                            setDropdownOpen(prev => ({ ...prev, [tpaInsCode]: false }))
+                                                                        }}
+                                                                        disabled={isImporting}
+                                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                    >
+                                                                        {isImporting ? 'Importing...' : 'Import Mantys Networks'}
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className="p-6 space-y-6">
-                                    {/* LT Plans Section */}
-                                    <div>
-                                        <h4 className="text-md font-semibold text-gray-900 mb-3">LT Plans ({plans.length})</h4>
-                                        {plans.length === 0 ? (
-                                            <div className="text-sm text-gray-500 italic">No plans fetched yet. Click "Fetch LT Plans" to load plans from Lifetrenz API.</div>
-                                        ) : (
-                                            <div className="overflow-x-auto border border-gray-200 rounded">
-                                                <table className="w-full text-sm">
-                                                    <thead className="bg-gray-50">
-                                                        <tr>
-                                                            <th className="text-left py-2 px-3 font-semibold text-gray-700">Plan ID</th>
-                                                            <th className="text-left py-2 px-3 font-semibold text-gray-700">Plan Name</th>
-                                                            <th className="text-left py-2 px-3 font-semibold text-gray-700">Plan Code</th>
-                                                            <th className="text-left py-2 px-3 font-semibold text-gray-700">Type</th>
-                                                            <th className="text-left py-2 px-3 font-semibold text-gray-700">Class</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {plans.map((plan) => (
-                                                            <tr key={plan.plan_id} className="border-b border-gray-100 hover:bg-gray-50">
-                                                                <td className="py-2 px-3 font-mono">{plan.plan_id}</td>
-                                                                <td className="py-2 px-3">{plan.insurance_plan_name}</td>
-                                                                <td className="py-2 px-3 font-mono">{plan.plan_code}</td>
-                                                                <td className="py-2 px-3">{plan.type_name}</td>
-                                                                <td className="py-2 px-3">{plan.class_name}</td>
+                                {!collapsedTPAs[tpaInsCode] && (
+                                    <div className="p-6 space-y-6">
+                                        {/* LT Plans Section */}
+                                        <div>
+                                            <h4 className="text-md font-semibold text-gray-900 mb-3">LT Plans ({plans.length})</h4>
+                                            {plans.length === 0 ? (
+                                                <div className="text-sm text-gray-500 italic">No plans fetched yet. Click "Fetch LT Plans" to load plans from Lifetrenz API.</div>
+                                            ) : (
+                                                <div className="overflow-x-auto border border-gray-200 rounded">
+                                                    <table className="w-full text-sm">
+                                                        <thead className="bg-gray-50">
+                                                            <tr>
+                                                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Plan ID</th>
+                                                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Plan Name</th>
+                                                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Plan Code</th>
+                                                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Type</th>
+                                                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Class</th>
                                                             </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        )}
-                                    </div>
+                                                        </thead>
+                                                        <tbody>
+                                                            {plans.map((plan) => (
+                                                                <tr key={plan.plan_id} className="border-b border-gray-100 hover:bg-gray-50">
+                                                                    <td className="py-2 px-3 font-mono">{plan.plan_id}</td>
+                                                                    <td className="py-2 px-3">{plan.insurance_plan_name}</td>
+                                                                    <td className="py-2 px-3 font-mono">{plan.plan_code}</td>
+                                                                    <td className="py-2 px-3">{plan.type_name}</td>
+                                                                    <td className="py-2 px-3">{plan.class_name}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+                                        </div>
 
-                                    {/* Mantys Networks Section */}
-                                    <div>
-                                        <h4 className="text-md font-semibold text-gray-900 mb-3">Mantys Networks ({networks.length})</h4>
-                                        {networks.length === 0 ? (
-                                            <div className="text-sm text-gray-500 italic">No networks imported yet. Click "Import Mantys Networks" to load networks from the mapping.</div>
-                                        ) : (
-                                            <div className="flex flex-wrap gap-2">
-                                                {networks.map((network, index) => (
-                                                    <span
-                                                        key={`${network.name}-${index}`}
-                                                        className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium"
-                                                    >
-                                                        {network.name}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
+                                        {/* Mantys Networks Section */}
+                                        <div>
+                                            <h4 className="text-md font-semibold text-gray-900 mb-3">Mantys Networks ({networks.length})</h4>
+                                            {networks.length === 0 ? (
+                                                <div className="text-sm text-gray-500 italic">No networks imported yet. Click "Import Mantys Networks" to load networks from the mapping.</div>
+                                            ) : (
+                                                <div className="flex flex-wrap gap-2">
+                                                    {networks.map((network, index) => (
+                                                        <span
+                                                            key={`${network.name}-${index}`}
+                                                            className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium"
+                                                        >
+                                                            {network.name}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
 
-                                    {/* Mappings Section */}
-                                    <div>
-                                        <h4 className="text-md font-semibold text-gray-900 mb-3">Plan-Network Mappings ({mappings.length})</h4>
-                                        {mappings.length === 0 ? (
-                                            <div className="text-sm text-gray-500 italic">No mappings created yet. Create mappings to link LT plans with Mantys networks.</div>
-                                        ) : (
-                                            <div className="overflow-x-auto border border-gray-200 rounded">
-                                                <table className="w-full text-sm">
-                                                    <thead className="bg-gray-50">
-                                                        <tr>
-                                                            <th className="text-left py-2 px-3 font-semibold text-gray-700">LT Plan</th>
-                                                            <th className="text-left py-2 px-3 font-semibold text-gray-700">Mantys Network</th>
-                                                            <th className="text-center py-2 px-3 font-semibold text-gray-700">Default</th>
-                                                            <th className="text-right py-2 px-3 font-semibold text-gray-700">Actions</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {mappings.map((mapping) => (
-                                                            <tr key={mapping.id} className="border-b border-gray-100 hover:bg-gray-50">
-                                                                <td className="py-2 px-3">
-                                                                    <div className="font-medium">{mapping.lt_plan_name}</div>
-                                                                    <div className="text-xs text-gray-500 font-mono">{mapping.lt_plan_code}</div>
-                                                                </td>
-                                                                <td className="py-2 px-3">
-                                                                    <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                                                                        {mapping.mantys_network_name}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="py-2 px-3 text-center">
-                                                                    {mapping.is_default ? (
-                                                                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
-                                                                            Default
+                                        {/* Mappings Section */}
+                                        <div>
+                                            <h4 className="text-md font-semibold text-gray-900 mb-3">Plan-Network Mappings ({mappings.length})</h4>
+                                            {mappings.length === 0 ? (
+                                                <div className="text-sm text-gray-500 italic">No mappings created yet. Create mappings to link LT plans with Mantys networks.</div>
+                                            ) : (
+                                                <div className="overflow-x-auto border border-gray-200 rounded">
+                                                    <table className="w-full text-sm">
+                                                        <thead className="bg-gray-50">
+                                                            <tr>
+                                                                <th className="text-left py-2 px-3 font-semibold text-gray-700">LT Plan</th>
+                                                                <th className="text-left py-2 px-3 font-semibold text-gray-700">Mantys Network</th>
+                                                                <th className="text-center py-2 px-3 font-semibold text-gray-700">Default</th>
+                                                                <th className="text-right py-2 px-3 font-semibold text-gray-700">Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {mappings.map((mapping) => (
+                                                                <tr key={mapping.id} className="border-b border-gray-100 hover:bg-gray-50">
+                                                                    <td className="py-2 px-3">
+                                                                        <div className="font-medium">{mapping.lt_plan_name}</div>
+                                                                        <div className="text-xs text-gray-500 font-mono">{mapping.lt_plan_code}</div>
+                                                                    </td>
+                                                                    <td className="py-2 px-3">
+                                                                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                                                                            {mapping.mantys_network_name}
                                                                         </span>
-                                                                    ) : (
+                                                                    </td>
+                                                                    <td className="py-2 px-3 text-center">
+                                                                        {mapping.is_default ? (
+                                                                            <div className="relative inline-block" data-default-dropdown={mapping.id}>
+                                                                                <button
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation()
+                                                                                        setDefaultDropdownOpen(prev => ({
+                                                                                            ...prev,
+                                                                                            [mapping.id]: !prev[mapping.id]
+                                                                                        }))
+                                                                                    }}
+                                                                                    className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium hover:bg-green-200 cursor-pointer"
+                                                                                >
+                                                                                    Default
+                                                                                </button>
+                                                                                {defaultDropdownOpen[mapping.id] && (
+                                                                                    <div className="absolute right-0 mt-1 w-40 bg-white rounded-md shadow-lg border border-gray-200 z-50">
+                                                                                        <div className="py-1">
+                                                                                            <button
+                                                                                                onClick={(e) => {
+                                                                                                    e.stopPropagation()
+                                                                                                    handleUnsetDefault(tpaInsCode, mapping.id)
+                                                                                                    setDefaultDropdownOpen(prev => ({
+                                                                                                        ...prev,
+                                                                                                        [mapping.id]: false
+                                                                                                    }))
+                                                                                                }}
+                                                                                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                                                                            >
+                                                                                                Unset Default
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <Button
+                                                                                variant="outline"
+                                                                                size="sm"
+                                                                                onClick={() => handleSetDefault(tpaInsCode, mapping.id)}
+                                                                            >
+                                                                                Set Default
+                                                                            </Button>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="py-2 px-3 text-right">
                                                                         <Button
-                                                                            variant="outline"
+                                                                            variant="destructive"
                                                                             size="sm"
-                                                                            onClick={() => handleSetDefault(tpaInsCode, mapping.id)}
+                                                                            onClick={() => handleDeleteMapping(tpaInsCode, mapping.id)}
                                                                         >
-                                                                            Set Default
+                                                                            Delete
                                                                         </Button>
-                                                                    )}
-                                                                </td>
-                                                                <td className="py-2 px-3 text-right">
-                                                                    <Button
-                                                                        variant="destructive"
-                                                                        size="sm"
-                                                                        onClick={() => handleDeleteMapping(tpaInsCode, mapping.id)}
-                                                                    >
-                                                                        Delete
-                                                                    </Button>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                             </div>
                         )
                     })}
@@ -1572,8 +1873,11 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                         onChange={(e) => setMappingForm({ ...mappingForm, is_default: e.target.checked })}
                                         className="w-4 h-4"
                                     />
-                                    <span className="text-sm">Set first selected network as default for this plan</span>
+                                    <span className="text-sm">Set first selected network as default (only 1 default allowed per Mantys network)</span>
                                 </label>
+                                <p className="text-xs text-gray-500 ml-6 mt-1">
+                                    If a default already exists for that network, it will be replaced.
+                                </p>
                             </div>
 
                             <div className="flex justify-end gap-3 pt-4">
@@ -1604,7 +1908,18 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                         <div className="px-6 py-4 border-b border-gray-200">
                             <h2 className="text-xl font-semibold">Import Plan-Network Mappings</h2>
                             <p className="text-sm text-gray-600 mt-1">TPA: {getTPAName(selectedTPA)} ({selectedTPA})</p>
-                            <p className="text-xs text-gray-500 mt-1">Paste JSON or CSV data. JSON format: [{'{'}"tpa_ins_code": "...", "lt_plan_id": 123, "lt_plan_name": "...", "lt_plan_code": "...", "mantys_network_name": "...", "is_default": false{'}'}]</p>
+                            <div className="text-xs text-gray-500 mt-2 space-y-1">
+                                <p><strong>Paste JSON data from Slack.</strong> Supports multiple formats:</p>
+                                <ul className="list-disc list-inside ml-2 space-y-1">
+                                    <li>Full exported template with <code>{"mappings"}</code> array filled in</li>
+                                    <li>Object with <code>{"expected_return_format.mappings"}</code> array</li>
+                                    <li>Direct array of mappings: <code>[{"{..."}]</code></li>
+                                </ul>
+                                <p className="mt-2"><strong>Expected format:</strong></p>
+                                <code className="block bg-gray-100 p-2 rounded text-xs mt-1">
+                                    {'{'}"mappings": [{'{'}"lt_plan_id": 123, "lt_plan_name": "...", "mantys_network_name": "...", "is_default": false{'}'}]{'}'}
+                                </code>
+                            </div>
                         </div>
                         <form onSubmit={handleImportMappings} className="p-6 space-y-4">
                             <div>
@@ -1659,6 +1974,7 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
     const [tpaConfigs, setTpaConfigs] = useState<any[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [fetchingTPA, setFetchingTPA] = useState<string | null>(null)
+    const [collapsedTPAs, setCollapsedTPAs] = useState<Record<string, boolean>>({})
 
     useEffect(() => {
         loadTPAs()
@@ -1786,9 +2102,25 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
                             <div key={tpaInsCode} className="border border-gray-200 rounded-lg overflow-hidden">
                                 <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                                     <div className="flex items-center justify-between">
-                                        <div>
-                                            <h3 className="text-lg font-semibold text-gray-900">{tpaName}</h3>
-                                            <p className="text-sm text-gray-600 font-mono mt-1">Ins Code: {tpaInsCode}</p>
+                                        <div className="flex items-center gap-3 flex-1">
+                                            <button
+                                                onClick={() => setCollapsedTPAs(prev => ({ ...prev, [tpaInsCode]: !prev[tpaInsCode] }))}
+                                                className="p-1 hover:bg-gray-200 rounded transition-colors"
+                                                aria-label={collapsedTPAs[tpaInsCode] ? 'Expand' : 'Collapse'}
+                                            >
+                                                <svg
+                                                    className={`w-5 h-5 text-gray-600 transition-transform ${collapsedTPAs[tpaInsCode] ? '' : 'rotate-90'}`}
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                </svg>
+                                            </button>
+                                            <div>
+                                                <h3 className="text-lg font-semibold text-gray-900">{tpaName}</h3>
+                                                <p className="text-sm text-gray-600 font-mono mt-1">Ins Code: {tpaInsCode}</p>
+                                            </div>
                                         </div>
                                         <div className="flex gap-2">
                                             <Button
@@ -1812,45 +2144,49 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
                                     </div>
                                 </div>
 
-                                {payers.length === 0 ? (
-                                    <div className="px-6 py-8 text-center text-gray-500">
-                                        <p className="mb-2">No payers configured for this TPA.</p>
-                                        <p className="text-sm">Click "Fetch from API" to load payers from Lifetrenz.</p>
-                                    </div>
-                                ) : (
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full">
-                                            <thead className="bg-gray-50">
-                                                <tr>
-                                                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Payer ID</th>
-                                                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Payer Name</th>
-                                                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Payer Code</th>
-                                                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Type</th>
-                                                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Mapping ID</th>
-                                                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Receiver Payer ID</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {payers.map((payer, index) => (
-                                                    <tr key={`${payer.ins_tpaid}-${index}`} className="border-b border-gray-100 hover:bg-gray-50">
-                                                        <td className="py-3 px-4 font-mono text-sm">{payer.ins_tpaid}</td>
-                                                        <td className="py-3 px-4">{payer.ins_tpa_name}</td>
-                                                        <td className="py-3 px-4 font-mono text-sm">{payer.ins_tpa_code}</td>
-                                                        <td className="py-3 px-4">
-                                                            <span className={`px-2 py-1 rounded text-xs ${payer.ins_tpa_type === 1
-                                                                ? 'bg-blue-100 text-blue-800'
-                                                                : 'bg-green-100 text-green-800'
-                                                                }`}>
-                                                                {payer.ins_tpa_type === 1 ? 'Insurance' : 'TPA'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-3 px-4 font-mono text-sm text-gray-600">{payer.reciver_payer_map_id}</td>
-                                                        <td className="py-3 px-4 font-mono text-sm text-gray-600">{payer.reciever_payer_id}</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                {!collapsedTPAs[tpaInsCode] && (
+                                    <>
+                                        {payers.length === 0 ? (
+                                            <div className="px-6 py-8 text-center text-gray-500">
+                                                <p className="mb-2">No payers configured for this TPA.</p>
+                                                <p className="text-sm">Click "Fetch from API" to load payers from Lifetrenz.</p>
+                                            </div>
+                                        ) : (
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full">
+                                                    <thead className="bg-gray-50">
+                                                        <tr>
+                                                            <th className="text-left py-3 px-4 font-semibold text-gray-700">Payer ID</th>
+                                                            <th className="text-left py-3 px-4 font-semibold text-gray-700">Payer Name</th>
+                                                            <th className="text-left py-3 px-4 font-semibold text-gray-700">Payer Code</th>
+                                                            <th className="text-left py-3 px-4 font-semibold text-gray-700">Type</th>
+                                                            <th className="text-left py-3 px-4 font-semibold text-gray-700">Mapping ID</th>
+                                                            <th className="text-left py-3 px-4 font-semibold text-gray-700">Receiver Payer ID</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {payers.map((payer, index) => (
+                                                            <tr key={`${payer.ins_tpaid}-${index}`} className="border-b border-gray-100 hover:bg-gray-50">
+                                                                <td className="py-3 px-4 font-mono text-sm">{payer.ins_tpaid}</td>
+                                                                <td className="py-3 px-4">{payer.ins_tpa_name}</td>
+                                                                <td className="py-3 px-4 font-mono text-sm">{payer.ins_tpa_code}</td>
+                                                                <td className="py-3 px-4">
+                                                                    <span className={`px-2 py-1 rounded text-xs ${payer.ins_tpa_type === 1
+                                                                        ? 'bg-blue-100 text-blue-800'
+                                                                        : 'bg-green-100 text-green-800'
+                                                                        }`}>
+                                                                        {payer.ins_tpa_type === 1 ? 'Insurance' : 'TPA'}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="py-3 px-4 font-mono text-sm text-gray-600">{payer.reciver_payer_map_id}</td>
+                                                                <td className="py-3 px-4 font-mono text-sm text-gray-600">{payer.reciever_payer_id}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         )
@@ -2186,124 +2522,126 @@ function DoctorsConfigTab({ clinicId }: { clinicId: string }) {
             {/* Add/Edit Modal */}
             {showAddModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full">
-                        <div className="px-6 py-4 border-b border-gray-200">
+                    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+                        <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
                             <h2 className="text-xl font-semibold">
                                 {editingDoctor ? 'Edit Doctor' : 'Add Doctor'}
                             </h2>
                         </div>
-                        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                            <div>
-                                <Label htmlFor="doctor_id">Doctor ID</Label>
-                                <Input
-                                    id="doctor_id"
-                                    value={formData.doctor_id}
-                                    onChange={(e) => setFormData({ ...formData, doctor_id: e.target.value })}
-                                    placeholder="e.g., DOC001"
-                                    required
-                                    disabled={!!editingDoctor}
-                                />
+                        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+                            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                                <div>
+                                    <Label htmlFor="doctor_id">Doctor ID</Label>
+                                    <Input
+                                        id="doctor_id"
+                                        value={formData.doctor_id}
+                                        onChange={(e) => setFormData({ ...formData, doctor_id: e.target.value })}
+                                        placeholder="e.g., DOC001"
+                                        required
+                                        disabled={!!editingDoctor}
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label htmlFor="doctor_name">Doctor Name</Label>
+                                    <Input
+                                        id="doctor_name"
+                                        value={formData.doctor_name}
+                                        onChange={(e) => setFormData({ ...formData, doctor_name: e.target.value })}
+                                        placeholder="e.g., Dr. Ahmed Khan"
+                                        required
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label htmlFor="doctor_code">Doctor Code (Optional)</Label>
+                                    <Input
+                                        id="doctor_code"
+                                        value={formData.doctor_code}
+                                        onChange={(e) => setFormData({ ...formData, doctor_code: e.target.value })}
+                                        placeholder="Doctor code"
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label htmlFor="specialization">Specialization (Optional)</Label>
+                                    <Input
+                                        id="specialization"
+                                        value={formData.specialization}
+                                        onChange={(e) => setFormData({ ...formData, specialization: e.target.value })}
+                                        placeholder="e.g., Cardiology, Pediatrics"
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label htmlFor="lt_user_id">Lifetrenz User ID (Optional)</Label>
+                                    <Input
+                                        id="lt_user_id"
+                                        value={formData.lt_user_id}
+                                        onChange={(e) => setFormData({ ...formData, lt_user_id: e.target.value })}
+                                        placeholder="Lifetrenz user ID"
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label htmlFor="dha_id">DHA ID (Optional)</Label>
+                                    <Input
+                                        id="dha_id"
+                                        value={formData.dha_id}
+                                        onChange={(e) => setFormData({ ...formData, dha_id: e.target.value })}
+                                        placeholder="DHA ID"
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label htmlFor="moh_id">MOH ID (Optional)</Label>
+                                    <Input
+                                        id="moh_id"
+                                        value={formData.moh_id}
+                                        onChange={(e) => setFormData({ ...formData, moh_id: e.target.value })}
+                                        placeholder="MOH ID"
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label htmlFor="lt_role_id">Lifetrenz Role ID (Optional)</Label>
+                                    <Input
+                                        id="lt_role_id"
+                                        value={formData.lt_role_id}
+                                        onChange={(e) => setFormData({ ...formData, lt_role_id: e.target.value })}
+                                        placeholder="Lifetrenz role ID"
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label htmlFor="lt_specialisation_id">Lifetrenz Specialisation (Optional)</Label>
+                                    <select
+                                        id="lt_specialisation_id"
+                                        value={formData.lt_specialisation_id}
+                                        onChange={(e) => setFormData({ ...formData, lt_specialisation_id: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="">Select Specialisation</option>
+                                        {Object.entries(specialisationsMapping).map(([id, name]) => (
+                                            <option key={id} value={id}>
+                                                {id} - {name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {formData.lt_specialisation_id && !specialisationsMapping[formData.lt_specialisation_id] && (
+                                        <div className="mt-1">
+                                            <Input
+                                                value={formData.lt_specialisation_id}
+                                                onChange={(e) => setFormData({ ...formData, lt_specialisation_id: e.target.value })}
+                                                placeholder="Or enter custom ID"
+                                                className="mt-1"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
-                            <div>
-                                <Label htmlFor="doctor_name">Doctor Name</Label>
-                                <Input
-                                    id="doctor_name"
-                                    value={formData.doctor_name}
-                                    onChange={(e) => setFormData({ ...formData, doctor_name: e.target.value })}
-                                    placeholder="e.g., Dr. Ahmed Khan"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <Label htmlFor="doctor_code">Doctor Code (Optional)</Label>
-                                <Input
-                                    id="doctor_code"
-                                    value={formData.doctor_code}
-                                    onChange={(e) => setFormData({ ...formData, doctor_code: e.target.value })}
-                                    placeholder="Doctor code"
-                                />
-                            </div>
-
-                            <div>
-                                <Label htmlFor="specialization">Specialization (Optional)</Label>
-                                <Input
-                                    id="specialization"
-                                    value={formData.specialization}
-                                    onChange={(e) => setFormData({ ...formData, specialization: e.target.value })}
-                                    placeholder="e.g., Cardiology, Pediatrics"
-                                />
-                            </div>
-
-                            <div>
-                                <Label htmlFor="lt_user_id">Lifetrenz User ID (Optional)</Label>
-                                <Input
-                                    id="lt_user_id"
-                                    value={formData.lt_user_id}
-                                    onChange={(e) => setFormData({ ...formData, lt_user_id: e.target.value })}
-                                    placeholder="Lifetrenz user ID"
-                                />
-                            </div>
-
-                            <div>
-                                <Label htmlFor="dha_id">DHA ID (Optional)</Label>
-                                <Input
-                                    id="dha_id"
-                                    value={formData.dha_id}
-                                    onChange={(e) => setFormData({ ...formData, dha_id: e.target.value })}
-                                    placeholder="DHA ID"
-                                />
-                            </div>
-
-                            <div>
-                                <Label htmlFor="moh_id">MOH ID (Optional)</Label>
-                                <Input
-                                    id="moh_id"
-                                    value={formData.moh_id}
-                                    onChange={(e) => setFormData({ ...formData, moh_id: e.target.value })}
-                                    placeholder="MOH ID"
-                                />
-                            </div>
-
-                            <div>
-                                <Label htmlFor="lt_role_id">Lifetrenz Role ID (Optional)</Label>
-                                <Input
-                                    id="lt_role_id"
-                                    value={formData.lt_role_id}
-                                    onChange={(e) => setFormData({ ...formData, lt_role_id: e.target.value })}
-                                    placeholder="Lifetrenz role ID"
-                                />
-                            </div>
-
-                            <div>
-                                <Label htmlFor="lt_specialisation_id">Lifetrenz Specialisation (Optional)</Label>
-                                <select
-                                    id="lt_specialisation_id"
-                                    value={formData.lt_specialisation_id}
-                                    onChange={(e) => setFormData({ ...formData, lt_specialisation_id: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                    <option value="">Select Specialisation</option>
-                                    {Object.entries(specialisationsMapping).map(([id, name]) => (
-                                        <option key={id} value={id}>
-                                            {id} - {name}
-                                        </option>
-                                    ))}
-                                </select>
-                                {formData.lt_specialisation_id && !specialisationsMapping[formData.lt_specialisation_id] && (
-                                    <div className="mt-1">
-                                        <Input
-                                            value={formData.lt_specialisation_id}
-                                            onChange={(e) => setFormData({ ...formData, lt_specialisation_id: e.target.value })}
-                                            placeholder="Or enter custom ID"
-                                            className="mt-1"
-                                        />
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="flex justify-end gap-3 pt-4">
+                            <div className="flex justify-end gap-3 pt-4 px-6 pb-6 border-t border-gray-200 flex-shrink-0">
                                 <Button
                                     type="button"
                                     variant="outline"
