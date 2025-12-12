@@ -46,10 +46,10 @@ export const Modal: React.FC<ModalProps> = ({
       />
 
       {/* Modal Content */}
-      <div className="relative bg-white rounded-lg shadow-xl max-w-4xl min-w-[500px] max-h-[90vh] w-full mx-4 overflow-hidden">
+      <div className="relative bg-white rounded-lg shadow-xl max-w-4xl min-w-[500px] max-h-[90vh] w-full mx-4 overflow-hidden flex flex-col">
         {/* Header */}
         {(title || showCloseButton) && (
-          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
             {title && (
               <h2 className="text-xl font-semibold text-gray-900">
                 {title}
@@ -69,8 +69,8 @@ export const Modal: React.FC<ModalProps> = ({
           </div>
         )}
 
-        {/* Body */}
-        <div className="overflow-y-auto max-h-[calc(90vh-120px)]">
+        {/* Body - Scrollable */}
+        <div className="flex-1 overflow-y-auto min-h-0">
           {children}
         </div>
       </div>

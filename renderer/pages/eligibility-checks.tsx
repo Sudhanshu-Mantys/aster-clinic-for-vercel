@@ -80,9 +80,9 @@ export default function EligibilityChecksPage() {
           </div>
 
           <Tabs defaultValue="new-check" className="space-y-6">
-            <TabsList className="grid w-full max-w-md grid-cols-2">
-              <TabsTrigger value="new-check">New Check</TabsTrigger>
-              <TabsTrigger value="history">History</TabsTrigger>
+            <TabsList className="grid w-full max-w-md grid-cols-2 bg-gray-100 border border-gray-200">
+              <TabsTrigger value="new-check" className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:font-semibold">New Check</TabsTrigger>
+              <TabsTrigger value="history" className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:font-semibold">History</TabsTrigger>
             </TabsList>
 
             <TabsContent value="new-check" className="space-y-6">

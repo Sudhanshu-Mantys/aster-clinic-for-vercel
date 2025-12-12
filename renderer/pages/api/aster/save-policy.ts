@@ -1,10 +1,16 @@
 /**
- * API endpoint to fetch existing patient insurance policy details from Aster
- * Returns the current policy without making any updates
+ * API endpoint to save/update patient insurance policy details to Aster
+ * Calls the update endpoint: /claim/update/patient/insurace/details/replicate
  */
 import { NextApiRequest, NextApiResponse } from 'next';
 
-const API_BASE_URL = 'https://aster-clinics-dev.mantys.org/SCMS/web/app.php';
+// Use tunnel by default (safer, works from any network)
+// Set NEXT_USE_TUNNEL=false to bypass tunnel for direct access
+const useTunnel = process.env.NEXT_USE_TUNNEL !== 'false';
+
+const API_BASE_URL = useTunnel
+  ? 'https://aster-clinics-dev.mantys.org/SCMS/web/app.php'
+  : 'https://prod.asterclinics.com/SCMS/web/app.php';
 
 export default async function handler(
   req: NextApiRequest,
@@ -22,17 +28,70 @@ export default async function handler(
     }
 
     console.log('Incoming policyData:', JSON.stringify(policyData, null, 2));
-    console.log('Step 1: Fetching existing insurance details for patient:', patientId);
+    console.log('Saving policy for patient:', patientId);
 
-    // Step 1: Fetch existing insurance details to get the policy ID
-    // Note: encounterId can be null for manual searches or policy updates without encounter context
-    let insuranceData = null;
-    let insuranceResponse = null;
+    // Remove fields that are not in the API specification
+    const { planCode, planId, ...cleanPolicyData } = policyData;
 
-    // First attempt: with appointment ID if available (encounterId can be null)
-    if (appointmentId) {
-      console.log('  Trying with appointment ID (encounterId:', encounterId ?? 'null', ')...');
-      insuranceResponse = await fetch(`${API_BASE_URL}/claim/insurance/details/replicate/get`, {
+    // Build the payload matching the API specification
+    // The API expects: head { reqtime, srvseqno, reqtype } and body { ...policyData }
+    const payload = {
+      head: {
+        reqtime: new Date().toDateString(),
+        srvseqno: "",
+        reqtype: "POST"
+      },
+      body: {
+        // Use policyId from existing policy if available, otherwise 0 for new policy
+        policyId: cleanPolicyData.policyId || 0,
+        isActive: cleanPolicyData.isActive ?? 1,
+        payerId: cleanPolicyData.payerId || null,
+        insuranceCompanyId: cleanPolicyData.insuranceCompanyId || null,
+        networkId: cleanPolicyData.networkId || null,
+        siteId: cleanPolicyData.siteId || 31,
+        policyNumber: cleanPolicyData.policyNumber || null,
+        insuranceGroupPolicyId: cleanPolicyData.insuranceGroupPolicyId || null,
+        encounterid: cleanPolicyData.encounterid ?? null, // Note: lowercase 'id' as per API, use null instead of 0
+        parentInsPolicyId: cleanPolicyData.parentInsPolicyId || null,
+        tpaCompanyId: cleanPolicyData.tpaCompanyId || null,
+        planName: cleanPolicyData.planName || null,
+        eligibilityReqId: cleanPolicyData.eligibilityReqId || null,
+        tpaPolicyId: cleanPolicyData.tpaPolicyId || null,
+        // insRules should be an array or null - if null, use empty array or keep as provided
+        insRules: cleanPolicyData.insRules || null,
+        orgId: cleanPolicyData.orgId || null,
+        insuranceMappingId: cleanPolicyData.insuranceMappingId || null,
+        tpaGroupPolicyId: cleanPolicyData.tpaGroupPolicyId || null,
+        apntId: cleanPolicyData.apntId || null,
+        insuranceValidTill: cleanPolicyData.insuranceValidTill || null,
+        orgName: cleanPolicyData.orgName || null,
+        tpaValidTill: cleanPolicyData.tpaValidTill || null,
+        patientId: patientId,
+        insuranceRenewal: cleanPolicyData.insuranceRenewal || null,
+        payerType: cleanPolicyData.payerType || 1,
+        insuranceStartDate: cleanPolicyData.insuranceStartDate || null,
+        insurancePolicyId: cleanPolicyData.insurancePolicyId || null,
+        hasTopUpCard: cleanPolicyData.hasTopUpCard ?? 0,
+        proposerRelation: cleanPolicyData.proposerRelation || "Self",
+        createdBy: cleanPolicyData.createdBy || null,
+        empId: cleanPolicyData.empId || null,
+        requestLetter: cleanPolicyData.requestLetter || null,
+        insertType: cleanPolicyData.insertType || 2,
+        customerId: cleanPolicyData.customerId || 1,
+        type: cleanPolicyData.type || 1,
+        relationshipId: cleanPolicyData.relationshipId || 26,
+        priorityPatientApplicable: cleanPolicyData.priorityPatientApplicable ?? 0,
+        typeId: cleanPolicyData.typeId || 1,
+        DepData: cleanPolicyData.DepData || null,
+      }
+    };
+
+    console.log('Sending payload to update endpoint:', JSON.stringify(payload, null, 2));
+
+    // Call the update endpoint
+    const updateResponse = await fetch(
+      `${API_BASE_URL}/claim/update/patient/insurace/details/replicate`,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -41,114 +100,28 @@ export default async function handler(
           'Accept-Encoding': 'gzip,deflate',
           'User-Agent': 'Mozilla/5.0 (Windows; U; en-US) AppleWebKit/533.19.4 (KHTML, like Gecko) AdobeAIR/32.0',
         },
-        body: JSON.stringify({
-          head: {
-            reqtime: new Date().toDateString(),
-            srvseqno: "",
-            reqtype: "POST"
-          },
-          body: {
-            apntId: appointmentId,
-            patientId: patientId,
-            encounterId: encounterId ?? null, // Can be null for policy details
-            customerId: 1,
-            primaryInsPolicyId: null,
-            siteId: 31,
-            isDiscard: 0,
-            hasTopUpCard: 0,
-          }
-        })
-      });
+        body: JSON.stringify(payload),
+      }
+    );
 
-      insuranceData = await insuranceResponse.json();
-      console.log('  Response:', insuranceData.head?.StatusValue);
-    }
+    const updateResult = await updateResponse.json();
+    console.log('Update response:', JSON.stringify(updateResult, null, 2));
 
-    // Second attempt: without appointment/encounter IDs (for manual searches)
-    if (!insuranceData?.body?.Data) {
-      console.log('  Trying with patient ID only...');
-      insuranceResponse = await fetch(`${API_BASE_URL}/claim/insurance/details/replicate/get`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Referer': 'app:/TrendEHR.swf',
-          'x-flash-version': '32,0,0,182',
-          'Accept-Encoding': 'gzip,deflate',
-          'User-Agent': 'Mozilla/5.0 (Windows; U; en-US) AppleWebKit/533.19.4 (KHTML, like Gecko) AdobeAIR/32.0',
-        },
-        body: JSON.stringify({
-          head: {
-            reqtime: new Date().toDateString(),
-            srvseqno: "",
-            reqtype: "POST"
-          },
-          body: {
-            apntId: null,
-            patientId: patientId,
-            encounterId: null, // Can be null for policy details
-            customerId: 1,
-            primaryInsPolicyId: null,
-            siteId: 31,
-            isDiscard: 0,
-            hasTopUpCard: 0,
-          }
-        })
-      });
-
-      insuranceData = await insuranceResponse.json();
-    }
-
-    console.log('Insurance data fetched:', JSON.stringify(insuranceData, null, 2));
-
-    if (!insuranceData?.body?.Data || insuranceData.body.Data.length === 0) {
-      console.error('No insurance policies found for patient');
-      return res.status(404).json({
-        error: 'No insurance policies found for this patient. Please ensure the patient has active insurance in Aster.',
-        details: insuranceData,
+    if (!updateResponse.ok || updateResult.head?.StatusValue !== 'Success') {
+      console.error('Failed to save policy:', updateResult);
+      return res.status(updateResponse.status || 500).json({
+        error: updateResult.head?.StatusText || 'Failed to save policy details',
+        details: updateResult,
       });
     }
-
-    // Step 2: Find the matching policy by payer ID
-    let existingPolicy = null;
-    if (payerId) {
-      existingPolicy = insuranceData.body.Data.find(
-        (policy: any) => policy.payer_id === payerId
-      );
-    }
-
-    // If no match by payer, try to find any active policy
-    if (!existingPolicy && insuranceData.body.Data.length > 0) {
-      existingPolicy = insuranceData.body.Data.find(
-        (policy: any) => policy.is_current === 1 || policy.insurance_status?.toLowerCase() === 'active'
-      );
-    }
-
-    // If still no match, use the first one
-    if (!existingPolicy && insuranceData.body.Data.length > 0) {
-      existingPolicy = insuranceData.body.Data[0];
-    }
-
-    if (!existingPolicy) {
-      return res.status(404).json({
-        error: 'No existing insurance policy found for this patient',
-      });
-    }
-
-    console.log('Step 2: Found existing policy:', {
-      policyId: existingPolicy.patient_insurance_tpa_policy_id,
-      payerId: existingPolicy.payer_id,
-      tpaName: existingPolicy.tpa_name,
-    });
-
-    // Step 3: Return the existing policy without making any updates
-    console.log('Returning existing policy without updates');
 
     return res.status(200).json({
       success: true,
-      data: existingPolicy,
+      message: 'Policy details saved successfully',
+      data: updateResult,
     });
   } catch (error) {
-    console.error('Error fetching policy details:', error);
+    console.error('Error saving policy details:', error);
     return res.status(500).json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error',

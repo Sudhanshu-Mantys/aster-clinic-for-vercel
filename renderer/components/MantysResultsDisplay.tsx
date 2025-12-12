@@ -335,6 +335,71 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     }
   }, [selectedNetwork, planMappings, plansConfig, data.policy_network]);
 
+  // Auto-match payer when payersConfig becomes available (backup mechanism)
+  // This ensures payer is matched even if payersConfig loads after the modal is opened
+  useEffect(() => {
+    // Only run if modal is open, payers are loaded, and payer is not already selected
+    if (!showSavePolicyModal || payersConfig.length === 0 || selectedPayer) {
+      return;
+    }
+
+    // Extract payer code from multiple possible sources
+    let payerCodeToMatch: string | null = null;
+
+    // 1. Check if payer_id is already a payer code (e.g., "INS038", "TPA002")
+    if (data.payer_id) {
+      const payerIdTrimmed = String(data.payer_id).trim().toUpperCase();
+      if (/^(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+$/.test(payerIdTrimmed)) {
+        payerCodeToMatch = payerIdTrimmed;
+      }
+    }
+
+    // 2. Extract payer code from payer_name
+    if (!payerCodeToMatch && data.policy_network?.payer_name) {
+      const payerName = data.policy_network.payer_name;
+      const codeMatch = payerName.match(/\b(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+\b/i);
+      if (codeMatch) {
+        payerCodeToMatch = codeMatch[0].toUpperCase().trim();
+      }
+    }
+
+    // 3. Fallback: try patient_info.payer_id as payer code
+    if (!payerCodeToMatch && data.patient_info?.payer_id) {
+      const patientPayerIdTrimmed = String(data.patient_info.payer_id).trim().toUpperCase();
+      if (/^(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+$/.test(patientPayerIdTrimmed)) {
+        payerCodeToMatch = patientPayerIdTrimmed;
+      }
+    }
+
+    if (payerCodeToMatch) {
+      // Match by ins_tpa_code (payer code) - case-insensitive and trim whitespace
+      const matchingPayer = payersConfig.find((p: any) => {
+        const configCode = String(p.ins_tpa_code || '').trim().toUpperCase();
+        const matchCode = payerCodeToMatch!.trim().toUpperCase();
+        return configCode === matchCode;
+      });
+
+      if (matchingPayer) {
+        console.log('✅ Auto-filled payer (late load):', matchingPayer.ins_tpa_name, 'from payer code:', payerCodeToMatch);
+        setSelectedPayer(matchingPayer);
+      } else {
+        // Fallback: try matching by receiver_payer_id if payer_id is numeric
+        if (data.patient_info?.payer_id) {
+          const payerIdNum = parseInt(data.patient_info.payer_id, 10);
+          if (!isNaN(payerIdNum)) {
+            const matchingPayerById = payersConfig.find((p: any) =>
+              p.reciever_payer_id === payerIdNum || String(p.reciever_payer_id) === data.patient_info.payer_id
+            );
+            if (matchingPayerById) {
+              console.log('✅ Auto-filled payer (late load, fallback by ID):', matchingPayerById.ins_tpa_name);
+              setSelectedPayer(matchingPayerById);
+            }
+          }
+        }
+      }
+    }
+  }, [showSavePolicyModal, payersConfig, selectedPayer, data.payer_id, data.policy_network?.payer_name, data.patient_info?.payer_id]);
+
   // Guard against undefined data - but check if we have error info first
   if (!data) {
     // Check if response has status/message/error_type for better error display
@@ -382,7 +447,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     setShowLifetrenzPreview(false);
   };
 
-  const handleSavePolicy = () => {
+  const handleSavePolicy = async () => {
     const finalPatientId = enrichedPatientId || patientId;
     const finalAppointmentId = enrichedAppointmentId || appointmentId;
 
@@ -392,6 +457,68 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       );
       return;
     }
+
+    // Helper function to load payers config if not already loaded
+    const ensurePayersConfigLoaded = async (): Promise<any[]> => {
+      // If payers are already loaded, return them
+      if (payersConfig.length > 0) {
+        return payersConfig;
+      }
+
+      // Otherwise, try to load them on-demand
+      if (!selectedClinicId || !response.tpa) {
+        console.log('⚠️ Cannot load payers: missing clinic ID or TPA');
+        return [];
+      }
+
+      try {
+        console.log('🔄 PayersConfig not loaded yet, loading on-demand...');
+
+        // First, try to get TPA config to get the ins_code
+        const configResponse = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
+        if (!configResponse.ok) {
+          console.log('⚠️ Could not load TPA config');
+          return [];
+        }
+
+        const configData = await configResponse.json();
+        if (!configData.configs || !Array.isArray(configData.configs)) {
+          console.log('⚠️ Invalid TPA config response');
+          return [];
+        }
+
+        // Find TPA config
+        let config = configData.configs.find((c: any) => c.ins_code === response.tpa);
+        if (!config) {
+          config = configData.configs.find((c: any) => c.tpa_id === response.tpa);
+        }
+        if (!config) {
+          config = configData.configs.find((c: any) => c.payer_code === response.tpa);
+        }
+
+        if (!config) {
+          console.log('⚠️ No TPA config found for:', response.tpa);
+          return [];
+        }
+
+        const tpaInsCode = config.ins_code || response.tpa;
+
+        // Load payers
+        const payersResponse = await fetch(`/api/clinic-config/payers?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
+        if (payersResponse.ok) {
+          const payersData = await payersResponse.json();
+          if (payersData.payers && Array.isArray(payersData.payers)) {
+            console.log('✅ Loaded payers config on-demand:', payersData.payers.length, 'payers');
+            setPayersConfig(payersData.payers);
+            return payersData.payers;
+          }
+        }
+      } catch (error) {
+        console.error('❌ Failed to load payers config on-demand:', error);
+      }
+
+      return [];
+    };
 
     // Initialize form fields from Mantys response
     setMemberId(data.patient_info?.patient_id_info?.member_id || data.patient_info?.policy_primary_member_id || "");
@@ -417,14 +544,58 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       }
     }
 
-    // Set dates
-    if (data.policy_start_date) {
-      const startDateObj = new Date(data.policy_start_date);
-      setStartDate(startDateObj.toISOString().split('T')[0]);
+    // Helper function to parse date from various formats
+    const parseDateToISO = (dateValue: any): string | null => {
+      if (!dateValue) return null;
+
+      // If it's already in YYYY-MM-DD format, return as is
+      if (typeof dateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+        return dateValue;
+      }
+
+      // If it's an object with DD, MM, YYYY (from policy_period_end)
+      if (typeof dateValue === 'object' && dateValue.DD && dateValue.MM && dateValue.YYYY) {
+        const day = String(dateValue.DD).padStart(2, '0');
+        const month = String(dateValue.MM).padStart(2, '0');
+        const year = dateValue.YYYY;
+        return `${year}-${month}-${day}`;
+      }
+
+      // Try to parse as date string
+      if (typeof dateValue === 'string') {
+        const dateObj = new Date(dateValue);
+        if (!isNaN(dateObj.getTime())) {
+          return dateObj.toISOString().split('T')[0];
+        }
+      }
+
+      return null;
+    };
+
+    // Set start date - check multiple sources
+    const startDateValue = data.policy_start_date ||
+      data.policy_network?.start_date ||
+      (data.copay_analysis?.new_version_of_copay_analysis?.policy_info?.policy_period_start);
+    const parsedStartDate = parseDateToISO(startDateValue);
+    if (parsedStartDate) {
+      setStartDate(parsedStartDate);
+      console.log('✅ Auto-filled start date:', parsedStartDate, 'from source:', startDateValue);
     }
-    if (data.policy_end_date) {
-      const expiryDateObj = new Date(data.policy_end_date);
-      setExpiryDate(expiryDateObj.toISOString().split('T')[0]);
+
+    // Set expiry date - check multiple sources (priority: policy_end_date > valid_upto > policy_period_end)
+    const expiryDateValue = data.policy_end_date ||
+      data.policy_network?.valid_upto ||
+      (data.copay_analysis?.new_version_of_copay_analysis?.policy_info?.policy_period_end);
+    const parsedExpiryDate = parseDateToISO(expiryDateValue);
+    if (parsedExpiryDate) {
+      setExpiryDate(parsedExpiryDate);
+      console.log('✅ Auto-filled expiry date:', parsedExpiryDate, 'from source:', expiryDateValue);
+    } else {
+      console.log('⚠️ Could not parse expiry date from:', {
+        policy_end_date: data.policy_end_date,
+        valid_upto: data.policy_network?.valid_upto,
+        policy_period_end: data.copay_analysis?.new_version_of_copay_analysis?.policy_info?.policy_period_end
+      });
     }
 
     // Map copay details to charge groups
@@ -499,12 +670,90 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       }
     }
 
-    // Try to find payer from config
-    if (payersConfig.length > 0 && data.patient_info?.payer_id) {
-      const matchingPayer = payersConfig.find((p: any) => p.reciever_payer_id === data.patient_info.payer_id);
-      if (matchingPayer) {
-        setSelectedPayer(matchingPayer);
+    // Ensure payers config is loaded before trying to match
+    const currentPayersConfig = await ensurePayersConfigLoaded();
+
+    // Try to find payer from config by matching payer code
+    console.log('🔍 Attempting to match payer. PayersConfig length:', currentPayersConfig.length);
+    if (currentPayersConfig.length > 0) {
+      // Extract payer code from multiple possible sources
+      let payerCodeToMatch: string | null = null;
+
+      // 1. Check if payer_id is already a payer code (e.g., "INS038", "TPA002")
+      if (data.payer_id) {
+        const payerIdTrimmed = String(data.payer_id).trim().toUpperCase();
+        if (/^(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+$/.test(payerIdTrimmed)) {
+          payerCodeToMatch = payerIdTrimmed;
+          console.log('📋 Extracted payer code from data.payer_id:', payerCodeToMatch);
+        }
       }
+
+      // 2. Extract payer code from payer_name (e.g., "NATIONAL GENERAL INSURANCE COMPANY - DHA - INS038")
+      if (!payerCodeToMatch && data.policy_network?.payer_name) {
+        const payerName = data.policy_network.payer_name;
+        console.log('📋 Checking payer_name for code:', payerName);
+        // Look for patterns like INS###, TPA###, etc. in the payer name (case-insensitive)
+        const codeMatch = payerName.match(/\b(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+\b/i);
+        if (codeMatch) {
+          payerCodeToMatch = codeMatch[0].toUpperCase().trim();
+          console.log('📋 Extracted payer code from payer_name:', payerCodeToMatch);
+        }
+      }
+
+      // 3. Fallback: try patient_info.payer_id as payer code
+      if (!payerCodeToMatch && data.patient_info?.payer_id) {
+        const patientPayerIdTrimmed = String(data.patient_info.payer_id).trim().toUpperCase();
+        if (/^(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+$/.test(patientPayerIdTrimmed)) {
+          payerCodeToMatch = patientPayerIdTrimmed;
+          console.log('📋 Extracted payer code from patient_info.payer_id:', payerCodeToMatch);
+        }
+      }
+
+      if (payerCodeToMatch) {
+        console.log('🔍 Looking for payer with code:', payerCodeToMatch);
+        console.log('🔍 Available payer codes in config:', currentPayersConfig.map((p: any) => ({
+          code: p.ins_tpa_code,
+          name: p.ins_tpa_name,
+          id: p.reciever_payer_id
+        })));
+
+        // Match by ins_tpa_code (payer code) - case-insensitive and trim whitespace
+        const matchingPayer = currentPayersConfig.find((p: any) => {
+          const configCode = String(p.ins_tpa_code || '').trim().toUpperCase();
+          const matchCode = payerCodeToMatch!.trim().toUpperCase();
+          return configCode === matchCode;
+        });
+
+        if (matchingPayer) {
+          console.log('✅ Auto-filled payer:', matchingPayer.ins_tpa_name, 'from payer code:', payerCodeToMatch, 'receiver_payer_id:', matchingPayer.reciever_payer_id);
+          setSelectedPayer(matchingPayer);
+        } else {
+          console.log('⚠️ Could not find matching payer for payer code:', payerCodeToMatch);
+          console.log('⚠️ Available payer codes:', currentPayersConfig.map((p: any) => p.ins_tpa_code));
+
+          // Fallback: try matching by receiver_payer_id if payer_id is numeric
+          if (data.patient_info?.payer_id) {
+            const payerIdNum = parseInt(data.patient_info.payer_id, 10);
+            if (!isNaN(payerIdNum)) {
+              const matchingPayerById = currentPayersConfig.find((p: any) =>
+                p.reciever_payer_id === payerIdNum || String(p.reciever_payer_id) === data.patient_info.payer_id
+              );
+              if (matchingPayerById) {
+                console.log('✅ Auto-filled payer (fallback by ID):', matchingPayerById.ins_tpa_name, 'from payer_id:', data.patient_info.payer_id);
+                setSelectedPayer(matchingPayerById);
+              }
+            }
+          }
+        }
+      } else {
+        console.log('⚠️ Could not extract payer code from Mantys response:', {
+          payer_id: data.payer_id,
+          patient_info_payer_id: data.patient_info?.payer_id,
+          payer_name: data.policy_network?.payer_name
+        });
+      }
+    } else {
+      console.log('⚠️ PayersConfig is empty, cannot match payer');
     }
 
     setShowSavePolicyModal(true);
@@ -583,7 +832,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         siteId: siteId, // From config or default
         policyNumber: data.patient_info?.patient_id_info?.policy_number || null,
         insuranceGroupPolicyId: null,
-        encounterid: finalEncounterId || 0,
+        encounterid: finalEncounterId || null,
         parentInsPolicyId: null,
         tpaCompanyId: data.patient_info?.tpa_id || null,
         planName: selectedPlan?.insurance_plan_name || data.patient_info?.plan_name || null,
@@ -1673,360 +1922,364 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         onClose={() => setShowSavePolicyModal(false)}
         title="Insurance Detail - Save Policy"
       >
-        <div className="p-6 space-y-6 max-h-[85vh] overflow-y-auto">
-          {/* Insurance Policy Information Section */}
-          <div className="border-b pb-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Insurance Policy Information</h3>
-            <div className="grid grid-cols-2 gap-4">
-              {/* Insurance Card # (Member ID) */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Insurance Card # (Member ID) <span className="text-red-600">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={memberId}
-                  onChange={(e) => setMemberId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                  placeholder="Enter member ID"
-                />
-              </div>
+        <div className="flex flex-col min-h-full">
+          {/* Scrollable Content */}
+          <div className="flex-1 p-6 space-y-6">
+            {/* Insurance Policy Information Section */}
+            <div className="border-b pb-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Insurance Policy Information</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {/* Insurance Card # (Member ID) */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Insurance Card # (Member ID) <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={memberId}
+                    onChange={(e) => setMemberId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                    placeholder="Enter member ID"
+                  />
+                </div>
 
-              {/* Receiver ID */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Receiver ID <span className="text-red-600">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={receiverId}
-                  onChange={(e) => setReceiverId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                  placeholder="Enter receiver ID"
-                />
-              </div>
+                {/* Receiver ID */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Receiver ID <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={receiverId}
+                    onChange={(e) => setReceiverId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                    placeholder="Enter receiver ID"
+                  />
+                </div>
 
-              {/* Payer */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Payer <span className="text-red-600">*</span>
-                </label>
-                <Select
-                  value={
-                    selectedPayer
-                      ? {
-                        value: selectedPayer.reciever_payer_id,
-                        label: selectedPayer.ins_tpa_name,
-                      }
-                      : null
-                  }
-                  onChange={(selected) => {
-                    const payer = payersConfig.find((p: any) => p.reciever_payer_id === selected?.value);
-                    setSelectedPayer(payer || null);
-                  }}
-                  options={payersConfig.map((payer: any) => ({
-                    value: payer.reciever_payer_id,
-                    label: payer.ins_tpa_name,
-                  }))}
-                  placeholder="Select payer"
-                  isSearchable
-                />
-              </div>
-
-              {/* Plan */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Plan <span className="text-red-600">*</span>
-                </label>
-                <Select
-                  value={
-                    selectedPlan
-                      ? {
-                        value: selectedPlan.plan_id,
-                        label: `${selectedPlan.plan_id} - ${selectedPlan.insurance_plan_name}`,
-                      }
-                      : null
-                  }
-                  onChange={(selected) => {
-                    const plan = plansConfig.find((p: any) => p.plan_id === selected?.value);
-                    setSelectedPlan(plan || null);
-                    if (plan) setRateCard(plan.plan_code || "");
-                  }}
-                  options={(() => {
-                    // If we have a selected network (from Mantys response), filter plans by mappings
-                    // Otherwise show all plans
-                    if (selectedNetwork && planMappings.length > 0) {
-                      const mappedPlanIds = planMappings
-                        .filter((m: any) => m.mantys_network_name === selectedNetwork)
-                        .map((m: any) => m.lt_plan_id);
-                      if (mappedPlanIds.length > 0) {
-                        return plansConfig
-                          .filter((plan: any) => mappedPlanIds.includes(plan.plan_id))
-                          .map((plan: any) => ({
-                            value: plan.plan_id,
-                            label: `${plan.plan_id} - ${plan.insurance_plan_name}`,
-                          }));
-                      }
+                {/* Payer */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Payer <span className="text-red-600">*</span>
+                  </label>
+                  <Select
+                    value={
+                      selectedPayer
+                        ? {
+                          value: selectedPayer.reciever_payer_id,
+                          label: selectedPayer.ins_tpa_name,
+                        }
+                        : null
                     }
-                    return plansConfig.map((plan: any) => ({
-                      value: plan.plan_id,
-                      label: `${plan.plan_id} - ${plan.insurance_plan_name}`,
-                    }));
-                  })()}
-                  placeholder="Select plan"
-                  isSearchable
-                />
-              </div>
+                    onChange={(selected) => {
+                      const payer = payersConfig.find((p: any) => p.reciever_payer_id === selected?.value);
+                      setSelectedPayer(payer || null);
+                    }}
+                    options={payersConfig.map((payer: any) => ({
+                      value: payer.reciever_payer_id,
+                      label: payer.ins_tpa_name,
+                    }))}
+                    placeholder="Select payer"
+                    isSearchable
+                  />
+                </div>
 
-              {/* Rate Card */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Rate Card
-                </label>
-                <input
-                  type="text"
-                  value={rateCard}
-                  onChange={(e) => setRateCard(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                  placeholder="Enter rate card"
-                />
-              </div>
+                {/* Plan */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Plan <span className="text-red-600">*</span>
+                  </label>
+                  <Select
+                    value={
+                      selectedPlan
+                        ? {
+                          value: selectedPlan.plan_id,
+                          label: `${selectedPlan.plan_id} - ${selectedPlan.insurance_plan_name}`,
+                        }
+                        : null
+                    }
+                    onChange={(selected) => {
+                      const plan = plansConfig.find((p: any) => p.plan_id === selected?.value);
+                      setSelectedPlan(plan || null);
+                      if (plan) setRateCard(plan.plan_code || "");
+                    }}
+                    options={(() => {
+                      // If we have a selected network (from Mantys response), filter plans by mappings
+                      // Otherwise show all plans
+                      if (selectedNetwork && planMappings.length > 0) {
+                        const mappedPlanIds = planMappings
+                          .filter((m: any) => m.mantys_network_name === selectedNetwork)
+                          .map((m: any) => m.lt_plan_id);
+                        if (mappedPlanIds.length > 0) {
+                          return plansConfig
+                            .filter((plan: any) => mappedPlanIds.includes(plan.plan_id))
+                            .map((plan: any) => ({
+                              value: plan.plan_id,
+                              label: `${plan.plan_id} - ${plan.insurance_plan_name}`,
+                            }));
+                        }
+                      }
+                      return plansConfig.map((plan: any) => ({
+                        value: plan.plan_id,
+                        label: `${plan.plan_id} - ${plan.insurance_plan_name}`,
+                      }));
+                    })()}
+                    placeholder="Select plan"
+                    isSearchable
+                  />
+                </div>
 
-              {/* Start Date */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Start Date (DD/MM/YYYY)
-                </label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                />
-              </div>
+                {/* Rate Card */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Rate Card
+                  </label>
+                  <input
+                    type="text"
+                    value={rateCard}
+                    onChange={(e) => setRateCard(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                    placeholder="Enter rate card"
+                  />
+                </div>
 
-              {/* Last Renewal Date */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Last Renewal Date (DD/MM/YYYY)
-                </label>
-                <input
-                  type="date"
-                  value={lastRenewalDate}
-                  onChange={(e) => setLastRenewalDate(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                />
-              </div>
+                {/* Start Date */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Start Date (DD/MM/YYYY)
+                  </label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  />
+                </div>
 
-              {/* Expiry Date */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Expiry Date (DD/MM/YYYY) <span className="text-red-600">*</span>
-                </label>
-                <input
-                  type="date"
-                  value={expiryDate}
-                  onChange={(e) => setExpiryDate(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                />
+                {/* Last Renewal Date */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Last Renewal Date (DD/MM/YYYY)
+                  </label>
+                  <input
+                    type="date"
+                    value={lastRenewalDate}
+                    onChange={(e) => setLastRenewalDate(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  />
+                </div>
+
+                {/* Expiry Date */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Expiry Date (DD/MM/YYYY) <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={expiryDate}
+                    onChange={(e) => setExpiryDate(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Patient Payable Section */}
-          <div className="border-b pb-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Patient Payable</h3>
+            {/* Patient Payable Section */}
+            <div className="border-b pb-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Patient Payable</h3>
 
-            {/* Deductible */}
-            <div className="mb-4">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Deductible</label>
-              <div className="flex items-center gap-4 mb-2">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={hasDeductible}
-                    onChange={() => setHasDeductible(true)}
-                    className="w-4 h-4"
-                  />
-                  <span>Yes</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={!hasDeductible}
-                    onChange={() => setHasDeductible(false)}
-                    className="w-4 h-4"
-                  />
-                  <span>No</span>
-                </label>
-              </div>
-              {hasDeductible && (
-                <div className="grid grid-cols-2 gap-4 mt-2">
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Flat *</label>
+              {/* Deductible */}
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Deductible</label>
+                <div className="flex items-center gap-4 mb-2">
+                  <label className="flex items-center gap-2">
                     <input
-                      type="number"
-                      value={deductibleFlat}
-                      onChange={(e) => setDeductibleFlat(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                      placeholder="0"
+                      type="radio"
+                      checked={hasDeductible}
+                      onChange={() => setHasDeductible(true)}
+                      className="w-4 h-4"
                     />
+                    <span>Yes</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={!hasDeductible}
+                      onChange={() => setHasDeductible(false)}
+                      className="w-4 h-4"
+                    />
+                    <span>No</span>
+                  </label>
+                </div>
+                {hasDeductible && (
+                  <div className="grid grid-cols-2 gap-4 mt-2">
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Flat *</label>
+                      <input
+                        type="number"
+                        value={deductibleFlat}
+                        onChange={(e) => setDeductibleFlat(e.target.value)}
+                        className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Max</label>
+                      <input
+                        type="number"
+                        value={deductibleMax}
+                        onChange={(e) => setDeductibleMax(e.target.value)}
+                        className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                        placeholder="0.00"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Max</label>
+                )}
+              </div>
+
+              {/* CoPay */}
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">CoPay</label>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2">
                     <input
-                      type="number"
-                      value={deductibleMax}
-                      onChange={(e) => setDeductibleMax(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md p-2 text-sm"
-                      placeholder="0.00"
+                      type="radio"
+                      checked={hasCopay}
+                      onChange={() => setHasCopay(true)}
+                      className="w-4 h-4"
                     />
+                    <span>Yes</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={!hasCopay}
+                      onChange={() => setHasCopay(false)}
+                      className="w-4 h-4"
+                    />
+                    <span>No</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Charge Group Table */}
+              {hasCopay && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Charge Group</label>
+                  <div className="border border-gray-300 rounded-md overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Charge Group</th>
+                          <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Flat</th>
+                          <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">%</th>
+                          <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Max</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {chargeGroups.map((cg, idx) => (
+                          <tr key={idx} className="border-b">
+                            <td className="py-2 px-3">{cg.name}</td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="number"
+                                value={cg.flat}
+                                onChange={(e) => {
+                                  const updated = [...chargeGroups];
+                                  updated[idx].flat = e.target.value;
+                                  setChargeGroups(updated);
+                                }}
+                                className="w-full border border-gray-300 rounded p-1 text-xs"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="number"
+                                value={cg.percent}
+                                onChange={(e) => {
+                                  const updated = [...chargeGroups];
+                                  updated[idx].percent = e.target.value;
+                                  setChargeGroups(updated);
+                                }}
+                                className="w-full border border-gray-300 rounded p-1 text-xs"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="number"
+                                value={cg.max}
+                                onChange={(e) => {
+                                  const updated = [...chargeGroups];
+                                  updated[idx].max = e.target.value;
+                                  setChargeGroups(updated);
+                                }}
+                                className="w-full border border-gray-300 rounded p-1 text-xs"
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                        {chargeGroups.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="py-4 px-3 text-center text-gray-500 text-sm">
+                              No charge groups configured. Copay details will be populated from Mantys response.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* CoPay */}
-            <div className="mb-4">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">CoPay</label>
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={hasCopay}
-                    onChange={() => setHasCopay(true)}
-                    className="w-4 h-4"
-                  />
-                  <span>Yes</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={!hasCopay}
-                    onChange={() => setHasCopay(false)}
-                    className="w-4 h-4"
-                  />
-                  <span>No</span>
-                </label>
+            {/* Primary Insurance Holder Details Summary */}
+            <div className="border-b pb-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Primary Insurance Holder Details</h3>
+              <div className="border border-gray-300 rounded-md overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Card #</th>
+                      <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Receiver</th>
+                      <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Payer</th>
+                      <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Plan</th>
+                      <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Expiry Date</th>
+                      <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Status</th>
+                      <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Relation</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="py-2 px-3">{memberId || "-"}</td>
+                      <td className="py-2 px-3">{receiverId || "-"}</td>
+                      <td className="py-2 px-3">{selectedPayer?.ins_tpa_name || "-"}</td>
+                      <td className="py-2 px-3">{selectedPlan ? `${selectedPlan.plan_id} - ${selectedPlan.insurance_plan_name}` : "-"}</td>
+                      <td className="py-2 px-3">{expiryDate ? new Date(expiryDate).toLocaleDateString('en-GB') : "-"}</td>
+                      <td className="py-2 px-3">
+                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">Active</span>
+                      </td>
+                      <td className="py-2 px-3">Self</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
-            </div>
-
-            {/* Charge Group Table */}
-            {hasCopay && (
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Charge Group</label>
-                <div className="border border-gray-300 rounded-md overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-100">
-                      <tr>
-                        <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Charge Group</th>
-                        <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Flat</th>
-                        <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">%</th>
-                        <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Max</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {chargeGroups.map((cg, idx) => (
-                        <tr key={idx} className="border-b">
-                          <td className="py-2 px-3">{cg.name}</td>
-                          <td className="py-2 px-3">
-                            <input
-                              type="number"
-                              value={cg.flat}
-                              onChange={(e) => {
-                                const updated = [...chargeGroups];
-                                updated[idx].flat = e.target.value;
-                                setChargeGroups(updated);
-                              }}
-                              className="w-full border border-gray-300 rounded p-1 text-xs"
-                            />
-                          </td>
-                          <td className="py-2 px-3">
-                            <input
-                              type="number"
-                              value={cg.percent}
-                              onChange={(e) => {
-                                const updated = [...chargeGroups];
-                                updated[idx].percent = e.target.value;
-                                setChargeGroups(updated);
-                              }}
-                              className="w-full border border-gray-300 rounded p-1 text-xs"
-                            />
-                          </td>
-                          <td className="py-2 px-3">
-                            <input
-                              type="number"
-                              value={cg.max}
-                              onChange={(e) => {
-                                const updated = [...chargeGroups];
-                                updated[idx].max = e.target.value;
-                                setChargeGroups(updated);
-                              }}
-                              className="w-full border border-gray-300 rounded p-1 text-xs"
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                      {chargeGroups.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="py-4 px-3 text-center text-gray-500 text-sm">
-                            No charge groups configured. Copay details will be populated from Mantys response.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Primary Insurance Holder Details Summary */}
-          <div className="border-b pb-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Primary Insurance Holder Details</h3>
-            <div className="border border-gray-300 rounded-md overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Card #</th>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Receiver</th>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Payer</th>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Plan</th>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Expiry Date</th>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Status</th>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Relation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="py-2 px-3">{memberId || "-"}</td>
-                    <td className="py-2 px-3">{receiverId || "-"}</td>
-                    <td className="py-2 px-3">{selectedPayer?.ins_tpa_name || "-"}</td>
-                    <td className="py-2 px-3">{selectedPlan ? `${selectedPlan.plan_id} - ${selectedPlan.insurance_plan_name}` : "-"}</td>
-                    <td className="py-2 px-3">{expiryDate ? new Date(expiryDate).toLocaleDateString('en-GB') : "-"}</td>
-                    <td className="py-2 px-3">
-                      <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">Active</span>
-                    </td>
-                    <td className="py-2 px-3">Self</td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex justify-end gap-3 border-t pt-4">
+          {/* Action Buttons - Sticky Footer */}
+          <div className="sticky bottom-0 bg-white border-t-2 border-gray-300 px-6 py-4 flex justify-end gap-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] mt-6 -mx-6 -mb-6 z-10">
             <Button
               variant="outline"
               onClick={() => setShowSavePolicyModal(false)}
               disabled={savingPolicy}
+              className="px-6 py-2.5"
             >
               Cancel
             </Button>
             <Button
               onClick={handleConfirmSavePolicy}
               disabled={savingPolicy || !selectedPlan}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-8 py-2.5 text-base shadow-md hover:shadow-lg transition-all"
             >
               {savingPolicy ? (
                 <>
