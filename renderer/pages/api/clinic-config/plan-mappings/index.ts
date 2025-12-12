@@ -70,7 +70,28 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
     const clinicId = getClinicIdFromQuery(req)
     if (!clinicId) return res.status(400).json({ error: 'clinic_id is required' })
 
-    const { tpa_ins_code, lt_plan_id, lt_plan_name, lt_plan_code, mantys_network_name } = req.body
+    const { bulk_import, mappings: bulkMappings } = req.body
+
+    // Handle bulk import
+    if (bulk_import === true && Array.isArray(bulkMappings)) {
+        try {
+            const result = await bulkImportMappings(clinicId, bulkMappings)
+            return res.status(201).json({
+                message: 'Bulk import completed',
+                imported: result.imported,
+                errors: result.errors
+            })
+        } catch (error: any) {
+            console.error('Error bulk importing mappings:', error)
+            return res.status(500).json({
+                error: 'Failed to bulk import mappings',
+                details: error.message
+            })
+        }
+    }
+
+    // Handle single mapping creation
+    const { tpa_ins_code, lt_plan_id, lt_plan_name, lt_plan_code, mantys_network_name, is_default } = req.body
 
     if (!tpa_ins_code || typeof tpa_ins_code !== 'string') {
         return res.status(400).json({ error: 'tpa_ins_code is required' })
@@ -96,10 +117,17 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
             lt_plan_id,
             lt_plan_name,
             lt_plan_code,
-            mantys_network_name
+            mantys_network_name,
+            is_default: is_default === true
         }
 
         await setPlanMapping(clinicId, mapping)
+        
+        // If this is set as default, unset other defaults for the same plan
+        if (is_default === true) {
+            await setDefaultMapping(clinicId, tpa_ins_code, mapping.id)
+        }
+
         return res.status(201).json({
             message: 'Mapping created successfully',
             mapping
@@ -111,6 +139,37 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
             details: error.message
         })
     }
+}
+
+async function handlePut(req: NextApiRequest, res: NextApiResponse) {
+    const clinicId = getClinicIdFromQuery(req)
+    if (!clinicId) return res.status(400).json({ error: 'clinic_id is required' })
+
+    const { tpa_ins_code, mapping_id, set_default } = req.query
+
+    if (!tpa_ins_code || typeof tpa_ins_code !== 'string') {
+        return res.status(400).json({ error: 'tpa_ins_code is required' })
+    }
+    if (!mapping_id || typeof mapping_id !== 'string') {
+        return res.status(400).json({ error: 'mapping_id is required' })
+    }
+
+    if (set_default === 'true') {
+        try {
+            await setDefaultMapping(clinicId, tpa_ins_code, mapping_id)
+            return res.status(200).json({
+                message: 'Default mapping set successfully'
+            })
+        } catch (error: any) {
+            console.error('Error setting default mapping:', error)
+            return res.status(500).json({
+                error: 'Failed to set default mapping',
+                details: error.message
+            })
+        }
+    }
+
+    return res.status(400).json({ error: 'Invalid operation' })
 }
 
 async function handleDelete(req: NextApiRequest, res: NextApiResponse) {

@@ -941,6 +941,7 @@ interface PlanNetworkMapping {
     lt_plan_name: string
     lt_plan_code: string
     mantys_network_name: string
+    is_default?: boolean
 }
 
 function PlansConfigTab({ clinicId }: { clinicId: string }) {
@@ -952,11 +953,14 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
     const [fetchingTPA, setFetchingTPA] = useState<string | null>(null)
     const [importingTPA, setImportingTPA] = useState<string | null>(null)
     const [showMappingModal, setShowMappingModal] = useState(false)
+    const [showImportModal, setShowImportModal] = useState(false)
     const [selectedTPA, setSelectedTPA] = useState<string | null>(null)
     const [mappingForm, setMappingForm] = useState({
         lt_plan_id: '',
-        mantys_network_name: ''
+        mantys_network_names: [] as string[],
+        is_default: false
     })
+    const [importJson, setImportJson] = useState('')
 
     useEffect(() => {
         loadTPAs()
@@ -1094,33 +1098,161 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
             return
         }
 
+        if (mappingForm.mantys_network_names.length === 0) {
+            alert('Please select at least one Mantys network')
+            return
+        }
+
         try {
-            const response = await fetch('/api/clinic-config/plan-mappings', {
-                method: 'POST',
+            // Create multiple mappings (many-to-many)
+            const promises = mappingForm.mantys_network_names.map((networkName, index) => {
+                const isDefault = mappingForm.is_default && index === 0
+                return fetch(`/api/clinic-config/plan-mappings?clinic_id=${clinicId}`, {
+                    method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    clinic_id: clinicId,
-                    tpa_ins_code: selectedTPA,
-                    lt_plan_id: plan.plan_id,
-                    lt_plan_name: plan.insurance_plan_name,
-                    lt_plan_code: plan.plan_code,
-                    mantys_network_name: mappingForm.mantys_network_name
+                        tpa_ins_code: selectedTPA,
+                        lt_plan_id: plan.plan_id,
+                        lt_plan_name: plan.insurance_plan_name,
+                        lt_plan_code: plan.plan_code,
+                        mantys_network_name: networkName,
+                        is_default: isDefault
+                    })
                 })
             })
 
-            if (response.ok) {
+            const results = await Promise.all(promises)
+            const errors = results.filter(r => !r.ok)
+
+            if (errors.length > 0) {
+                const error = await errors[0].json().catch(() => ({ error: 'Unknown error' }))
+                alert(`Failed to create some mappings: ${error.error || 'Unknown error'}`)
+            } else {
                 await loadMappings()
                 setShowMappingModal(false)
-                setMappingForm({ lt_plan_id: '', mantys_network_name: '' })
+                setMappingForm({ lt_plan_id: '', mantys_network_names: [], is_default: false })
                 setSelectedTPA(null)
-                alert('Mapping created successfully')
-            } else {
-                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
-                alert(`Failed to create mapping: ${error.error || 'Unknown error'}`)
+                alert(`Successfully created ${mappingForm.mantys_network_names.length} mapping(s)`)
             }
         } catch (error) {
             console.error('Failed to create mapping:', error)
             alert('Failed to create mapping')
+        }
+    }
+
+    const handleSetDefault = async (tpaInsCode: string, mappingId: string) => {
+        try {
+            const response = await fetch(
+                `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}&set_default=true`,
+                { method: 'PUT' }
+            )
+
+            if (response.ok) {
+                await loadMappings()
+                alert('Default mapping set successfully')
+            } else {
+                alert('Failed to set default mapping')
+            }
+        } catch (error) {
+            console.error('Failed to set default mapping:', error)
+            alert('Failed to set default mapping')
+        }
+    }
+
+    const handleExportMappings = async (tpaInsCode: string, format: 'json' | 'csv') => {
+        try {
+            const response = await fetch(
+                `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=${format}`
+            )
+
+            if (response.ok) {
+                if (format === 'json') {
+                    const data = await response.json()
+                    const blob = new Blob([JSON.stringify(data.mappings, null, 2)], { type: 'application/json' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `plan-mappings-${tpaInsCode}-${Date.now()}.json`
+                    a.click()
+                    URL.revokeObjectURL(url)
+                } else {
+                    const blob = await response.blob()
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `plan-mappings-${tpaInsCode}-${Date.now()}.csv`
+                    a.click()
+                    URL.revokeObjectURL(url)
+                }
+            } else {
+                alert('Failed to export mappings')
+            }
+        } catch (error) {
+            console.error('Failed to export mappings:', error)
+            alert('Failed to export mappings')
+        }
+    }
+
+    const handleImportMappings = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!selectedTPA || !importJson.trim()) return
+
+        try {
+            let mappings: PlanNetworkMapping[] = []
+            
+            // Try to parse as JSON
+            try {
+                const parsed = JSON.parse(importJson)
+                mappings = Array.isArray(parsed) ? parsed : parsed.mappings || []
+            } catch {
+                // Try to parse as CSV
+                const lines = importJson.trim().split('\n')
+                const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
+                mappings = lines.slice(1).map(line => {
+                    const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+                    const mapping: any = {}
+                    headers.forEach((header, index) => {
+                        mapping[header] = values[index]
+                    })
+                    return {
+                        tpa_ins_code: selectedTPA,
+                        lt_plan_id: Number(mapping.lt_plan_id),
+                        lt_plan_name: mapping.lt_plan_name,
+                        lt_plan_code: mapping.lt_plan_code,
+                        mantys_network_name: mapping.mantys_network_name,
+                        is_default: mapping.is_default === 'true' || mapping.is_default === true
+                    } as PlanNetworkMapping
+                }).filter(m => m.lt_plan_id && m.mantys_network_name)
+            }
+
+            if (mappings.length === 0) {
+                alert('No valid mappings found in the import data')
+                return
+            }
+
+            const response = await fetch(`/api/clinic-config/plan-mappings?clinic_id=${clinicId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    bulk_import: true,
+                    mappings
+                })
+            })
+
+            if (response.ok) {
+                const data = await response.json()
+                await loadMappings()
+                setShowImportModal(false)
+                setImportJson('')
+                setSelectedTPA(null)
+                alert(`Successfully imported ${data.imported} mapping(s). ${data.errors > 0 ? `${data.errors} error(s).` : ''}`)
+            } else {
+                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
+                alert(`Failed to import mappings: ${error.error || 'Unknown error'}`)
+            }
+        } catch (error) {
+            console.error('Failed to import mappings:', error)
+            alert('Failed to import mappings. Please check the format.')
         }
     }
 
@@ -1196,7 +1328,7 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                 disabled={isFetching}
                                             >
                                                 {isFetching ? 'Fetching...' : 'Fetch LT Plans'}
-                                            </Button>
+                </Button>
                                             <Button
                                                 variant="outline"
                                                 size="sm"
@@ -1206,26 +1338,56 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                 {isImporting ? 'Importing...' : 'Import Mantys Networks'}
                                             </Button>
                                             {plans.length > 0 && networks.length > 0 && (
-                                                <Button
-                                                    variant="default"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        setSelectedTPA(tpaInsCode)
-                                                        setShowMappingModal(true)
-                                                    }}
-                                                >
-                                                    Create Mapping
-                                                </Button>
+                                                <>
+                                                    <Button
+                                                        variant="default"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setSelectedTPA(tpaInsCode)
+                                                            setShowMappingModal(true)
+                                                        }}
+                                                    >
+                                                        Create Mapping
+                                                    </Button>
+                                                    {mappings.length > 0 && (
+                                                        <>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => handleExportMappings(tpaInsCode, 'json')}
+                                                            >
+                                                                Export JSON
+                                                            </Button>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => handleExportMappings(tpaInsCode, 'csv')}
+                                                            >
+                                                                Export CSV
+                                                            </Button>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => {
+                                                                    setSelectedTPA(tpaInsCode)
+                                                                    setShowImportModal(true)
+                                                                }}
+                                                            >
+                                                                Import
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                </>
                                             )}
                                         </div>
                                     </div>
-                                </div>
+            </div>
 
                                 <div className="p-6 space-y-6">
                                     {/* LT Plans Section */}
                                     <div>
                                         <h4 className="text-md font-semibold text-gray-900 mb-3">LT Plans ({plans.length})</h4>
-                                        {plans.length === 0 ? (
+            {plans.length === 0 ? (
                                             <div className="text-sm text-gray-500 italic">No plans fetched yet. Click "Fetch LT Plans" to load plans from Lifetrenz API.</div>
                                         ) : (
                                             <div className="overflow-x-auto border border-gray-200 rounded">
@@ -1237,11 +1399,11 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                             <th className="text-left py-2 px-3 font-semibold text-gray-700">Plan Code</th>
                                                             <th className="text-left py-2 px-3 font-semibold text-gray-700">Type</th>
                                                             <th className="text-left py-2 px-3 font-semibold text-gray-700">Class</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {plans.map((plan) => (
-                                                            <tr key={plan.plan_id} className="border-b border-gray-100 hover:bg-gray-50">
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {plans.map((plan) => (
+                                <tr key={plan.plan_id} className="border-b border-gray-100 hover:bg-gray-50">
                                                                 <td className="py-2 px-3 font-mono">{plan.plan_id}</td>
                                                                 <td className="py-2 px-3">{plan.insurance_plan_name}</td>
                                                                 <td className="py-2 px-3 font-mono">{plan.plan_code}</td>
@@ -1286,6 +1448,7 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                         <tr>
                                                             <th className="text-left py-2 px-3 font-semibold text-gray-700">LT Plan</th>
                                                             <th className="text-left py-2 px-3 font-semibold text-gray-700">Mantys Network</th>
+                                                            <th className="text-center py-2 px-3 font-semibold text-gray-700">Default</th>
                                                             <th className="text-right py-2 px-3 font-semibold text-gray-700">Actions</th>
                                                         </tr>
                                                     </thead>
@@ -1301,19 +1464,34 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                                         {mapping.mantys_network_name}
                                                                     </span>
                                                                 </td>
+                                                                <td className="py-2 px-3 text-center">
+                                                                    {mapping.is_default ? (
+                                                                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
+                                                                            Default
+                                                                        </span>
+                                                                    ) : (
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            onClick={() => handleSetDefault(tpaInsCode, mapping.id)}
+                                                                        >
+                                                                            Set Default
+                                            </Button>
+                                                                    )}
+                                                                </td>
                                                                 <td className="py-2 px-3 text-right">
                                                                     <Button
                                                                         variant="destructive"
                                                                         size="sm"
                                                                         onClick={() => handleDeleteMapping(tpaInsCode, mapping.id)}
                                                                     >
-                                                                        Delete
-                                                                    </Button>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
+                                                Delete
+                                            </Button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                                             </div>
                                         )}
                                     </div>
@@ -1327,10 +1505,11 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
             {/* Create Mapping Modal */}
             {showMappingModal && selectedTPA && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full">
+                    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                         <div className="px-6 py-4 border-b border-gray-200">
-                            <h2 className="text-xl font-semibold">Create Plan-Network Mapping</h2>
+                            <h2 className="text-xl font-semibold">Create Plan-Network Mapping (Many-to-Many)</h2>
                             <p className="text-sm text-gray-600 mt-1">TPA: {getTPAName(selectedTPA)} ({selectedTPA})</p>
+                            <p className="text-xs text-gray-500 mt-1">You can map one LT plan to multiple Mantys networks</p>
                         </div>
                         <form onSubmit={handleCreateMapping} className="p-6 space-y-4">
                             <div>
@@ -1338,7 +1517,7 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                 <select
                                     id="lt_plan_id"
                                     value={mappingForm.lt_plan_id}
-                                    onChange={(e) => setMappingForm({ ...mappingForm, lt_plan_id: e.target.value })}
+                                    onChange={(e) => setMappingForm({ ...mappingForm, lt_plan_id: e.target.value, mantys_network_names: [] })}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     required
                                 >
@@ -1352,21 +1531,49 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                             </div>
 
                             <div>
-                                <Label htmlFor="mantys_network_name">Mantys Network</Label>
-                                <select
-                                    id="mantys_network_name"
-                                    value={mappingForm.mantys_network_name}
-                                    onChange={(e) => setMappingForm({ ...mappingForm, mantys_network_name: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    required
-                                >
-                                    <option value="">Select a network...</option>
+                                <Label htmlFor="mantys_network_names">Mantys Networks (Select Multiple)</Label>
+                                <div className="mt-2 space-y-2 max-h-60 overflow-y-auto border border-gray-200 rounded-md p-3">
                                     {(networksByTPA[selectedTPA] || []).map((network, index) => (
-                                        <option key={`${network.name}-${index}`} value={network.name}>
-                                            {network.name}
-                                        </option>
+                                        <label key={`${network.name}-${index}`} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                                            <input
+                                                type="checkbox"
+                                                checked={mappingForm.mantys_network_names.includes(network.name)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setMappingForm({
+                                                            ...mappingForm,
+                                                            mantys_network_names: [...mappingForm.mantys_network_names, network.name]
+                                                        })
+                                                    } else {
+                                                        setMappingForm({
+                                                            ...mappingForm,
+                                                            mantys_network_names: mappingForm.mantys_network_names.filter(n => n !== network.name)
+                                                        })
+                                                    }
+                                                }}
+                                                className="w-4 h-4"
+                                            />
+                                            <span className="text-sm">{network.name}</span>
+                                        </label>
                                     ))}
-                                </select>
+                                </div>
+                                {mappingForm.mantys_network_names.length > 0 && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Selected: {mappingForm.mantys_network_names.join(', ')}
+                                    </p>
+                                )}
+                            </div>
+
+                            <div>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={mappingForm.is_default}
+                                        onChange={(e) => setMappingForm({ ...mappingForm, is_default: e.target.checked })}
+                                        className="w-4 h-4"
+                                    />
+                                    <span className="text-sm">Set first selected network as default for this plan</span>
+                                </label>
                             </div>
 
                             <div className="flex justify-end gap-3 pt-4">
@@ -1375,14 +1582,58 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                     variant="outline"
                                     onClick={() => {
                                         setShowMappingModal(false)
-                                        setMappingForm({ lt_plan_id: '', mantys_network_name: '' })
+                                        setMappingForm({ lt_plan_id: '', mantys_network_names: [], is_default: false })
                                         setSelectedTPA(null)
                                     }}
                                 >
                                     Cancel
                                 </Button>
-                                <Button type="submit">
-                                    Create Mapping
+                                <Button type="submit" disabled={mappingForm.mantys_network_names.length === 0}>
+                                    Create {mappingForm.mantys_network_names.length > 0 ? `${mappingForm.mantys_network_names.length} ` : ''}Mapping(s)
+                                </Button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Import Mappings Modal */}
+            {showImportModal && selectedTPA && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="px-6 py-4 border-b border-gray-200">
+                            <h2 className="text-xl font-semibold">Import Plan-Network Mappings</h2>
+                            <p className="text-sm text-gray-600 mt-1">TPA: {getTPAName(selectedTPA)} ({selectedTPA})</p>
+                            <p className="text-xs text-gray-500 mt-1">Paste JSON or CSV data. JSON format: [{'{'}"tpa_ins_code": "...", "lt_plan_id": 123, "lt_plan_name": "...", "lt_plan_code": "...", "mantys_network_name": "...", "is_default": false{'}'}]</p>
+                        </div>
+                        <form onSubmit={handleImportMappings} className="p-6 space-y-4">
+                            <div>
+                                <Label htmlFor="import_json">Import Data (JSON or CSV)</Label>
+                                <textarea
+                                    id="import_json"
+                                    value={importJson}
+                                    onChange={(e) => setImportJson(e.target.value)}
+                                    placeholder='Paste JSON array or CSV data here...'
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                                    rows={12}
+                                    required
+                                />
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-4">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setShowImportModal(false)
+                                        setImportJson('')
+                                        setSelectedTPA(null)
+                                    }}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button type="submit" disabled={!importJson.trim()}>
+                                    Import Mappings
                                 </Button>
                             </div>
                         </form>
