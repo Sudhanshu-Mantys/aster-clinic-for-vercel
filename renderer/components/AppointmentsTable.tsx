@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { AppointmentData } from "../lib/api";
 
 interface AppointmentsTableProps {
@@ -7,11 +7,89 @@ interface AppointmentsTableProps {
     onAppointmentClick: (appointment: AppointmentData) => void;
 }
 
+interface EligibilityStatus {
+    [mpi: string]: 'success' | 'error' | 'processing' | null; // success = green, error = red, processing = yellow, null = no check
+}
+
 export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
     appointments,
     isLoading,
     onAppointmentClick,
 }) => {
+    const [eligibilityStatus, setEligibilityStatus] = useState<EligibilityStatus>({});
+
+    // Check eligibility status for all appointments
+    useEffect(() => {
+        const checkEligibilityStatus = async () => {
+            if (appointments.length === 0) return;
+
+            const statusMap: EligibilityStatus = {};
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            try {
+                // Fetch eligibility history
+                const response = await fetch('/api/eligibility-history');
+                if (!response.ok) return;
+
+                const historyItems = await response.json();
+
+                // Filter for today's eligibility checks (complete, error, pending, processing)
+                const todayEligibilityChecks = historyItems.filter((item: any) => {
+                    // Must be complete, error, pending, or processing status
+                    if (!['complete', 'error', 'pending', 'processing'].includes(item.status)) return false;
+
+                    // Check if created today
+                    const createdAt = new Date(item.createdAt);
+                    createdAt.setHours(0, 0, 0, 0);
+                    if (createdAt.getTime() !== today.getTime()) return false;
+
+                    return true;
+                });
+
+                // Map MPI to eligibility status
+                todayEligibilityChecks.forEach((item: any) => {
+                    if (item.patientMPI) {
+                        if (item.status === 'error') {
+                            // Error status = red dot
+                            statusMap[item.patientMPI] = 'error';
+                        } else if (item.status === 'pending' || item.status === 'processing') {
+                            // Processing status = yellow dot
+                            statusMap[item.patientMPI] = 'processing';
+                        } else if (item.status === 'complete') {
+                            if (item.result && item.result.data) {
+                                // Check if eligible - result.data.is_eligible should be true
+                                const resultData = item.result.data;
+                                if (resultData.is_eligible === true) {
+                                    // Success = green dot
+                                    statusMap[item.patientMPI] = 'success';
+                                } else {
+                                    // Complete but not eligible = red dot
+                                    statusMap[item.patientMPI] = 'error';
+                                }
+                            } else {
+                                // Complete but no data = error (red dot)
+                                statusMap[item.patientMPI] = 'error';
+                            }
+                        }
+                    }
+                });
+
+                setEligibilityStatus(statusMap);
+            } catch (error) {
+                console.error('Error checking eligibility status:', error);
+            }
+        };
+
+        checkEligibilityStatus();
+
+        // Refresh eligibility status every 5 seconds to catch status updates (especially for processing -> complete/error)
+        const interval = setInterval(() => {
+            checkEligibilityStatus();
+        }, 5000);
+
+        return () => clearInterval(interval);
+    }, [appointments]);
     if (isLoading) {
         return (
             <div className="flex items-center justify-center py-12">
@@ -86,6 +164,9 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                             Appt Date/Time
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Payer
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                             Physician
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
@@ -95,7 +176,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                             Visit Type
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                            Payer
+                            Eligibility
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                             Mobile
@@ -139,6 +220,74 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                                 </div>
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900">
+                                <div className="max-w-xs flex items-start gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-medium truncate">
+                                            {appointment.payer_name || appointment.receiver_name || appointment.payer_type || "N/A"}
+                                        </p>
+                                        {appointment.network_name && (
+                                            <p className="text-xs text-gray-500 truncate">
+                                                {appointment.network_name}
+                                            </p>
+                                        )}
+                                        {appointment.payer_type && appointment.payer_name && (
+                                            <p className="text-xs text-gray-500 truncate">
+                                                Type: {appointment.payer_type}
+                                            </p>
+                                        )}
+                                    </div>
+                                    {/* Eligibility status indicator */}
+                                    {eligibilityStatus[appointment.mpi] && (
+                                        <div className="flex-shrink-0 mt-1">
+                                            {eligibilityStatus[appointment.mpi] === 'success' ? (
+                                                <span
+                                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600"
+                                                    title="Eligibility check successful"
+                                                >
+                                                    <svg
+                                                        className="w-3 h-3"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        viewBox="0 0 24 24"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={3}
+                                                            d="M5 13l4 4L19 7"
+                                                        />
+                                                    </svg>
+                                                </span>
+                                            ) : eligibilityStatus[appointment.mpi] === 'processing' ? (
+                                                <span
+                                                    className="inline-block w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
+                                                    title="Eligibility check in progress"
+                                                />
+                                            ) : (
+                                                <span
+                                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600"
+                                                    title="Eligibility check failed or error"
+                                                >
+                                                    <svg
+                                                        className="w-3 h-3"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        viewBox="0 0 24 24"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={3}
+                                                            d="M6 18L18 6M6 6l12 12"
+                                                        />
+                                                    </svg>
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900">
                                 <div className="max-w-xs">
                                     <p className="font-medium truncate">
                                         {appointment.provider || appointment.physician_name || "N/A"}
@@ -167,22 +316,55 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                                 {appointment.visit_type || "N/A"}
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-900">
-                                <div className="max-w-xs">
-                                    <p className="font-medium truncate">
-                                        {appointment.payer_name || appointment.receiver_name || appointment.payer_type || "N/A"}
-                                    </p>
-                                    {appointment.network_name && (
-                                        <p className="text-xs text-gray-500 truncate">
-                                            {appointment.network_name}
-                                        </p>
-                                    )}
-                                    {appointment.payer_type && appointment.payer_name && (
-                                        <p className="text-xs text-gray-500 truncate">
-                                            Type: {appointment.payer_type}
-                                        </p>
-                                    )}
-                                </div>
+                            <td className="px-4 py-3 whitespace-nowrap text-center">
+                                {eligibilityStatus[appointment.mpi] ? (
+                                    eligibilityStatus[appointment.mpi] === 'success' ? (
+                                        <span
+                                            className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-600"
+                                            title="Eligibility check successful"
+                                        >
+                                            <svg
+                                                className="w-4 h-4"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={3}
+                                                    d="M5 13l4 4L19 7"
+                                                />
+                                            </svg>
+                                        </span>
+                                    ) : eligibilityStatus[appointment.mpi] === 'processing' ? (
+                                        <span
+                                            className="inline-block w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
+                                            title="Eligibility check in progress"
+                                        />
+                                    ) : (
+                                        <span
+                                            className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-100 text-red-600"
+                                            title="Eligibility check failed or error"
+                                        >
+                                            <svg
+                                                className="w-4 h-4"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={3}
+                                                    d="M6 18L18 6M6 6l12 12"
+                                                />
+                                            </svg>
+                                        </span>
+                                    )
+                                ) : (
+                                    <span className="text-gray-300">—</span>
+                                )}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                                 {appointment.mobile_phone || "N/A"}

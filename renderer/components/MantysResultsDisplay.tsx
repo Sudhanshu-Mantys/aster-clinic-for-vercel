@@ -49,6 +49,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [policySaved, setPolicySaved] = useState(false);
   const [tpaConfig, setTpaConfig] = useState<any>(null);
+  const [plansConfig, setPlansConfig] = useState<any[]>([]);
 
   // Get user and clinic context
   const { user } = useAuth();
@@ -57,7 +58,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const { data } = response;
 
-  // Load TPA config when component mounts or TPA changes
+  // Load TPA config and plans when component mounts or TPA changes
   useEffect(() => {
     const loadTPAConfig = async () => {
       if (!selectedClinicId || !response.tpa) return;
@@ -87,11 +88,34 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               console.log("✅ Found TPA config for save policy:", {
                 ins_code: config.ins_code,
                 tpa_name: config.tpa_name,
+                hospital_insurance_mapping_id: config.hospital_insurance_mapping_id,
                 lt_site_id: config.lt_site_id,
                 lt_customer_id: config.lt_customer_id,
                 lt_other_config: config.lt_other_config
               });
               setTpaConfig(config);
+
+              // Load plans for this TPA to map plan name to plan code
+              const tpaInsCode = config.ins_code || response.tpa;
+              try {
+                const plansResponse = await fetch(`/api/clinic-config/plans?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
+                if (plansResponse.ok) {
+                  const plansData = await plansResponse.json();
+                  // Handle both response formats: { plans, tpa_ins_code } or { plans_by_tpa: {...} }
+                  let plans: any[] = [];
+                  if (plansData.plans && Array.isArray(plansData.plans)) {
+                    plans = plansData.plans;
+                  } else if (plansData.plans_by_tpa && plansData.plans_by_tpa[tpaInsCode]) {
+                    plans = plansData.plans_by_tpa[tpaInsCode];
+                  }
+                  if (plans.length > 0) {
+                    setPlansConfig(plans);
+                    console.log("✅ Loaded plans config:", plans.length, "plans for TPA:", tpaInsCode);
+                  }
+                }
+              } catch (plansError) {
+                console.error("❌ Failed to load plans config:", plansError);
+              }
             } else {
               console.log("⚠️ No TPA config found for:", response.tpa);
             }
@@ -171,6 +195,29 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       const createdBy = !isNaN(parsedUserId) ? parsedUserId : 13295;
       const ltOtherConfig = tpaConfig?.lt_other_config || {};
 
+      // Get insurance mapping ID from config (preferred) or Mantys response
+      const insuranceMappingId = tpaConfig?.hospital_insurance_mapping_id
+        ? tpaConfig.hospital_insurance_mapping_id
+        : (data.patient_info?.insurance_mapping_id ? parseInt(data.patient_info.insurance_mapping_id, 10) : null);
+
+      // Map plan name from Mantys to plan code from config
+      const planNameFromMantys = data.patient_info?.plan_name;
+      let planCodeFromConfig: string | null = null;
+      if (planNameFromMantys && plansConfig.length > 0) {
+        // Try to find matching plan by name (case-insensitive, partial match)
+        const matchingPlan = plansConfig.find((plan: any) => {
+          const planName = plan.insurance_plan_name?.toLowerCase() || "";
+          const mantysPlanName = planNameFromMantys.toLowerCase();
+          return planName === mantysPlanName || planName.includes(mantysPlanName) || mantysPlanName.includes(planName);
+        });
+        if (matchingPlan?.plan_code) {
+          planCodeFromConfig = matchingPlan.plan_code;
+          console.log("✅ Mapped plan name to plan code:", planNameFromMantys, "->", planCodeFromConfig);
+        } else {
+          console.log("⚠️ No plan code found for plan name:", planNameFromMantys);
+        }
+      }
+
       // Extract policy data from Mantys response, using config values
       const policyData = {
         policyId: data.patient_info?.policy_id || null,
@@ -185,11 +232,12 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         parentInsPolicyId: null,
         tpaCompanyId: data.patient_info?.tpa_id || null,
         planName: data.patient_info?.plan_name || null,
+        planCode: planCodeFromConfig, // From config mapping
         eligibilityReqId: null,
         tpaPolicyId: data.patient_info?.patient_id_info?.member_id || null,
         insRules: null,
         orgId: null,
-        insuranceMappingId: data.patient_info?.insurance_mapping_id || null,
+        insuranceMappingId: insuranceMappingId, // From config (preferred) or Mantys response
         tpaGroupPolicyId: null,
         apntId: appointmentId,
         insuranceValidTill: data.policy_end_date || null,

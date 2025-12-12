@@ -76,8 +76,8 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
           setEnrichedPatientId(undefined);
         }
 
-        // If item is complete, fetch fresh result from API instead of using cached
-        if (item && item.status === 'complete' && item.taskId) {
+        // If item is complete or error, fetch fresh result from API instead of using cached
+        if (item && (item.status === 'complete' || item.status === 'error') && item.taskId) {
           setLoadingFreshResult(true);
           try {
             const response = await fetch('/api/mantys/check-status', {
@@ -90,6 +90,18 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
               const apiResponse = await response.json();
               console.log('API Response:', apiResponse);
 
+              // Update history status if it changed (e.g., was 'complete' but is actually 'error')
+              if (apiResponse.status !== item.status) {
+                console.log(`Status changed from ${item.status} to ${apiResponse.status}, updating history`);
+                await EligibilityHistoryService.update(item.id, {
+                  status: apiResponse.status as any,
+                  error: apiResponse.status === 'error' ? (apiResponse.message || apiResponse.result?.message) : undefined,
+                });
+                // Reload the item to get updated status
+                const updatedItem = await EligibilityHistoryService.getById(item.id);
+                setSelectedItem(updatedItem);
+              }
+
               if (apiResponse.status === 'complete' && apiResponse.result) {
                 // Validate that result has data property
                 if (apiResponse.result.data) {
@@ -99,8 +111,12 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                   console.warn('API result missing data property, using cached result');
                   setFreshResult(null);
                 }
+              } else if (apiResponse.status === 'error' && apiResponse.result) {
+                // Store error result for display
+                console.log('Setting error result:', apiResponse.result);
+                setFreshResult(apiResponse.result);
               } else {
-                console.warn('API response not complete or missing result');
+                console.warn('API response not complete/error or missing result');
                 setFreshResult(null);
               }
             } else {
@@ -180,8 +196,8 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
   const handleViewDetails = (item: EligibilityHistoryItem) => {
     setSelectedItemId(item.id);
 
-    // Use drawer for completed checks, modal for active checks
-    if (item.status === "complete" && item.result) {
+    // Use drawer for completed checks (with or without errors), modal for active checks
+    if ((item.status === "complete" || item.status === "error") && item.result) {
       setShowDrawer(true);
     } else {
       setShowModal(true);
@@ -564,8 +580,8 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
         )}
       </div>
 
-      {/* Drawer for completed check results */}
-      {showDrawer && selectedItem?.status === "complete" && (
+      {/* Drawer for completed check results (including errors) */}
+      {showDrawer && (selectedItem?.status === "complete" || selectedItem?.status === "error") && (
         <Drawer
           isOpen={showDrawer}
           onClose={handleCloseDrawer}

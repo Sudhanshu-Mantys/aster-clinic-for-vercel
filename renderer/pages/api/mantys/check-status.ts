@@ -102,27 +102,52 @@ export default async function handler(
       resultData.status === "PROCESS_COMPLETE" &&
       resultData.eligibility_result
     ) {
-      // Task is complete - update Redis status
+      // Task is complete - check if result contains an error
+      const dataDump = resultData.eligibility_result.data_dump;
+
+      // Determine if this is an error result
+      const isError =
+        !dataDump.data || // Missing data indicates error
+        dataDump.error_type || // Has error_type
+        (dataDump.message && (
+          dataDump.message.toLowerCase().includes('invalid') ||
+          dataDump.message.toLowerCase().includes('error') ||
+          dataDump.message.toLowerCase().includes('failed') ||
+          dataDump.message.toLowerCase().includes('credentials')
+        )); // Error message keywords
+
+      const finalStatus = isError ? "error" : "complete";
+      // Extract error message - prioritize message, then error_type, then construct from available info
+      let errorMessage: string;
+      if (isError) {
+        if (dataDump.message) {
+          errorMessage = dataDump.message;
+        } else if (dataDump.error_type) {
+          errorMessage = dataDump.error_type;
+        } else {
+          errorMessage = "Eligibility check failed";
+        }
+      } else {
+        errorMessage = dataDump.status === "member_not_found"
+          ? "Member not found"
+          : "Eligibility check complete";
+      }
+
+      // Update Redis status with correct status
       try {
         await eligibilityRedisService.updateEligibilityStatus(
           task_id,
-          "complete",
+          finalStatus,
           new Date().toISOString(),
         );
       } catch (redisError) {
         console.error("Failed to update Redis status (non-fatal):", redisError);
       }
 
-      // Task is complete - return final results
-      const dataDump = resultData.eligibility_result.data_dump;
-
       return res.status(200).json({
-        status: "complete",
+        status: finalStatus,
         taskStatus: resultData.status,
-        message:
-          dataDump.status === "member_not_found"
-            ? "Member not found"
-            : "Eligibility check complete",
+        message: errorMessage,
         result: {
           tpa: dataDump.tpa,
           data: dataDump.data,
