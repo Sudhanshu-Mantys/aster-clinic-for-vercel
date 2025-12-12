@@ -1012,16 +1012,16 @@ export async function setDefaultMapping(clinicId: string, tpaInsCode: string, ma
         const redis = await getRedisClient()
         const mappingKey = `clinic:plan_mapping:${clinicId}:${tpaInsCode}:${mappingId}`
         const mappingData = await redis.get(mappingKey)
-        
+
         if (!mappingData) {
             throw new Error('Mapping not found')
         }
 
         const mapping: PlanNetworkMapping = JSON.parse(mappingData)
-        
+
         // Get all mappings for this TPA
         const allMappings = await getPlanMappingsByTPA(clinicId, tpaInsCode)
-        
+
         // Unset defaults for the same plan
         const pipeline = redis.pipeline()
         for (const m of allMappings) {
@@ -1031,11 +1031,11 @@ export async function setDefaultMapping(clinicId: string, tpaInsCode: string, ma
                 pipeline.set(key, JSON.stringify(updated))
             }
         }
-        
+
         // Set this mapping as default
         const updated = { ...mapping, is_default: true, updated_at: new Date().toISOString() }
         pipeline.set(mappingKey, JSON.stringify(updated))
-        
+
         await pipeline.exec()
     } catch (error) {
         console.error('Error setting default mapping:', error)

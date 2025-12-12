@@ -1109,8 +1109,8 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                 const isDefault = mappingForm.is_default && index === 0
                 return fetch(`/api/clinic-config/plan-mappings?clinic_id=${clinicId}`, {
                     method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
                         tpa_ins_code: selectedTPA,
                         lt_plan_id: plan.plan_id,
                         lt_plan_name: plan.insurance_plan_name,
@@ -1199,7 +1199,7 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
 
         try {
             let mappings: PlanNetworkMapping[] = []
-            
+
             // Try to parse as JSON
             try {
                 const parsed = JSON.parse(importJson)
@@ -1328,7 +1328,7 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                 disabled={isFetching}
                                             >
                                                 {isFetching ? 'Fetching...' : 'Fetch LT Plans'}
-                </Button>
+                                            </Button>
                                             <Button
                                                 variant="outline"
                                                 size="sm"
@@ -1381,13 +1381,13 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                             )}
                                         </div>
                                     </div>
-            </div>
+                                </div>
 
                                 <div className="p-6 space-y-6">
                                     {/* LT Plans Section */}
                                     <div>
                                         <h4 className="text-md font-semibold text-gray-900 mb-3">LT Plans ({plans.length})</h4>
-            {plans.length === 0 ? (
+                                        {plans.length === 0 ? (
                                             <div className="text-sm text-gray-500 italic">No plans fetched yet. Click "Fetch LT Plans" to load plans from Lifetrenz API.</div>
                                         ) : (
                                             <div className="overflow-x-auto border border-gray-200 rounded">
@@ -1399,11 +1399,11 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                             <th className="text-left py-2 px-3 font-semibold text-gray-700">Plan Code</th>
                                                             <th className="text-left py-2 px-3 font-semibold text-gray-700">Type</th>
                                                             <th className="text-left py-2 px-3 font-semibold text-gray-700">Class</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {plans.map((plan) => (
-                                <tr key={plan.plan_id} className="border-b border-gray-100 hover:bg-gray-50">
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {plans.map((plan) => (
+                                                            <tr key={plan.plan_id} className="border-b border-gray-100 hover:bg-gray-50">
                                                                 <td className="py-2 px-3 font-mono">{plan.plan_id}</td>
                                                                 <td className="py-2 px-3">{plan.insurance_plan_name}</td>
                                                                 <td className="py-2 px-3 font-mono">{plan.plan_code}</td>
@@ -1476,7 +1476,7 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                                             onClick={() => handleSetDefault(tpaInsCode, mapping.id)}
                                                                         >
                                                                             Set Default
-                                            </Button>
+                                                                        </Button>
                                                                     )}
                                                                 </td>
                                                                 <td className="py-2 px-3 text-right">
@@ -1485,13 +1485,13 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                                                                         size="sm"
                                                                         onClick={() => handleDeleteMapping(tpaInsCode, mapping.id)}
                                                                     >
-                                                Delete
-                                            </Button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                                                                        Delete
+                                                                    </Button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
                                             </div>
                                         )}
                                     </div>

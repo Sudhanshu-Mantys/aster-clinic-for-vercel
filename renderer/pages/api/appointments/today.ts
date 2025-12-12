@@ -21,34 +21,34 @@ interface RequestHead {
 
 interface AppointmentSearchRequestBody {
   type: null;
-  payerId: null;
-  visitTypeId: null;
+  payerId: number | null;
+  visitTypeId: number | null;
   pageNo: number;
-  patientName: null;
+  patientName: string | null;
   recPerPage: number;
   groupByApntStatus: number;
-  mpii1: null;
+  mpii1: string | null;
   referralUploadFilter: number;
-  mobPhn: null;
+  mobPhn: string | null;
   isFilterDate: number;
   appStatusId: string;
   filterByReferral: number;
-  mcnNo: null;
-  visitPurposeId: null;
-  specialisationId: null;
-  orderType: null;
+  mcnNo: string | null;
+  visitPurposeId: number | null;
+  specialisationId: number | null;
+  orderType: string | null;
   timeOrderBy: number;
-  mpii2: null;
-  physicianId: null;
-  displayEncounterNumber: null;
-  payerTypeId: null;
-  insuranceType: null;
-  isEmergencyAppointment: null;
+  mpii2: string | null;
+  physicianId: number | null;
+  displayEncounterNumber: string | null;
+  payerTypeId: number | null;
+  insuranceType: string | null;
+  isEmergencyAppointment: boolean | null;
   encounterType: number;
   customerSiteId: number;
   fromDate: string;
   toDate: string;
-  roomId: null;
+  roomId: number | null;
 }
 
 interface AppointmentSearchRequest {
