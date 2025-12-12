@@ -80,17 +80,53 @@ export default async function handler(
   console.log("=== Today's Appointments API Called ===");
   console.log("Method:", req.method);
 
-  // Only allow GET requests
-  if (req.method !== "GET") {
+  // Support both GET and POST requests
+  if (req.method !== "GET" && req.method !== "POST") {
     console.error("❌ Invalid method:", req.method);
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Get today's date
+  // Get filters from query params (GET) or body (POST)
+  const filters = req.method === "GET" ? req.query : req.body;
+
+  // Get today's date as default
   const today = new Date();
   const todayFormatted = formatDate(today);
 
-  console.log("📅 Today's date:", todayFormatted);
+  // Extract filter parameters with defaults
+  const {
+    fromDate = todayFormatted,
+    toDate = todayFormatted,
+    isFilterDate = 1,
+    patientName = null,
+    mpi = null,
+    phoneNumber = null,
+    displayEncounterNumber = null,
+    appStatusId = "16,3,21,22,6,23,24,17,25,18,7,8,15,11,26,27",
+    physicianId = null,
+    visitTypeId = null,
+    specialisationId = null,
+    roomId = null,
+    payerId = null,
+    payerTypeId = null,
+    insuranceType = null,
+    customerSiteId = 31,
+    encounterType = 1,
+    visitPurposeId = null,
+    pageNo = 0,
+    recPerPage = 200,
+  } = filters;
+
+  console.log("📅 Date range:", fromDate, "to", toDate);
+  console.log("🔍 Filters:", {
+    patientName,
+    mpi,
+    phoneNumber,
+    displayEncounterNumber,
+    appStatusId,
+    physicianId,
+    payerTypeId,
+  });
 
   // Build the request body for the Aster Clinics API
   const requestBody: AppointmentSearchRequest = {
@@ -101,34 +137,34 @@ export default async function handler(
     },
     body: {
       type: null,
-      payerId: null,
-      visitTypeId: null,
-      pageNo: 0,
-      patientName: null,
-      recPerPage: 200, // Fetch more appointments for today
+      payerId: payerId ? Number(payerId) : null,
+      visitTypeId: visitTypeId ? Number(visitTypeId) : null,
+      pageNo: Number(pageNo),
+      patientName: patientName || null,
+      recPerPage: Number(recPerPage),
       groupByApntStatus: 0,
-      mpii1: null,
+      mpii1: mpi || null,
       referralUploadFilter: 0,
-      mobPhn: null,
-      isFilterDate: 1,
-      appStatusId: "16,3,21,22,6,23,24,17,25,18,7,8,15,11,26,27",
+      mobPhn: phoneNumber || null,
+      isFilterDate: Number(isFilterDate),
+      appStatusId: appStatusId,
       filterByReferral: 0,
       mcnNo: null,
-      visitPurposeId: null,
-      specialisationId: null,
+      visitPurposeId: visitPurposeId ? Number(visitPurposeId) : null,
+      specialisationId: specialisationId ? Number(specialisationId) : null,
       orderType: null,
       timeOrderBy: 2,
       mpii2: null,
-      physicianId: null,
-      displayEncounterNumber: null,
-      payerTypeId: null,
-      insuranceType: null,
+      physicianId: physicianId ? Number(physicianId) : null,
+      displayEncounterNumber: displayEncounterNumber || null,
+      payerTypeId: payerTypeId ? Number(payerTypeId) : null,
+      insuranceType: insuranceType || null,
       isEmergencyAppointment: null,
-      encounterType: 1,
-      customerSiteId: 31,
-      fromDate: todayFormatted,
-      toDate: todayFormatted,
-      roomId: null,
+      encounterType: Number(encounterType),
+      customerSiteId: Number(customerSiteId),
+      fromDate: fromDate,
+      toDate: toDate,
+      roomId: roomId ? Number(roomId) : null,
     },
   };
 

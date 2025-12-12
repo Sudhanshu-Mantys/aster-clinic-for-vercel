@@ -257,10 +257,60 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
       setUploadedFiles(newUploadedFiles);
 
+      // If all files uploaded successfully, save the eligibility order details
       if (newUploadedFiles.length === keyFields.referralDocuments.length) {
-        alert(
-          `All ${newUploadedFiles.length} documents uploaded successfully!`,
-        );
+        console.log("✅ All files uploaded. Now saving eligibility order details...");
+
+        try {
+          // Get insurance mapping ID from patient info
+          const insuranceMappingId = data.patient_info?.insurance_mapping_id;
+
+          if (!insuranceMappingId) {
+            console.warn("⚠️ No insurance mapping ID found. Skipping eligibility order save.");
+            alert(
+              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nNote: Could not save eligibility order details (missing insurance mapping ID).`,
+            );
+            return;
+          }
+
+          // Call the save eligibility order API
+          const orderResponse = await fetch("/api/aster/save-eligibility-order", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              patientId,
+              appointmentId,
+              insuranceMappingId,
+              physicianId: 11260, // Default physician ID
+              authorizationNumber: "",
+              authorizationName: "",
+              createdBy: 13295, // Default user ID
+              vendorId: 24,
+              siteId: 31,
+            }),
+          });
+
+          const orderResult = await orderResponse.json();
+
+          if (orderResponse.ok) {
+            console.log("✅ Eligibility order saved successfully:", orderResult);
+            alert(
+              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nEligibility order details saved to Aster.`,
+            );
+          } else {
+            console.error("❌ Failed to save eligibility order:", orderResult.error);
+            alert(
+              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nWarning: Failed to save eligibility order details: ${orderResult.error || "Unknown error"}`,
+            );
+          }
+        } catch (orderError) {
+          console.error("❌ Error saving eligibility order:", orderError);
+          alert(
+            `All ${newUploadedFiles.length} documents uploaded successfully!\n\nWarning: Error occurred while saving eligibility order details. See console for details.`,
+          );
+        }
       } else {
         alert(
           `Uploaded ${newUploadedFiles.length} out of ${keyFields.referralDocuments.length} documents. Check console for errors.`,

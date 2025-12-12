@@ -19,7 +19,7 @@ interface UploadMetadata {
   recType: null;
   isActive: number;
   patientId: number;
-  encounterId: number;
+  encounterId: number | null; // Can be null for document uploads
   fbType: number;
   siteId: number;
   uploadDate: string; // Format: YYYY-MM-DD
@@ -38,7 +38,7 @@ interface UploadMetadata {
 
 interface UploadRequest {
   patientId: number;
-  encounterId: number;
+  encounterId?: number | null; // Optional, can be null for document uploads
   appointmentId: number;
   insTpaPatId: number;
   fileName: string;
@@ -213,9 +213,7 @@ export default async function handler(
     if (!uploadRequest.patientId) {
       return res.status(400).json({ error: "patientId is required" });
     }
-    if (uploadRequest.encounterId === undefined || uploadRequest.encounterId === null) {
-      return res.status(400).json({ error: "encounterId is required (use 0 if not available)" });
-    }
+    // encounterId is optional - can be null for document uploads
     if (!uploadRequest.appointmentId) {
       return res.status(400).json({ error: "appointmentId is required" });
     }
@@ -269,7 +267,7 @@ export default async function handler(
       recType: null,
       isActive: 1,
       patientId: uploadRequest.patientId,
-      encounterId: uploadRequest.encounterId,
+      encounterId: uploadRequest.encounterId ?? null, // Can be null for document uploads
       fbType: 3, // File type - 3 seems to be for eligibility/insurance docs
       siteId: 31, // Default site ID from your curl example
       uploadDate,

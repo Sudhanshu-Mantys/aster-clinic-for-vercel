@@ -14,6 +14,11 @@ import {
 } from "./ui/card";
 import { Drawer } from "./ui/drawer";
 import { InsuranceDetailsSection } from "./InsuranceDetailsSection";
+import {
+  AppointmentsFilterForm,
+  AppointmentFilters,
+} from "./AppointmentsFilterForm";
+import { AppointmentsTable } from "./AppointmentsTable";
 
 interface TodaysAppointmentsListProps {
   onRefresh?: () => void;
@@ -25,7 +30,6 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const [appointments, setAppointments] = useState<AppointmentData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentData | null>(null);
   const [insuranceDetails, setInsuranceDetails] = useState<InsuranceData[]>([]);
@@ -35,12 +39,26 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     new Set(),
   );
   const [showDrawer, setShowDrawer] = useState(false);
+  const [currentFilters, setCurrentFilters] = useState<AppointmentFilters | null>(null);
 
-  const fetchTodaysAppointments = async () => {
+  const fetchAppointments = async (filters?: AppointmentFilters) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/appointments/today");
+      let url = "/api/appointments/today";
+
+      // If filters are provided, add them as query parameters
+      if (filters) {
+        const params = new URLSearchParams();
+        Object.entries(filters).forEach(([key, value]) => {
+          if (value !== null && value !== undefined && value !== "") {
+            params.append(key, String(value));
+          }
+        });
+        url += `?${params.toString()}`;
+      }
+
+      const response = await fetch(url);
       const data = await response.json();
 
       if (!response.ok) {
@@ -57,11 +75,21 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   };
 
   useEffect(() => {
-    fetchTodaysAppointments();
+    fetchAppointments();
   }, []);
 
+  const handleSearch = (filters: AppointmentFilters) => {
+    setCurrentFilters(filters);
+    fetchAppointments(filters);
+  };
+
+  const handleClear = () => {
+    setCurrentFilters(null);
+    fetchAppointments();
+  };
+
   const handleRefresh = () => {
-    fetchTodaysAppointments();
+    fetchAppointments(currentFilters || undefined);
     onRefresh?.();
   };
 
@@ -160,287 +188,81 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     } as PatientData;
   };
 
-  // Filter appointments based on search term
-  const filteredAppointments = appointments.filter((apt) => {
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      apt.full_name?.toLowerCase().includes(searchLower) ||
-      apt.mpi?.toLowerCase().includes(searchLower) ||
-      apt.mobile_phone?.includes(searchTerm) ||
-      apt.physician_name?.toLowerCase().includes(searchLower) ||
-      apt.appointment_status?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  // Group appointments by status for better organization
-  const groupedAppointments = filteredAppointments.reduce(
-    (acc, apt) => {
-      const status = apt.appointment_status || "Unknown";
-      if (!acc[status]) {
-        acc[status] = [];
-      }
-      acc[status].push(apt);
-      return acc;
-    },
-    {} as Record<string, AppointmentData[]>,
-  );
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading today's appointments...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-        <div className="flex items-start">
-          <svg
-            className="w-5 h-5 text-red-600 mt-0.5 mr-3"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <div className="flex-1">
-            <h4 className="text-sm font-medium text-red-900">
-              Error Loading Appointments
-            </h4>
-            <p className="text-sm text-red-700 mt-1">{error}</p>
-            <button
-              onClick={handleRefresh}
-              className="mt-2 text-sm text-red-600 hover:text-red-700 font-medium underline"
-            >
-              Try Again
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
-      <div className="space-y-4">
-        {/* Header with search and refresh */}
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1">
-            <input
-              type="text"
-              placeholder="Search by name, MPI, phone, physician, or status..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <button
-            onClick={handleRefresh}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-            Refresh
-          </button>
-        </div>
+      <div className="space-y-6">
+        {/* Filter Form */}
+        <AppointmentsFilterForm
+          onSearch={handleSearch}
+          onClear={handleClear}
+          onRefresh={handleRefresh}
+          isLoading={isLoading}
+        />
 
-        {/* Summary stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardDescription>Total Appointments</CardDescription>
-              <CardTitle className="text-3xl">{appointments.length}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardDescription>Showing</CardDescription>
-              <CardTitle className="text-3xl">
-                {filteredAppointments.length}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardDescription>Status Groups</CardDescription>
-              <CardTitle className="text-3xl">
-                {Object.keys(groupedAppointments).length}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardDescription>Last Updated</CardDescription>
-              <CardTitle className="text-lg">
-                {new Date().toLocaleTimeString()}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-        </div>
-
-        {/* Appointments list */}
-        {filteredAppointments.length === 0 ? (
-          <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
-            <svg
-              className="mx-auto h-12 w-12 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
-            </svg>
-            <h3 className="mt-2 text-sm font-medium text-gray-900">
-              No appointments found
-            </h3>
-            <p className="mt-1 text-sm text-gray-500">
-              {searchTerm
-                ? "Try adjusting your search terms."
-                : "No appointments scheduled for today."}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {Object.entries(groupedAppointments).map(([status, appts]) => (
-              <div key={status} className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {status}
-                  </h3>
-                  <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded-full">
-                    {appts.length}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {appts.map((apt) => (
-                    <Card
-                      key={apt.appointment_id}
-                      className="hover:shadow-md transition-shadow cursor-pointer"
-                      onClick={() => handleAppointmentClick(apt)}
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {/* Patient Info */}
-                            <div>
-                              <p className="font-semibold text-gray-900">
-                                {apt.full_name}
-                              </p>
-                              <div className="mt-1 space-y-0.5">
-                                <p className="text-sm text-gray-600">
-                                  <span className="font-medium">MPI:</span>{" "}
-                                  {apt.mpi}
-                                </p>
-                                {apt.mobile_phone && (
-                                  <p className="text-sm text-gray-600">
-                                    <span className="font-medium">Phone:</span>{" "}
-                                    {apt.mobile_phone}
-                                  </p>
-                                )}
-                                {apt.age && (
-                                  <p className="text-sm text-gray-600">
-                                    <span className="font-medium">Age:</span>{" "}
-                                    {apt.age} | {apt.gender}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Appointment Info */}
-                            <div>
-                              <p className="text-sm font-medium text-gray-700">
-                                Appointment Details
-                              </p>
-                              <div className="mt-1 space-y-0.5">
-                                <p className="text-sm text-gray-600">
-                                  <span className="font-medium">Time:</span>{" "}
-                                  {apt.appointment_time}
-                                </p>
-                                <p className="text-sm text-gray-600">
-                                  <span className="font-medium">ID:</span>{" "}
-                                  {apt.appointment_id}
-                                </p>
-                                {apt.specialisation_name && (
-                                  <p className="text-sm text-gray-600">
-                                    <span className="font-medium">
-                                      Specialization:
-                                    </span>{" "}
-                                    {apt.specialisation_name}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Physician Info */}
-                            <div>
-                              <p className="text-sm font-medium text-gray-700">
-                                Physician
-                              </p>
-                              <p className="text-sm text-gray-900 mt-1">
-                                {apt.physician_name}
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Status Badge */}
-                          <div className="ml-4 flex flex-col items-end gap-2">
-                            <span
-                              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                                apt.appointment_status
-                                  ?.toLowerCase()
-                                  .includes("confirmed")
-                                  ? "bg-green-100 text-green-800"
-                                  : apt.appointment_status
-                                        ?.toLowerCase()
-                                        .includes("pending")
-                                    ? "bg-yellow-100 text-yellow-800"
-                                    : apt.appointment_status
-                                          ?.toLowerCase()
-                                          .includes("cancelled")
-                                      ? "bg-red-100 text-red-800"
-                                      : "bg-gray-100 text-gray-800"
-                              }`}
-                            >
-                              {apt.appointment_status}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              Click for details
-                            </span>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+        {/* Error Display */}
+        {error && (
+          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start">
+              <svg
+                className="w-5 h-5 text-red-600 mt-0.5 mr-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <div className="flex-1">
+                <h4 className="text-sm font-medium text-red-900">
+                  Error Loading Appointments
+                </h4>
+                <p className="text-sm text-red-700 mt-1">{error}</p>
+                <button
+                  onClick={handleRefresh}
+                  className="mt-2 text-sm text-red-600 hover:text-red-700 font-medium underline"
+                >
+                  Try Again
+                </button>
               </div>
-            ))}
+            </div>
           </div>
         )}
+
+        {/* Summary Stats - Compact */}
+        {!error && (
+          <div className="flex items-center gap-6 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-gray-600">Total Appointments</span>
+              <span className="font-semibold text-gray-900 text-lg">{appointments.length}</span>
+            </div>
+            <div className="h-6 w-px bg-gray-300"></div>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-600">Last Updated</span>
+              <span className="font-medium text-gray-900">
+                {new Date().toLocaleTimeString()}
+              </span>
+            </div>
+            <div className="h-6 w-px bg-gray-300"></div>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-600">Date Range</span>
+              <span className="font-medium text-gray-900">
+                {currentFilters?.fromDate || "Today"} -{" "}
+                {currentFilters?.toDate || "Today"}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Appointments Table */}
+        <AppointmentsTable
+          appointments={appointments}
+          isLoading={isLoading}
+          onAppointmentClick={handleAppointmentClick}
+        />
       </div>
 
       {/* Drawer for appointment details and insurance */}

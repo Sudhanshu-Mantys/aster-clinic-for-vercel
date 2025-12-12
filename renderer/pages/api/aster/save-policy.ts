@@ -25,13 +25,13 @@ export default async function handler(
     console.log('Step 1: Fetching existing insurance details for patient:', patientId);
 
     // Step 1: Fetch existing insurance details to get the policy ID
-    // Try with different parameter combinations since manual searches might not have appointment/encounter
+    // Note: encounterId can be null for manual searches or policy updates without encounter context
     let insuranceData = null;
     let insuranceResponse = null;
 
-    // First attempt: with all IDs if available
-    if (appointmentId && encounterId) {
-      console.log('  Trying with appointment and encounter IDs...');
+    // First attempt: with appointment ID if available (encounterId can be null)
+    if (appointmentId) {
+      console.log('  Trying with appointment ID (encounterId:', encounterId ?? 'null', ')...');
       insuranceResponse = await fetch(`${API_BASE_URL}/claim/insurance/details/replicate/get`, {
         method: 'POST',
         headers: {
@@ -50,7 +50,7 @@ export default async function handler(
           body: {
             apntId: appointmentId,
             patientId: patientId,
-            encounterId: encounterId,
+            encounterId: encounterId ?? null, // Can be null for policy details
             customerId: 1,
             primaryInsPolicyId: null,
             siteId: 31,
@@ -85,7 +85,7 @@ export default async function handler(
           body: {
             apntId: null,
             patientId: patientId,
-            encounterId: 0,
+            encounterId: null, // Can be null for policy details
             customerId: 1,
             primaryInsPolicyId: null,
             siteId: 31,
