@@ -274,7 +274,14 @@ export interface AppointmentData {
   appointment_status: string;
   appointment_status_id: number;
   physician_name: string;
+  physician_id?: number;
+  provider?: string;
   specialisation_name: string;
+  payer_type?: string;
+  payer_name?: string;
+  receiver_name?: string;
+  network_name?: string;
+  payer_id?: number;
   [key: string]: any; // For any additional fields
 }
 

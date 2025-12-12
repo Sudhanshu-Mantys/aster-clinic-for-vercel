@@ -80,22 +80,22 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                             SI.No
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                            Status
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                            Physician
+                            Patient Details
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                             Appt Date/Time
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Physician
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Status
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                             Visit Type
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                            Payer Type
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                            Patient Details
+                            Payer
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                             Mobile
@@ -115,23 +115,15 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                                 {index + 1}
                             </td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                                <span
-                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
-                                        appointment.appointment_status
-                                    )}`}
-                                >
-                                    {appointment.appointment_status || "Unknown"}
-                                </span>
-                            </td>
                             <td className="px-4 py-3 text-sm text-gray-900">
                                 <div className="max-w-xs">
                                     <p className="font-medium truncate">
-                                        {appointment.physician_name || "N/A"}
+                                        {appointment.full_name || "N/A"}
                                     </p>
-                                    {appointment.specialisation_name && (
-                                        <p className="text-xs text-gray-500 truncate">
-                                            {appointment.specialisation_name}
+                                    <p className="text-xs text-gray-500">MPI: {appointment.mpi}</p>
+                                    {appointment.age && (
+                                        <p className="text-xs text-gray-500">
+                                            {appointment.age} | {appointment.gender}
                                         </p>
                                     )}
                                 </div>
@@ -146,21 +138,48 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                                     </p>
                                 </div>
                             </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                {appointment.visit_type || "N/A"}
+                            <td className="px-4 py-3 text-sm text-gray-900">
+                                <div className="max-w-xs">
+                                    <p className="font-medium truncate">
+                                        {appointment.provider || appointment.physician_name || "N/A"}
+                                    </p>
+                                    {appointment.specialisation_name && (
+                                        <p className="text-xs text-gray-500 truncate">
+                                            {appointment.specialisation_name}
+                                        </p>
+                                    )}
+                                    {appointment.physician_id && (
+                                        <p className="text-xs text-gray-400 truncate">
+                                            ID: {appointment.physician_id}
+                                        </p>
+                                    )}
+                                </div>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                                <span
+                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                                        appointment.appointment_status
+                                    )}`}
+                                >
+                                    {appointment.appointment_status || "Unknown"}
+                                </span>
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                {appointment.payer_type || "N/A"}
+                                {appointment.visit_type || "N/A"}
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900">
                                 <div className="max-w-xs">
                                     <p className="font-medium truncate">
-                                        {appointment.full_name || "N/A"}
+                                        {appointment.payer_name || appointment.receiver_name || appointment.payer_type || "N/A"}
                                     </p>
-                                    <p className="text-xs text-gray-500">MPI: {appointment.mpi}</p>
-                                    {appointment.age && (
-                                        <p className="text-xs text-gray-500">
-                                            {appointment.age} | {appointment.gender}
+                                    {appointment.network_name && (
+                                        <p className="text-xs text-gray-500 truncate">
+                                            {appointment.network_name}
+                                        </p>
+                                    )}
+                                    {appointment.payer_type && appointment.payer_name && (
+                                        <p className="text-xs text-gray-500 truncate">
+                                            Type: {appointment.payer_type}
                                         </p>
                                     )}
                                 </div>

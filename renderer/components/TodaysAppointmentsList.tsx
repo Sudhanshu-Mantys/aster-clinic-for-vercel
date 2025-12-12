@@ -19,6 +19,10 @@ import {
   AppointmentFilters,
 } from "./AppointmentsFilterForm";
 import { AppointmentsTable } from "./AppointmentsTable";
+import { EligibilityCheckMetadata } from "../lib/redis-eligibility-mapping";
+import { EligibilityHistoryService, EligibilityHistoryItem } from "../utils/eligibilityHistory";
+import { MantysResultsDisplay } from "./MantysResultsDisplay";
+import { ExtractionProgressModal } from "./ExtractionProgressModal";
 
 interface TodaysAppointmentsListProps {
   onRefresh?: () => void;
@@ -40,6 +44,13 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   );
   const [showDrawer, setShowDrawer] = useState(false);
   const [currentFilters, setCurrentFilters] = useState<AppointmentFilters | null>(null);
+  const [previousSearches, setPreviousSearches] = useState<EligibilityCheckMetadata[]>([]);
+  const [loadingPreviousSearches, setLoadingPreviousSearches] = useState(false);
+  const [selectedEligibilityItem, setSelectedEligibilityItem] = useState<EligibilityHistoryItem | null>(null);
+  const [showEligibilityDrawer, setShowEligibilityDrawer] = useState(false);
+  const [showEligibilityModal, setShowEligibilityModal] = useState(false);
+  const [loadingEligibilityItem, setLoadingEligibilityItem] = useState(false);
+  const [freshEligibilityResult, setFreshEligibilityResult] = useState<any>(null);
 
   const fetchAppointments = async (filters?: AppointmentFilters) => {
     setIsLoading(true);
@@ -99,6 +110,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     setInsuranceDetails([]);
     setInsuranceError(null);
     setExpandedInsurance(new Set());
+    setPreviousSearches([]);
 
     // Fetch insurance details for the patient
     if (appointment.patient_id) {
@@ -140,6 +152,53 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         setIsLoadingInsurance(false);
       }
     }
+
+    // Fetch previous eligibility searches
+    const fetchPreviousSearches = async () => {
+      const patientId = appointment.patient_id;
+      const mpi = appointment.mpi;
+
+      if (!patientId && !mpi) {
+        setPreviousSearches([]);
+        return;
+      }
+
+      setLoadingPreviousSearches(true);
+      try {
+        let searches: EligibilityCheckMetadata[] = [];
+
+        // Try by patientId first
+        if (patientId) {
+          const response = await fetch(`/api/eligibility/get-by-patient-id?patientId=${patientId}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.data) {
+              searches = data.data;
+            }
+          }
+        }
+
+        // If no results and we have mpi, try by mpi
+        if (searches.length === 0 && mpi) {
+          const response = await fetch(`/api/eligibility/get-by-mpi?mpi=${mpi}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.data) {
+              searches = data.data;
+            }
+          }
+        }
+
+        setPreviousSearches(searches);
+      } catch (error) {
+        console.error("Error fetching previous searches:", error);
+        setPreviousSearches([]);
+      } finally {
+        setLoadingPreviousSearches(false);
+      }
+    };
+
+    fetchPreviousSearches();
   };
 
   const handleCloseDrawer = () => {
@@ -149,6 +208,104 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       setInsuranceDetails([]);
       setInsuranceError(null);
       setExpandedInsurance(new Set());
+    }, 300);
+  };
+
+  const handlePreviousSearchClick = async (search: EligibilityCheckMetadata) => {
+    setLoadingEligibilityItem(true);
+    setFreshEligibilityResult(null);
+    
+    try {
+      // Fetch the eligibility history item by taskId
+      const historyItem = await EligibilityHistoryService.getByTaskId(search.taskId);
+      
+      if (historyItem) {
+        setSelectedEligibilityItem(historyItem);
+        
+        // Use drawer for completed checks, modal for active checks
+        if (historyItem.status === "complete" && historyItem.result) {
+          // Try to fetch fresh result from API
+          try {
+            const response = await fetch('/api/mantys/check-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ task_id: search.taskId }),
+            });
+
+            if (response.ok) {
+              const apiResponse = await response.json();
+              if (apiResponse.status === 'complete' && apiResponse.result) {
+                if (apiResponse.result.data) {
+                  setFreshEligibilityResult(apiResponse.result);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error fetching fresh result:', error);
+          }
+          
+          setShowEligibilityDrawer(true);
+        } else {
+          setShowEligibilityModal(true);
+        }
+      } else {
+        // If not found in history, try to fetch from API directly
+        if (search.status === "complete") {
+          try {
+            const response = await fetch('/api/mantys/check-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ task_id: search.taskId }),
+            });
+
+            if (response.ok) {
+              const apiResponse = await response.json();
+              if (apiResponse.status === 'complete' && apiResponse.result) {
+                // Create a synthetic history item
+                const syntheticItem: EligibilityHistoryItem = {
+                  id: search.taskId,
+                  taskId: search.taskId,
+                  patientId: search.patientId.toString(),
+                  patientName: search.patientName,
+                  patientMPI: search.mpi,
+                  status: "complete",
+                  createdAt: search.createdAt,
+                  completedAt: search.completedAt,
+                  result: apiResponse.result,
+                };
+                setSelectedEligibilityItem(syntheticItem);
+                setFreshEligibilityResult(apiResponse.result);
+                setShowEligibilityDrawer(true);
+              }
+            }
+          } catch (error) {
+            console.error('Error fetching eligibility result:', error);
+            alert('Could not load eligibility check details. It may have expired or been deleted.');
+          }
+        } else {
+          alert('This eligibility check is still in progress or not available.');
+        }
+      }
+    } catch (error) {
+      console.error('Error loading eligibility item:', error);
+      alert('Error loading eligibility check details.');
+    } finally {
+      setLoadingEligibilityItem(false);
+    }
+  };
+
+  const handleCloseEligibilityDrawer = () => {
+    setShowEligibilityDrawer(false);
+    setTimeout(() => {
+      setSelectedEligibilityItem(null);
+      setFreshEligibilityResult(null);
+    }, 300);
+  };
+
+  const handleCloseEligibilityModal = () => {
+    setShowEligibilityModal(false);
+    setTimeout(() => {
+      setSelectedEligibilityItem(null);
     }, 300);
   };
 
@@ -394,6 +551,70 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
               </div>
             </div>
 
+            {/* Previous Eligibility Searches */}
+            {loadingPreviousSearches ? (
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <p className="text-sm text-gray-600">Loading previous eligibility searches...</p>
+              </div>
+            ) : previousSearches.length > 0 ? (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                <h3 className="font-semibold text-purple-900 mb-3">
+                  Previous Eligibility Searches ({previousSearches.length})
+                </h3>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {previousSearches.map((search, index) => (
+                    <div
+                      key={search.taskId}
+                      onClick={() => handlePreviousSearchClick(search)}
+                      className="bg-white border border-purple-200 rounded-md p-3 text-sm cursor-pointer hover:shadow-md transition-all hover:border-purple-300"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-purple-900">
+                              #{index + 1}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                search.status === "complete"
+                                  ? "bg-green-100 text-green-800"
+                                  : search.status === "processing"
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : search.status === "error"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-gray-100 text-gray-800"
+                              }`}
+                            >
+                              {search.status.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="space-y-0.5 text-gray-700">
+                            <p>
+                              <span className="font-medium">TPA:</span> {search.tpaCode}
+                            </p>
+                            <p>
+                              <span className="font-medium">Visit Type:</span> {search.visitType}
+                            </p>
+                            <p>
+                              <span className="font-medium">ID Type:</span> {search.idType}
+                            </p>
+                            {search.createdAt && (
+                              <p className="text-xs text-gray-500">
+                                {new Date(search.createdAt).toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-500 font-mono">
+                          {search.taskId.substring(0, 8)}...
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             {/* Insurance Details */}
             <div className="bg-white border border-gray-200 rounded-lg p-4">
               <InsuranceDetailsSection
@@ -408,6 +629,87 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           </div>
         )}
       </Drawer>
+
+      {/* Drawer for completed eligibility check results */}
+      {showEligibilityDrawer && selectedEligibilityItem?.status === "complete" && (
+        <Drawer
+          isOpen={showEligibilityDrawer}
+          onClose={handleCloseEligibilityDrawer}
+          title={`Eligibility Check Results - ${selectedEligibilityItem.patientName || selectedEligibilityItem.patientId}`}
+          size="xl"
+        >
+          <div className="p-6">
+            {loadingEligibilityItem ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                  <p className="mt-4 text-gray-600">Loading results...</p>
+                </div>
+              </div>
+            ) : freshEligibilityResult ? (
+              <MantysResultsDisplay
+                response={freshEligibilityResult}
+                onClose={handleCloseEligibilityDrawer}
+                onCheckAnother={handleCloseEligibilityDrawer}
+                screenshot={selectedEligibilityItem.interimResults?.screenshot || null}
+                patientMPI={selectedEligibilityItem.patientMPI}
+                patientId={selectedEligibilityItem.patientId ? parseInt(selectedEligibilityItem.patientId) : undefined}
+                appointmentId={selectedEligibilityItem.appointmentId}
+                encounterId={selectedEligibilityItem.encounterId}
+              />
+            ) : selectedEligibilityItem?.result ? (
+              <MantysResultsDisplay
+                response={selectedEligibilityItem.result}
+                onClose={handleCloseEligibilityDrawer}
+                onCheckAnother={handleCloseEligibilityDrawer}
+                screenshot={selectedEligibilityItem.interimResults?.screenshot || null}
+                patientMPI={selectedEligibilityItem.patientMPI}
+                patientId={selectedEligibilityItem.patientId ? parseInt(selectedEligibilityItem.patientId) : undefined}
+                appointmentId={selectedEligibilityItem.appointmentId}
+                encounterId={selectedEligibilityItem.encounterId}
+              />
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                <p>No results available</p>
+              </div>
+            )}
+          </div>
+        </Drawer>
+      )}
+
+      {/* Modal for pending/processing/error eligibility checks */}
+      {showEligibilityModal && selectedEligibilityItem && (
+        <ExtractionProgressModal
+          isOpen={showEligibilityModal}
+          onClose={handleCloseEligibilityModal}
+          status={
+            selectedEligibilityItem.status === "error" ? "complete" : selectedEligibilityItem.status
+          }
+          statusMessage={
+            selectedEligibilityItem.status === "pending"
+              ? "Navigating Insurance Portal..."
+              : selectedEligibilityItem.status === "processing"
+                ? "Extracting eligibility data from TPA portal..."
+                : selectedEligibilityItem.status === "complete"
+                  ? "Eligibility check complete!"
+                  : "Check Failed"
+          }
+          interimScreenshot={selectedEligibilityItem.interimResults?.screenshot || null}
+          interimDocuments={
+            selectedEligibilityItem.interimResults?.documents?.map((doc) => ({
+              id: doc.name,
+              tag: doc.type,
+              url: doc.url,
+            })) || []
+          }
+          pollingAttempts={selectedEligibilityItem.pollingAttempts || 0}
+          maxAttempts={150}
+          viewMode="history"
+          errorMessage={
+            selectedEligibilityItem.status === "error" ? selectedEligibilityItem.error : null
+          }
+        />
+      )}
     </>
   );
 };

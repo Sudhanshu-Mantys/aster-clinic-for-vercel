@@ -3,7 +3,7 @@
  * Displays the eligibility check results from Mantys API
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   MantysEligibilityResponse,
   MantysKeyFields,
@@ -15,6 +15,7 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Sidebar } from "./ui/sidebar";
 import { LifetrenzEligibilityPreview } from "./LifetrenzEligibilityPreview";
+import { useAuth } from "../contexts/AuthContext";
 
 interface MantysResultsDisplayProps {
   response: MantysEligibilityResponse;
@@ -47,9 +48,62 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [policySaved, setPolicySaved] = useState(false);
+  const [tpaConfig, setTpaConfig] = useState<any>(null);
+
+  // Get user and clinic context
+  const { user } = useAuth();
+  const selectedClinicId = user?.selected_team_id || null;
 
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const { data } = response;
+
+  // Load TPA config when component mounts or TPA changes
+  useEffect(() => {
+    const loadTPAConfig = async () => {
+      if (!selectedClinicId || !response.tpa) return;
+
+      try {
+        console.log("🔍 Loading TPA config for save policy:", response.tpa, "clinic:", selectedClinicId);
+        const configResponse = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
+        if (configResponse.ok) {
+          const configData = await configResponse.json();
+          if (configData.configs && Array.isArray(configData.configs)) {
+            // Try to find config by ins_code, tpa_id, or payer_code
+            let config = configData.configs.find(
+              (c: any) => c.ins_code === response.tpa
+            );
+            if (!config) {
+              config = configData.configs.find(
+                (c: any) => c.tpa_id === response.tpa
+              );
+            }
+            if (!config) {
+              config = configData.configs.find(
+                (c: any) => c.payer_code === response.tpa
+              );
+            }
+
+            if (config) {
+              console.log("✅ Found TPA config for save policy:", {
+                ins_code: config.ins_code,
+                tpa_name: config.tpa_name,
+                lt_site_id: config.lt_site_id,
+                lt_customer_id: config.lt_customer_id,
+                lt_other_config: config.lt_other_config
+              });
+              setTpaConfig(config);
+            } else {
+              console.log("⚠️ No TPA config found for:", response.tpa);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("❌ Failed to load TPA config for save policy:", error);
+      }
+    };
+
+    loadTPAConfig();
+  }, [selectedClinicId, response.tpa]);
 
   // Guard against undefined data - but check if we have error info first
   if (!data) {
@@ -109,14 +163,22 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     setSavingPolicy(true);
 
     try {
-      // Extract policy data from Mantys response
+      // Get config values with fallbacks to defaults
+      const siteId = tpaConfig?.lt_site_id ? parseInt(tpaConfig.lt_site_id, 10) : 31;
+      const customerId = tpaConfig?.lt_customer_id ? parseInt(tpaConfig.lt_customer_id, 10) : 1;
+      // Try to parse user.id as number, fallback to default if invalid
+      const parsedUserId = user?.id ? parseInt(user.id, 10) : NaN;
+      const createdBy = !isNaN(parsedUserId) ? parsedUserId : 13295;
+      const ltOtherConfig = tpaConfig?.lt_other_config || {};
+
+      // Extract policy data from Mantys response, using config values
       const policyData = {
         policyId: data.patient_info?.policy_id || null,
         isActive: 1,
         payerId: data.patient_info?.payer_id || null,
         insuranceCompanyId: null,
         networkId: data.policy_network?.network_id || null,
-        siteId: 31, // Default site ID
+        siteId: siteId, // From config or default
         policyNumber: data.patient_info?.patient_id_info?.policy_number || null,
         insuranceGroupPolicyId: null,
         encounterid: encounterId || 0,
@@ -135,20 +197,20 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         tpaValidTill: data.policy_end_date || null,
         patientId: patientId,
         insuranceRenewal: null,
-        payerType: 1,
+        payerType: ltOtherConfig.payerType || 1, // From config or default
         insuranceStartDate: data.policy_start_date || null,
         insurancePolicyId: null,
         hasTopUpCard: 0,
         proposerRelation: "Self",
-        createdBy: 13295, // TODO: Get actual user ID
+        createdBy: createdBy, // From user context or default
         empId: null,
         requestLetter: null,
-        insertType: 2,
-        customerId: 1,
-        type: 1,
-        relationshipId: 26, // Default relationship ID for "Self"
+        insertType: ltOtherConfig.insertType || 2, // From config or default
+        customerId: customerId, // From config or default
+        type: ltOtherConfig.type || 1, // From config or default
+        relationshipId: ltOtherConfig.relationshipId || 26, // From config or default (26 = "Self")
         priorityPatientApplicable: 0,
-        typeId: 2,
+        typeId: ltOtherConfig.typeId || 2, // From config or default
         DepData: null,
       };
 

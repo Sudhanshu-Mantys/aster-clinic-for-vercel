@@ -16,6 +16,8 @@ import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
 import { EligibilityHistoryService } from "../utils/eligibilityHistory";
 import pollingService from "../services/eligibilityPollingService";
+import { useAuth } from "../contexts/AuthContext";
+import { EligibilityCheckMetadata } from "../lib/redis-eligibility-mapping";
 
 interface MantysEligibilityFormProps {
   patientData: PatientData | null;
@@ -98,13 +100,218 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     useState<MantysEligibilityResponse | null>(null);
   const [showResults, setShowResults] = useState(false);
 
-  // Organization/Clinic Context (would come from auth/context in real app)
+  // Organization/Clinic Context
+  const { user } = useAuth();
   const selectedOrganizationId: string = "aster-clinics"; // Example: "medcare", "al-noor", "healthhub", "kims", "org1"
-  const selectedClinicId: string = "92d5da39-36af-4fa2-bde3-3828600d7871"; // Aster clinic ID
+  const selectedClinicId: string = user?.selected_team_id || "92d5da39-36af-4fa2-bde3-3828600d7871"; // Get from auth context
+
+  // TPA Config and Doctors State
+  const [tpaConfig, setTpaConfig] = useState<any>(null);
+  const [doctorsList, setDoctorsList] = useState<any[]>([]);
+  const [isDoctorCompulsory, setIsDoctorCompulsory] = useState(false);
+
+  // Previous Searches State
+  const [previousSearches, setPreviousSearches] = useState<EligibilityCheckMetadata[]>([]);
+  const [loadingPreviousSearches, setLoadingPreviousSearches] = useState(false);
 
   // ============================================================================
   // PRE-FILL FORM WITH PATIENT DATA
   // ============================================================================
+
+  // Load TPA config and doctors when insurance data, options, or clinic ID changes
+  useEffect(() => {
+    if (selectedClinicId) {
+      loadDoctors();
+      // Try to load TPA config - prioritize payer_code, then options
+      const identifier = insuranceData?.payer_code || (options && options !== "BOTH" ? options : null);
+      if (identifier) {
+        loadTPAConfig(identifier);
+      }
+    }
+  }, [selectedClinicId, insuranceData?.payer_code, options]);
+
+  const loadTPAConfig = async (identifier: string) => {
+    if (!selectedClinicId || !identifier) return;
+    try {
+      console.log("🔍 Loading TPA config for identifier:", identifier, "clinic:", selectedClinicId);
+      const response = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log("📦 Received TPA configs:", data.configs?.length || 0, "configs");
+        if (data.configs && Array.isArray(data.configs)) {
+          // Log all config identifiers for debugging
+          console.log("🔑 Available TPA config identifiers:", data.configs.map((c: any) => ({
+            ins_code: c.ins_code,
+            payer_code: c.payer_code,
+            tpa_id: c.tpa_id,
+            tpa_name: c.tpa_name
+          })));
+
+          // Try multiple ways to find the config:
+          // 1. By ins_code (primary identifier)
+          // 2. By payer_code
+          // 3. By tpa_id
+          let config = data.configs.find(
+            (c: any) => c.ins_code === identifier
+          );
+          if (!config) {
+            config = data.configs.find(
+              (c: any) => c.payer_code === identifier
+            );
+          }
+          if (!config) {
+            config = data.configs.find(
+              (c: any) => c.tpa_id === identifier
+            );
+          }
+
+          if (config) {
+            console.log("✅ Found TPA config:", {
+              ins_code: config.ins_code,
+              tpa_name: config.tpa_name,
+              extra_form_fields: config.extra_form_fields
+            });
+            setTpaConfig(config);
+            // Check if doctor is compulsory
+            const extraFormFields = config.extra_form_fields || [];
+            const doctorField = extraFormFields.find((field: any) => field.field === "doctor");
+            const isCompulsory = doctorField?.required === true;
+            console.log("👨‍⚕️ Doctor compulsory:", isCompulsory, "doctorField:", doctorField);
+            setIsDoctorCompulsory(isCompulsory);
+          } else {
+            console.log("⚠️ No TPA config found for identifier:", identifier, "- Available configs:", data.configs.map((c: any) => c.ins_code || c.tpa_id));
+            // Reset if not found
+            setTpaConfig(null);
+            setIsDoctorCompulsory(false);
+          }
+        }
+      } else {
+        console.error("❌ Failed to fetch TPA configs, status:", response.status);
+      }
+    } catch (error) {
+      console.error("❌ Failed to load TPA config:", error);
+    }
+  };
+
+  const loadDoctors = async () => {
+    if (!selectedClinicId) return;
+    try {
+      const response = await fetch(`/api/clinic-config/doctors?clinic_id=${selectedClinicId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setDoctorsList(data.configs || []);
+      }
+    } catch (error) {
+      console.error("Failed to load doctors:", error);
+    }
+  };
+
+  // Fetch appointment data to get physician information and pre-fill doctor
+  useEffect(() => {
+    const fetchAppointmentData = async () => {
+      if (patientData?.appointment_id && selectedClinicId && doctorsList.length > 0) {
+        try {
+          // Get today's date for the API
+          const today = new Date();
+          const fromDate = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
+
+          const response = await fetch(`/api/appointments/today?fromDate=${fromDate}&toDate=${fromDate}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.body?.Data && Array.isArray(data.body.Data)) {
+              // Find the appointment matching our appointment_id
+              const appointment = data.body.Data.find(
+                (apt: any) => apt.appointment_id === patientData.appointment_id
+              );
+
+              if (appointment) {
+                // Try to match by provider name first (most reliable)
+                const providerName = appointment.provider?.trim();
+                const physicianName = appointment.physician_name?.trim();
+                const physicianId = appointment.physician_id;
+
+                console.log("🔍 Looking for doctor matching:", { providerName, physicianName, physicianId });
+
+                let matchedDoctor = null;
+
+                // Try matching by provider name first
+                if (providerName) {
+                  matchedDoctor = doctorsList.find(
+                    (doc) => {
+                      const docName = doc.doctor_name?.trim().toLowerCase() || "";
+                      const provName = providerName.toLowerCase();
+                      // Try exact match first
+                      if (docName === provName) return true;
+                      // Try partial match (remove "Dr." prefix if present)
+                      const docNameClean = docName.replace(/^dr\.?\s*/i, "");
+                      const provNameClean = provName.replace(/^dr\.?\s*/i, "");
+                      return docNameClean === provNameClean ||
+                        docName.includes(provNameClean) ||
+                        provNameClean.includes(docName);
+                    }
+                  );
+                }
+
+                // If not found, try physician_name
+                if (!matchedDoctor && physicianName) {
+                  matchedDoctor = doctorsList.find(
+                    (doc) => {
+                      const docName = doc.doctor_name?.trim().toLowerCase() || "";
+                      const physName = physicianName.toLowerCase();
+                      return docName === physName ||
+                        docName.includes(physName) ||
+                        physName.includes(docName);
+                    }
+                  );
+                }
+
+                // If still not found and we have physician_id, try matching by lt_user_id
+                if (!matchedDoctor && physicianId) {
+                  matchedDoctor = doctorsList.find(
+                    (doc) => doc.lt_user_id === physicianId.toString() || doc.doctor_id === physicianId.toString()
+                  );
+                }
+
+                // If found and has DHA ID, pre-fill
+                if (matchedDoctor && matchedDoctor.dha_id && matchedDoctor.dha_id.trim() !== "") {
+                  console.log("✅ Pre-filling doctor from appointment:", matchedDoctor.doctor_name, "DHA ID:", matchedDoctor.dha_id);
+                  setDoctorName(matchedDoctor.dha_id);
+                } else if (matchedDoctor) {
+                  console.log("⚠️ Found doctor but no DHA ID:", matchedDoctor.doctor_name);
+                } else {
+                  console.log("⚠️ No matching doctor found for:", { providerName, physicianName, physicianId });
+                }
+              }
+            } else if (data.appointments && Array.isArray(data.appointments)) {
+              // Fallback to old format
+              const appointment = data.appointments.find(
+                (apt: any) => apt.appointment_id === patientData.appointment_id
+              );
+
+              if (appointment && appointment.physician_name) {
+                const physicianName = appointment.physician_name.trim();
+                const matchedDoctor = doctorsList.find(
+                  (doc) => doc.doctor_name?.trim().toLowerCase() === physicianName.toLowerCase()
+                );
+
+                if (matchedDoctor && matchedDoctor.dha_id && matchedDoctor.dha_id.trim() !== "") {
+                  console.log("✅ Pre-filling doctor from appointment (fallback):", matchedDoctor.doctor_name, "DHA ID:", matchedDoctor.dha_id);
+                  setDoctorName(matchedDoctor.dha_id);
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Failed to fetch appointment data for physician:", error);
+        }
+      }
+    };
+
+    // Wait for doctors list to load before trying to match
+    if (doctorsList.length > 0 && patientData?.appointment_id) {
+      fetchAppointmentData();
+    }
+  }, [patientData?.appointment_id, doctorsList.length, selectedClinicId]);
 
   useEffect(() => {
     if (patientData) {
@@ -148,12 +355,17 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         ADNIC: "INS017",
         Mednet: "TPA036",
         Oman: "INS012",
+        Inayah: "TPA008",
       };
 
       // Check both tpa_name and insurance_name for mapping
       const tpaName = insuranceData.tpa_name;
       const insuranceName = insuranceData.insurance_name;
+      const payerName = insuranceData.payer_name;
+      const receiverCode = insuranceData.receiver_code;
+      const payerCode = insuranceData.payer_code;
 
+      // First, try to map by name
       const mappedTpa = Object.entries(tpaMapping).find(([key]) => {
         const keyLower = key.toLowerCase();
         if (tpaName && tpaName.toLowerCase().includes(keyLower)) {
@@ -162,11 +374,42 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         if (insuranceName && insuranceName.toLowerCase().includes(keyLower)) {
           return true;
         }
+        if (payerName && payerName.toLowerCase().includes(keyLower)) {
+          return true;
+        }
+        // Also check if payer_code matches directly (e.g., INS026 for DAMAN)
+        if (payerCode === "INS026" && keyLower === "daman") {
+          return true;
+        }
         return false;
       });
 
       if (mappedTpa) {
+        console.log("🎯 Mapped insurance to TPA:", mappedTpa[1], "from:", { tpaName, insuranceName, payerName, payer_code: payerCode, receiver_code: receiverCode });
         setOptions(mappedTpa[1]);
+      } else {
+        // If no name mapping found, check codes directly
+        // Priority: TPA codes > INS codes (TPA gets priority when both are available)
+        const tpaCode = receiverCode?.match(/^TPA[0-9A-Z]+$/) ? receiverCode :
+          payerCode?.match(/^TPA[0-9A-Z]+$/) ? payerCode : null;
+        const insCode = receiverCode?.match(/^INS[0-9A-Z]+$/) ? receiverCode :
+          payerCode?.match(/^INS[0-9A-Z]+$/) ? payerCode : null;
+        const otherCode = receiverCode?.match(/^(D|DHPO|RIYATI)[0-9A-Z]*$/) ? receiverCode :
+          payerCode?.match(/^(D|DHPO|RIYATI)[0-9A-Z]*$/) ? payerCode : null;
+
+        // Prioritize TPA codes over INS codes
+        if (tpaCode) {
+          console.log("✅ Using TPA code (priority):", tpaCode, "from:", { receiver_code: receiverCode, payer_code: payerCode });
+          setOptions(tpaCode);
+        } else if (insCode) {
+          console.log("⚠️ Using INS code (fallback):", insCode, "from:", { receiver_code: receiverCode, payer_code: payerCode });
+          setOptions(insCode);
+        } else if (otherCode) {
+          console.log("⚠️ Using other code:", otherCode, "from:", { receiver_code: receiverCode, payer_code: payerCode });
+          setOptions(otherCode);
+        } else {
+          console.log("❌ No valid code found in:", { receiver_code: receiverCode, payer_code: payerCode });
+        }
       }
 
       // Pre-fill member ID if available
@@ -180,7 +423,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         setPayerName(insuranceData.payer_name);
       }
     }
-  }, [patientData, insuranceData]);
+  }, [patientData, insuranceData, selectedClinicId]);
 
   // ============================================================================
   // INSURANCE PROVIDER OPTIONS (50+ TPAs)
@@ -388,16 +631,18 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   );
 
   // ============================================================================
-  // DOCTOR LIST (Mock - would come from API)
+  // DOCTOR LIST (from API)
   // ============================================================================
 
-  const DOCTORS_LIST = [
-    { label: "Dr. Ahmed Hassan", value: "DR001" },
-    { label: "Dr. Sarah Johnson", value: "DR002" },
-    { label: "Dr. Mohammed Ali", value: "DR003" },
-    { label: "Dr. Emily Chen", value: "DR004" },
-    { label: "Dr. Fatima Al Zaabi", value: "DR005" },
-  ];
+  const DOCTORS_LIST = useMemo(() => {
+    return doctorsList
+      .filter((doctor) => doctor.dha_id && doctor.dha_id.trim() !== "") // Only show doctors with DHA ID
+      .map((doctor) => ({
+        label: `${doctor.doctor_name}${doctor.dha_id ? ` (DHA: ${doctor.dha_id})` : ""}`,
+        value: doctor.dha_id || doctor.doctor_id,
+        doctor: doctor,
+      }));
+  }, [doctorsList]);
 
   // ============================================================================
   // PAYER OPTIONS (for NextCare Policy Number)
@@ -424,19 +669,27 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     (options === "TPA023" || options === "INS026" || options === "D004") &&
     isPodEligible;
 
-  // Doctor name field requirement
-  const showDoctorsNameField =
-    options === "INS026" || // Daman
-    options === "TPA029" || // eCare
-    options === "D004" || // Daman variant
-    options === "TPA023" || // Daman Thiqa
-    options === "BOTH" ||
-    options === "DHPO" ||
-    options === "RIYATI" ||
-    (options === "TPA037" && selectedOrganizationId === "al-noor") || // Lifeline at Al Noor
-    (options === "TPA001" && selectedOrganizationId === "org1") || // Neuron at Org1
-    (options === "INS017" && selectedOrganizationId === "org1") || // ADNIC at Org1
-    (options === "TPA004" && selectedOrganizationId === "org1"); // NAS at Org1
+  // Doctor name field requirement - check config first, then fallback to hardcoded logic
+  const showDoctorsNameField = useMemo(() => {
+    // If doctor is compulsory in config, show the field
+    if (isDoctorCompulsory) {
+      return true;
+    }
+    // Fallback to original hardcoded logic
+    return (
+      options === "INS026" || // Daman
+      options === "TPA029" || // eCare
+      options === "D004" || // Daman variant
+      options === "TPA023" || // Daman Thiqa
+      options === "BOTH" ||
+      options === "DHPO" ||
+      options === "RIYATI" ||
+      (options === "TPA037" && selectedOrganizationId === "al-noor") || // Lifeline at Al Noor
+      (options === "TPA001" && selectedOrganizationId === "org1") || // Neuron at Org1
+      (options === "INS017" && selectedOrganizationId === "org1") || // ADNIC at Org1
+      (options === "TPA004" && selectedOrganizationId === "org1") // NAS at Org1
+    );
+  }, [isDoctorCompulsory, options, selectedOrganizationId]);
 
   // Name field requirement
   const showNameField =
@@ -532,6 +785,58 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       }
     }
   }, [options, visitType, idType]);
+
+  // Helper function to fetch previous searches
+  const fetchPreviousSearches = React.useCallback(async () => {
+    // Try to get patientId or mpi from patientData or enriched context
+    const contextToUse = enrichedPatientContext || patientData;
+    const patientId = contextToUse?.patient_id;
+    const mpi = contextToUse?.mpi;
+
+    if (!patientId && !mpi) {
+      setPreviousSearches([]);
+      return;
+    }
+
+    setLoadingPreviousSearches(true);
+    try {
+      let searches: EligibilityCheckMetadata[] = [];
+
+      // Try by patientId first
+      if (patientId) {
+        const response = await fetch(`/api/eligibility/get-by-patient-id?patientId=${patientId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data) {
+            searches = data.data;
+          }
+        }
+      }
+
+      // If no results and we have mpi, try by mpi
+      if (searches.length === 0 && mpi) {
+        const response = await fetch(`/api/eligibility/get-by-mpi?mpi=${mpi}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data) {
+            searches = data.data;
+          }
+        }
+      }
+
+      setPreviousSearches(searches);
+    } catch (error) {
+      console.error("Error fetching previous searches:", error);
+      setPreviousSearches([]);
+    } finally {
+      setLoadingPreviousSearches(false);
+    }
+  }, [patientData, enrichedPatientContext]);
+
+  // Fetch previous eligibility searches when modal opens
+  useEffect(() => {
+    fetchPreviousSearches();
+  }, [fetchPreviousSearches]);
 
   // ============================================================================
   // ID NUMBER INPUT HANDLING & VALIDATION
@@ -671,6 +976,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     // Doctor name validation
     if (showDoctorsNameField && !doctorName) {
       newErrors.doctorName = "Doctor name is required";
+    }
+
+    // DHA ID validation when doctor is compulsory
+    if (isDoctorCompulsory && doctorName) {
+      const selectedDoctor = doctorsList.find(
+        (doc) => doc.dha_id === doctorName || doc.doctor_id === doctorName
+      );
+      if (!selectedDoctor || !selectedDoctor.dha_id || selectedDoctor.dha_id.trim() === "") {
+        newErrors.doctorName = "Selected doctor must have a DHA ID";
+      }
     }
 
     // Name validation
@@ -844,13 +1159,37 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
       setStatusMessage("Creating eligibility check task...");
 
+      // Get doctor DHA ID if doctor is compulsory
+      let doctorDhaId: string | undefined = undefined;
+      if (isDoctorCompulsory && doctorName) {
+        const selectedDoctor = doctorsList.find(
+          (doc) => doc.dha_id === doctorName || doc.doctor_id === doctorName
+        );
+        if (selectedDoctor && selectedDoctor.dha_id) {
+          doctorDhaId = selectedDoctor.dha_id;
+        } else {
+          throw new Error("Selected doctor must have a DHA ID");
+        }
+      } else if (doctorName) {
+        // For non-compulsory cases, try to find DHA ID if available
+        const selectedDoctor = doctorsList.find(
+          (doc) => doc.dha_id === doctorName || doc.doctor_id === doctorName
+        );
+        if (selectedDoctor && selectedDoctor.dha_id) {
+          doctorDhaId = selectedDoctor.dha_id;
+        } else {
+          // Fallback to doctorName if no DHA ID found
+          doctorDhaId = doctorName;
+        }
+      }
+
       // Build Mantys payload according to API specification
       const mantysPayload = buildMantysPayload({
         idValue: emiratesId,
         tpaId: options as TPACode,
         idType: idType as IDType,
         visitType: visitType as VisitType,
-        doctorName: doctorName || undefined,
+        doctorName: doctorDhaId || doctorName || undefined,
         payerName: undefined,
       });
 
@@ -918,6 +1257,12 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
       // Step 3: Monitor status for UI updates (optional - user can close modal)
       monitorTaskStatus(createdTaskId, historyItem.id);
+
+      // Refresh previous searches after successful submission
+      // Wait a bit for Redis to be updated
+      setTimeout(() => {
+        fetchPreviousSearches();
+      }, 1000);
     } catch (error: any) {
       console.error("Error submitting eligibility check:", error);
       setApiError(
@@ -1081,6 +1426,68 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           </div>
         </div>
 
+        {/* Previous Searches */}
+        {loadingPreviousSearches ? (
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <p className="text-sm text-gray-600">Loading previous searches...</p>
+          </div>
+        ) : previousSearches.length > 0 ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-green-900 mb-3">
+              Previous Eligibility Searches ({previousSearches.length})
+            </h3>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {previousSearches.map((search, index) => (
+                <div
+                  key={search.taskId}
+                  className="bg-white border border-green-200 rounded-md p-3 text-sm"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium text-green-900">
+                          #{index + 1}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${search.status === "complete"
+                            ? "bg-green-100 text-green-800"
+                            : search.status === "processing"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : search.status === "error"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-gray-100 text-gray-800"
+                            }`}
+                        >
+                          {search.status.toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="space-y-0.5 text-gray-700">
+                        <p>
+                          <span className="font-medium">TPA:</span> {search.tpaCode}
+                        </p>
+                        <p>
+                          <span className="font-medium">Visit Type:</span> {search.visitType}
+                        </p>
+                        <p>
+                          <span className="font-medium">ID Type:</span> {search.idType}
+                        </p>
+                        {search.createdAt && (
+                          <p className="text-xs text-gray-500">
+                            {new Date(search.createdAt).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-500 font-mono">
+                      {search.taskId.substring(0, 8)}...
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {/* Form Fields */}
         <div>
           <div className="space-y-4">
@@ -1227,9 +1634,25 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   placeholder="Select doctor's name"
                   isSearchable
                 />
+                {doctorName && (() => {
+                  const selectedDoctor = doctorsList.find(
+                    (doc) => doc.dha_id === doctorName || doc.doctor_id === doctorName
+                  );
+                  return selectedDoctor?.dha_id ? (
+                    <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-sm">
+                      <span className="font-medium text-blue-900">DHA ID: </span>
+                      <span className="text-blue-700">{selectedDoctor.dha_id}</span>
+                    </div>
+                  ) : null;
+                })()}
                 {errors.doctorName && (
                   <span className="text-red-500 text-sm mt-1">
                     {errors.doctorName}
+                  </span>
+                )}
+                {isDoctorCompulsory && DOCTORS_LIST.length === 0 && (
+                  <span className="text-orange-600 text-sm mt-1 block">
+                    ⚠️ No doctors with DHA ID available. Please configure doctors with DHA ID in clinic settings.
                   </span>
                 )}
               </div>

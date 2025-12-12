@@ -338,7 +338,7 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
 
                         <div className="space-y-2">
                             <Label htmlFor="payerType" className="text-sm font-medium">
-                                Payer Type
+                                Payer
                             </Label>
                             <select
                                 id="payerType"
