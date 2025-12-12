@@ -1008,7 +1008,16 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
             const response = await fetch(`/api/clinic-config/tpa?clinic_id=${clinicId}`)
             if (response.ok) {
                 const data = await response.json()
-                setTpaConfigs(data.configs || [])
+                const configs = data.configs || []
+                setTpaConfigs(configs)
+                // Initialize all TPAs as collapsed (closed) by default
+                const initialCollapsed: Record<string, boolean> = {}
+                configs.forEach((tpa: any) => {
+                    if (tpa.ins_code) {
+                        initialCollapsed[tpa.ins_code] = true
+                    }
+                })
+                setCollapsedTPAs(initialCollapsed)
             }
         } catch (error) {
             console.error('Failed to load TPAs:', error)
@@ -1986,7 +1995,16 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
             const response = await fetch(`/api/clinic-config/tpa?clinic_id=${clinicId}`)
             if (response.ok) {
                 const data = await response.json()
-                setTpaConfigs(data.configs || [])
+                const configs = data.configs || []
+                setTpaConfigs(configs)
+                // Initialize all TPAs as collapsed (closed) by default
+                const initialCollapsed: Record<string, boolean> = {}
+                configs.forEach((tpa: any) => {
+                    if (tpa.ins_code) {
+                        initialCollapsed[tpa.ins_code] = true
+                    }
+                })
+                setCollapsedTPAs(initialCollapsed)
             }
         } catch (error) {
             console.error('Failed to load TPAs:', error)
