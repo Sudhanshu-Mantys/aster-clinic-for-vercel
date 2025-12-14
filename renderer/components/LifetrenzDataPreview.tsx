@@ -134,11 +134,10 @@ export const LifetrenzDataPreview: React.FC<LifetrenzDataPreviewProps> = ({
                             <DataRow label="Authorization Limit" value={`AED ${lifetrenzPayload.insurance.authorizationLimit}`} />
                             <div className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded">
                                 <span className="font-medium text-gray-700">Status:</span>
-                                <Badge className={`${
-                                    lifetrenzPayload.insurance.status.toLowerCase() === 'active'
-                                        ? 'bg-green-100 text-green-800 border-green-200'
-                                        : 'bg-red-100 text-red-800 border-red-200'
-                                }`}>
+                                <Badge className={`${lifetrenzPayload.insurance.status.toLowerCase() === 'active'
+                                    ? 'bg-green-100 text-green-800 border-green-200'
+                                    : 'bg-red-100 text-red-800 border-red-200'
+                                    }`}>
                                     {lifetrenzPayload.insurance.status}
                                 </Badge>
                             </div>
@@ -281,9 +280,8 @@ const DataRow: React.FC<{ label: string; value: string | number; highlighted?: b
     if (!value) return null
 
     return (
-        <div className={`flex items-center justify-between py-2 px-3 rounded ${
-            highlighted ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'
-        }`}>
+        <div className={`flex items-center justify-between py-2 px-3 rounded ${highlighted ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'
+            }`}>
             <span className="font-medium text-gray-700 text-sm">{label}:</span>
             <span className={`text-gray-900 text-sm ${highlighted ? 'font-semibold' : ''}`}>
                 {value}

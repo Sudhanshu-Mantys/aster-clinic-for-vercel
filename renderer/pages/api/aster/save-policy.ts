@@ -45,9 +45,15 @@ export default async function handler(
         // Use policyId from existing policy if available, otherwise 0 for new policy
         policyId: cleanPolicyData.policyId || 0,
         isActive: cleanPolicyData.isActive ?? 1,
-        payerId: cleanPolicyData.payerId || null,
+        // Ensure payerId is a number or null
+        payerId: cleanPolicyData.payerId
+          ? (typeof cleanPolicyData.payerId === 'string' ? parseInt(cleanPolicyData.payerId, 10) : cleanPolicyData.payerId)
+          : null,
         insuranceCompanyId: cleanPolicyData.insuranceCompanyId || null,
-        networkId: cleanPolicyData.networkId || null,
+        // Ensure networkId is a number or null
+        networkId: cleanPolicyData.networkId
+          ? (typeof cleanPolicyData.networkId === 'string' ? parseInt(cleanPolicyData.networkId, 10) : cleanPolicyData.networkId)
+          : null,
         siteId: cleanPolicyData.siteId || 31,
         policyNumber: cleanPolicyData.policyNumber || null,
         insuranceGroupPolicyId: cleanPolicyData.insuranceGroupPolicyId || null,

@@ -313,22 +313,31 @@ export default async function handler(
         console.log('Final response:', JSON.stringify(transformedData, null, 2))
 
         // Store patient context in Redis in bulk (background task - fire and forget)
-        // EXACTLY like today's appointments API
+        // Store complete appointment data instead of just limited fields
         if (data.body?.Data && Array.isArray(data.body.Data)) {
             const contexts = data.body.Data
                 .filter((appointmentData) => appointmentData.mpi && appointmentData.patient_id)
-                .map((appointmentData) => ({
+                .map((appointmentData) => {
+                    // Store all appointment data fields, ensuring required fields are present
+                    const context: any = {
+                        // Required fields
                     mpi: appointmentData.mpi,
                     patientId: appointmentData.patient_id,
                     patientName: appointmentData.full_name || '',
+                        lastUpdated: new Date().toISOString(),
+                        
+                        // Include all appointment data fields
+                        ...appointmentData,
+                        
+                        // Map field names to match our interface (if different)
                     appointmentId: appointmentData.appointment_id,
                     encounterId: appointmentData.encounter_id,
                     phone: appointmentData.mobile_phone,
                     email: appointmentData.email,
-                    dob: appointmentData.dob,
-                    gender: appointmentData.gender,
-                    lastUpdated: new Date().toISOString(),
-                }));
+                    };
+                    
+                    return context;
+                });
 
             // Run as background task - don't await
             patientContextRedisService

@@ -1384,109 +1384,6 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           </div>
         )}
 
-        {/* Header info */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-blue-900 mb-2">
-            Patient Information
-          </h3>
-          <div className="space-y-1 text-sm text-blue-800">
-            {patientData && (
-              <>
-                {name && (
-                  <p>
-                    <span className="font-medium">Name:</span> {name}
-                  </p>
-                )}
-                {phoneNumber && (
-                  <p>
-                    <span className="font-medium">Phone:</span> {phoneNumber}
-                  </p>
-                )}
-                {emiratesId && (
-                  <p>
-                    <span className="font-medium">ID:</span> {emiratesId}
-                  </p>
-                )}
-              </>
-            )}
-            {insuranceData && (
-              <>
-                <p>
-                  <span className="font-medium">Insurance:</span>{" "}
-                  {insuranceData.tpa_name}
-                </p>
-                {insuranceData.ins_plan && (
-                  <p>
-                    <span className="font-medium">Plan:</span>{" "}
-                    {insuranceData.ins_plan}
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Previous Searches */}
-        {loadingPreviousSearches ? (
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <p className="text-sm text-gray-600">Loading previous searches...</p>
-          </div>
-        ) : previousSearches.length > 0 ? (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <h3 className="text-sm font-semibold text-green-900 mb-3">
-              Previous Eligibility Searches ({previousSearches.length})
-            </h3>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {previousSearches.map((search, index) => (
-                <div
-                  key={search.taskId}
-                  className="bg-white border border-green-200 rounded-md p-3 text-sm"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-green-900">
-                          #{index + 1}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded text-xs font-medium ${search.status === "complete"
-                            ? "bg-green-100 text-green-800"
-                            : search.status === "processing"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : search.status === "error"
-                                ? "bg-red-100 text-red-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}
-                        >
-                          {search.status.toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="space-y-0.5 text-gray-700">
-                        <p>
-                          <span className="font-medium">TPA:</span> {search.tpaCode}
-                        </p>
-                        <p>
-                          <span className="font-medium">Visit Type:</span> {search.visitType}
-                        </p>
-                        <p>
-                          <span className="font-medium">ID Type:</span> {search.idType}
-                        </p>
-                        {search.createdAt && (
-                          <p className="text-xs text-gray-500">
-                            {new Date(search.createdAt).toLocaleString()}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-xs text-gray-500 font-mono">
-                      {search.taskId.substring(0, 8)}...
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
 
         {/* Form Fields */}
         <div>
@@ -1960,7 +1857,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
             )}
 
             {/* Submit Button */}
-            <div className="pt-6 flex gap-3 sticky bottom-0 bg-white pb-4 border-t border-gray-200 -mx-6 px-6 mt-6">
+            <div className="pt-6 flex gap-3 mt-6 border-t border-gray-200">
               <Button
                 onClick={handleSubmit}
                 disabled={isSubmitting}

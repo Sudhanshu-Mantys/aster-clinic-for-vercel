@@ -67,7 +67,7 @@ export default async function handler(
 
         // Build the request payload matching the working format
         // Use insTpaPatId for ordObj.insuranceMappingId (not hospital_insurance_mapping_id)
-        const ordObjInsuranceMappingId = requestData.insTpaPatId || requestData.insuranceMappingId;
+        const ordObjInsuranceMappingId = requestData.insTpaPatId ?? null;
 
         const payload = {
             head: {
@@ -97,7 +97,7 @@ export default async function handler(
                 ordObj: [
                     {
                         reqPatientId: requestData.patientId,
-                        authNumber: null,
+                        authNumber: requestData.authorizationNumber || null, // Match authorizationNumber
                         encId: requestData.encounterId || null, // Use encounterId
                         eprescId: null,
                         authNetPayable: null,
@@ -105,7 +105,7 @@ export default async function handler(
                         insuranceMappingId: ordObjInsuranceMappingId, // Use insTpaPatId, not hospital_insurance_mapping_id
                         orderId: null,
                         authPayerPayable: null,
-                        reqPhyId: requestData.physicianId || 11260,
+                        reqPhyId: requestData.physicianId ?? null,
                         authQty: null
                     }
                 ],

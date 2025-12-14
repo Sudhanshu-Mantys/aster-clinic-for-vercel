@@ -229,36 +229,70 @@ export default async function handler(
     console.log("✅ API response OK, RecordCount:", data.body?.RecordCount);
 
     // Store patient context in Redis in bulk (background task - fire and forget)
+    // Store complete appointment data instead of just limited fields
     if (data.body?.Data && Array.isArray(data.body.Data)) {
-      const contexts = data.body.Data
-        .filter((appointmentData) => appointmentData.mpi && appointmentData.patient_id)
-        .map((appointmentData) => ({
-          mpi: appointmentData.mpi,
-          patientId: appointmentData.patient_id,
-          patientName: appointmentData.full_name || "",
-          appointmentId: appointmentData.appointment_id,
-          encounterId: appointmentData.encounter_id,
-          phone: appointmentData.mobile_phone,
-          email: appointmentData.email,
-          dob: appointmentData.dob,
-          gender: appointmentData.gender,
-          lastUpdated: new Date().toISOString(),
-        }));
+      console.log(`📝 Preparing to store ${data.body.Data.length} appointments in Redis`);
 
-      // Run as background task - don't await
-      patientContextRedisService
-        .storeBulkPatientContexts(contexts)
-        .then(() => {
-          console.log(
-            `✅ Bulk stored ${contexts.length} patient contexts in Redis`,
-          );
+      const contexts = data.body.Data
+        .filter((appointmentData) => {
+          const hasRequired = appointmentData.mpi && appointmentData.patient_id;
+          if (!hasRequired) {
+            console.warn(`⚠️ Skipping appointment ${appointmentData.appointment_id} - missing mpi or patient_id`);
+          }
+          return hasRequired;
         })
-        .catch((redisError) => {
-          console.error(
-            "⚠️ Failed to bulk store appointment contexts in Redis (non-fatal):",
-            redisError,
-          );
+        .map((appointmentData) => {
+          // Store all appointment data fields, ensuring required fields are present
+          // Spread appointmentData first, then override with mapped field names
+          const context: any = {
+            // Include all appointment data fields first
+            ...appointmentData,
+
+            // Required fields (override to ensure they're present and correctly named)
+            mpi: appointmentData.mpi,
+            patientId: appointmentData.patient_id,
+            patientName: appointmentData.full_name || "",
+            lastUpdated: new Date().toISOString(),
+
+            // Map field names to match our interface (override original field names)
+            appointmentId: appointmentData.appointment_id,
+            encounterId: appointmentData.encounter_id,
+            phone: appointmentData.mobile_phone,
+            email: appointmentData.email,
+          };
+
+          return context;
         });
+
+      console.log(`📝 Filtered to ${contexts.length} valid contexts to store`);
+
+      if (contexts.length > 0) {
+        // Run as background task - don't await
+        patientContextRedisService
+          .storeBulkPatientContexts(contexts)
+          .then(() => {
+            console.log(
+              `✅ Successfully bulk stored ${contexts.length} patient contexts in Redis`,
+            );
+            // Log a sample of what was stored
+            if (contexts.length > 0) {
+              const sample = contexts[0];
+              console.log(`📋 Sample stored context - MPI: ${sample.mpi}, PatientId: ${sample.patientId}, AppointmentId: ${sample.appointmentId}`);
+            }
+          })
+          .catch((redisError) => {
+            console.error(
+              "❌ Failed to bulk store appointment contexts in Redis (non-fatal):",
+              redisError,
+            );
+            console.error("Error details:", redisError instanceof Error ? redisError.message : String(redisError));
+            console.error("Error stack:", redisError instanceof Error ? redisError.stack : "No stack trace");
+          });
+      } else {
+        console.warn("⚠️ No valid contexts to store in Redis");
+      }
+    } else {
+      console.warn("⚠️ No appointment data found in response to store in Redis");
     }
 
     // Return the appointments immediately without waiting for Redis

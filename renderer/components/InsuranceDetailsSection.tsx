@@ -3,7 +3,6 @@ import { Badge } from "./ui/badge";
 import { InsuranceData, PatientData } from "../lib/api";
 import { MantysEligibilityForm } from "./MantysEligibilityForm";
 import { Button } from "./ui/button";
-import { Sidebar } from "./ui/sidebar";
 import { useAuth } from "../contexts/AuthContext";
 
 interface InsuranceDetailsSectionProps {
@@ -26,9 +25,7 @@ export const InsuranceDetailsSection: React.FC<
   patientData,
 }) => {
     const { user } = useAuth();
-    const [selectedInsuranceForEligibility, setSelectedInsuranceForEligibility] =
-      useState<InsuranceData | null>(null);
-    const [showEligibilitySidebar, setShowEligibilitySidebar] = useState(false);
+    const [showEligibilityFormFor, setShowEligibilityFormFor] = useState<Set<number>>(new Set());
     const [tpaConfigs, setTpaConfigs] = useState<Record<string, any>>({});
     const [doctors, setDoctors] = useState<any[]>([]);
     const [eligibilityButtonStates, setEligibilityButtonStates] = useState<Record<number, boolean>>({});
@@ -123,34 +120,82 @@ export const InsuranceDetailsSection: React.FC<
       }
     }, [insuranceDetails, tpaConfigs, doctors]);
 
-    const handleCheckEligibility = (insurance: InsuranceData) => {
-      setSelectedInsuranceForEligibility(insurance);
-      setShowEligibilitySidebar(true);
+    // Automatically open form for active insurance entries when they're expanded
+    useEffect(() => {
+      const newOpenForms = new Set(showEligibilityFormFor);
+      let hasChanges = false;
+
+      insuranceDetails.forEach((insurance, index) => {
+        const insuranceKey = insurance.patient_insurance_tpa_policy_id || index;
+        const isActive = insurance.insurance_status?.toLowerCase() === "active";
+        const isExpanded = expandedInsurance.has(insuranceKey);
+
+        // Check if button should be visible for this active insurance
+        if (isActive && isExpanded) {
+          // Check visibility directly using the function, or fall back to state
+          const shouldShowButton = eligibilityButtonStates[insuranceKey] !== false
+            ? (eligibilityButtonStates[insuranceKey] ?? checkEligibilityButtonVisibility(insurance))
+            : false;
+
+          if (shouldShowButton && !newOpenForms.has(insuranceKey)) {
+            newOpenForms.add(insuranceKey);
+            hasChanges = true;
+          }
+        }
+      });
+
+      if (hasChanges) {
+        setShowEligibilityFormFor(newOpenForms);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [expandedInsurance, insuranceDetails, eligibilityButtonStates]);
+
+    const handleCheckEligibility = (insurance: InsuranceData, insuranceKey: number) => {
+      // Toggle form visibility - if already showing for this insurance, hide it
+      const newOpenForms = new Set(showEligibilityFormFor);
+      if (newOpenForms.has(insuranceKey)) {
+        newOpenForms.delete(insuranceKey);
+      } else {
+        // Expand the accordion if it's not already expanded
+        if (!expandedInsurance.has(insuranceKey)) {
+          onToggleExpanded(insuranceKey);
+        }
+        newOpenForms.add(insuranceKey);
+      }
+      setShowEligibilityFormFor(newOpenForms);
     };
 
     const handleSearchAcrossAllTPAs = () => {
-      // Open eligibility form without specific insurance data
-      // This will trigger the form to prefill with Emirates ID and BOTH option
-      setSelectedInsuranceForEligibility(null);
-      setShowEligibilitySidebar(true);
+      // For "no insurance" case, we'll use a special key (-1) to show the form
+      const newOpenForms = new Set(showEligibilityFormFor);
+      if (newOpenForms.has(-1)) {
+        newOpenForms.delete(-1);
+      } else {
+        newOpenForms.add(-1);
+      }
+      setShowEligibilityFormFor(newOpenForms);
     };
 
-    const handleCloseSidebar = () => {
-      setShowEligibilitySidebar(false);
-      // Delay clearing the selected insurance to allow sidebar animation to complete
-      setTimeout(() => setSelectedInsuranceForEligibility(null), 300);
+    const handleCloseForm = (insuranceKey?: number) => {
+      if (insuranceKey !== undefined) {
+        const newOpenForms = new Set(showEligibilityFormFor);
+        newOpenForms.delete(insuranceKey);
+        setShowEligibilityFormFor(newOpenForms);
+      } else {
+        setShowEligibilityFormFor(new Set());
+      }
     };
 
     return (
-      <div className="ml-8 mt-4 pt-4 border-t border-green-200">
-        <h5 className="text-sm font-semibold text-gray-900 mb-3">
-          Insurance Details
-        </h5>
+      <div>
+        <h3 className="font-semibold text-gray-900 mb-2 text-sm">
+          Insurance Details (Lifetrenz)
+        </h3>
 
         {isLoadingInsurance && (
-          <div className="flex items-center text-sm text-gray-600">
+          <div className="flex items-center text-xs text-gray-600">
             <svg
-              className="animate-spin h-4 w-4 mr-2"
+              className="animate-spin h-3 w-3 mr-2"
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
               viewBox="0 0 24 24"
@@ -174,42 +219,53 @@ export const InsuranceDetailsSection: React.FC<
         )}
 
         {insuranceError && (
-          <div className="text-sm text-orange-600 bg-orange-50 p-3 rounded-lg border border-orange-200">
+          <div className="text-xs text-orange-600 bg-orange-50 p-2 rounded-lg border border-orange-200">
             <p className="font-medium">Unable to fetch insurance details</p>
-            <p className="text-xs mt-1">{insuranceError}</p>
+            <p className="text-xs mt-0.5">{insuranceError}</p>
           </div>
         )}
 
         {!isLoadingInsurance &&
           !insuranceError &&
           insuranceDetails.length === 0 && (
-            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-              <p className="text-sm text-gray-500 mb-3">
+            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+              <p className="text-xs text-gray-500 mb-2">
                 No insurance records found for this patient
               </p>
               <Button
                 onClick={handleSearchAcrossAllTPAs}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                className={`w-full text-xs py-1.5 ${showEligibilityFormFor.has(-1)
+                  ? "bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-300"
+                  : "bg-blue-600 hover:bg-blue-700 text-white"
+                  }`}
                 size="sm"
               >
-                🔍 Search Across All TPAs with Mantys
+                {showEligibilityFormFor.has(-1) ? "▼ Hide Eligibility Form" : "🔍 Search Across All TPAs with Mantys"}
               </Button>
+              {showEligibilityFormFor.has(-1) && (
+                <div className="mt-4">
+                  <MantysEligibilityForm
+                    patientData={patientData}
+                    insuranceData={null}
+                    onClose={() => handleCloseForm(-1)}
+                  />
+                </div>
+              )}
             </div>
           )}
 
         {!isLoadingInsurance && insuranceDetails.length > 0 && (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {insuranceDetails.map((insurance, index) => {
-              const isExpanded = expandedInsurance.has(
-                insurance.patient_insurance_tpa_policy_id,
-              );
+              const insuranceKey = insurance.patient_insurance_tpa_policy_id || index;
+              const isExpanded = expandedInsurance.has(insuranceKey);
               const isExpired =
                 insurance.insurance_status?.toLowerCase() === "expired";
 
               return (
                 <div
-                  key={insurance.patient_insurance_tpa_policy_id || index}
-                  className={`border rounded-lg p-4 transition-all ${isExpired
+                  key={insuranceKey}
+                  className={`border rounded-lg p-3 transition-all ${isExpired
                     ? "bg-gray-50 border-gray-200"
                     : "bg-blue-50 border-blue-200"
                     }`}
@@ -217,30 +273,26 @@ export const InsuranceDetailsSection: React.FC<
                   <button
                     type="button"
                     onClick={() =>
-                      onToggleExpanded(insurance.patient_insurance_tpa_policy_id)
+                      onToggleExpanded(insuranceKey)
                     }
                     className="w-full"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 text-left">
                         <div className="flex items-center gap-2">
-                          <h6
-                            className={`font-medium ${isExpired ? "text-gray-700" : "text-blue-900"}`}
-                          >
+                          <h6 className={`font-medium text-sm ${isExpired ? "text-gray-700" : "text-blue-900"}`}>
                             {insurance.tpa_name ||
                               insurance.payer_name ||
                               `Insurance ${index + 1}`}
                           </h6>
                           {insurance.ins_plan && (
-                            <span
-                              className={`text-xs ${isExpired ? "text-gray-600" : "text-blue-700"}`}
-                            >
+                            <span className={`text-xs ${isExpired ? "text-gray-600" : "text-blue-700"}`}>
                               ({insurance.ins_plan})
                             </span>
                           )}
                         </div>
                         {!isExpanded && insurance.ins_exp_date && (
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-gray-500 mt-0.5">
                             Expires: {insurance.ins_exp_date}
                           </p>
                         )}
@@ -268,7 +320,7 @@ export const InsuranceDetailsSection: React.FC<
                           )}
                         </div>
                         <svg
-                          className={`w-5 h-5 transition-transform ${isExpanded ? "rotate-180" : ""} ${isExpired ? "text-gray-500" : "text-blue-600"}`}
+                          className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""} ${isExpired ? "text-gray-500" : "text-blue-600"}`}
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -285,71 +337,71 @@ export const InsuranceDetailsSection: React.FC<
                   </button>
 
                   {isExpanded && (
-                    <div className="mt-3 space-y-2 text-sm">
-                      {insurance.tpa_policy_id && (
-                        <div className="flex items-start">
-                          <span className="font-medium text-gray-700 min-w-[140px]">
-                            TPA Policy ID:
-                          </span>
-                          <span className="text-gray-900 flex-1">
-                            {insurance.tpa_policy_id}
-                          </span>
-                        </div>
-                      )}
-                      {insurance.payer_name && (
-                        <div className="flex items-start">
-                          <span className="font-medium text-gray-700 min-w-[140px]">
-                            Payer:
-                          </span>
-                          <span className="text-gray-900 flex-1">
-                            {insurance.payer_name}
-                          </span>
-                        </div>
-                      )}
-                      {insurance.payer_code && (
-                        <div className="flex items-start">
-                          <span className="font-medium text-gray-700 min-w-[140px]">
-                            Payer Code:
-                          </span>
-                          <span className="text-gray-900 flex-1">
-                            {insurance.payer_code}
-                          </span>
-                        </div>
-                      )}
-                      {insurance.relation && (
-                        <div className="flex items-start">
-                          <span className="font-medium text-gray-700 min-w-[140px]">
-                            Relation:
-                          </span>
-                          <span className="text-gray-900 flex-1">
-                            {insurance.relation}
-                          </span>
-                        </div>
-                      )}
-                      {insurance.rate_card_name && (
-                        <div className="flex items-start">
-                          <span className="font-medium text-gray-700 min-w-[140px]">
-                            Rate Card:
-                          </span>
-                          <span className="text-gray-900 flex-1">
-                            {insurance.rate_card_name}
-                          </span>
-                        </div>
-                      )}
-                      {insurance.authorization_limit && (
-                        <div className="flex items-start">
-                          <span className="font-medium text-gray-700 min-w-[140px]">
-                            Auth Limit:
-                          </span>
-                          <span className="text-gray-900 flex-1">
-                            AED {insurance.authorization_limit}
-                          </span>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-blue-200">
+                    <div className="mt-2 space-y-1.5 text-xs">
+                      <div className="grid grid-cols-2 gap-2">
+                        {insurance.tpa_policy_id && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-gray-700">
+                              TPA Policy ID:
+                            </span>
+                            <span className="text-gray-900">
+                              {insurance.tpa_policy_id}
+                            </span>
+                          </div>
+                        )}
+                        {insurance.payer_name && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-gray-700">
+                              Payer:
+                            </span>
+                            <span className="text-gray-900">
+                              {insurance.payer_name}
+                            </span>
+                          </div>
+                        )}
+                        {insurance.payer_code && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-gray-700">
+                              Payer Code:
+                            </span>
+                            <span className="text-gray-900">
+                              {insurance.payer_code}
+                            </span>
+                          </div>
+                        )}
+                        {insurance.relation && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-gray-700">
+                              Relation:
+                            </span>
+                            <span className="text-gray-900">
+                              {insurance.relation}
+                            </span>
+                          </div>
+                        )}
+                        {insurance.rate_card_name && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-gray-700">
+                              Rate Card:
+                            </span>
+                            <span className="text-gray-900">
+                              {insurance.rate_card_name}
+                            </span>
+                          </div>
+                        )}
+                        {insurance.authorization_limit && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-gray-700">
+                              Auth Limit:
+                            </span>
+                            <span className="text-gray-900">
+                              AED {insurance.authorization_limit}
+                            </span>
+                          </div>
+                        )}
                         {insurance.insurance_from && (
-                          <div>
-                            <span className="font-medium text-gray-700 block">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-gray-700">
                               From:
                             </span>
                             <span className="text-gray-900">
@@ -358,8 +410,8 @@ export const InsuranceDetailsSection: React.FC<
                           </div>
                         )}
                         {insurance.ins_exp_date && (
-                          <div>
-                            <span className="font-medium text-gray-700 block">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-gray-700">
                               Expires:
                             </span>
                             <span className="text-gray-900">
@@ -371,16 +423,16 @@ export const InsuranceDetailsSection: React.FC<
 
                       {/* Copay/Deductible Details */}
                       {insurance.copay?.Default && (
-                        <div className="pt-2 border-t border-blue-200">
-                          <span className="font-medium text-gray-700 block mb-2">
+                        <div className={`pt-1.5 border-t mt-1.5 ${isExpired ? "border-gray-200" : "border-blue-200"}`}>
+                          <span className="font-medium text-gray-700 text-xs mb-1 block">
                             Coverage Details:
                           </span>
                           <div className="space-y-1 text-xs">
                             {insurance.copay.Default.copay_details &&
                               insurance.copay.Default.copay_details.length >
                               0 && (
-                                <div className="bg-white rounded p-2">
-                                  <p className="font-medium text-gray-800 mb-1">
+                                <div className="bg-gray-50 rounded p-1.5">
+                                  <p className="font-medium text-gray-800 mb-0.5 text-xs">
                                     Copay:
                                   </p>
                                   {insurance.copay.Default.copay_details.map(
@@ -402,8 +454,8 @@ export const InsuranceDetailsSection: React.FC<
                             {insurance.copay.Default.Deduct_details &&
                               insurance.copay.Default.Deduct_details.length >
                               0 && (
-                                <div className="bg-white rounded p-2">
-                                  <p className="font-medium text-gray-800 mb-1">
+                                <div className="bg-gray-50 rounded p-1.5">
+                                  <p className="font-medium text-gray-800 mb-0.5 text-xs">
                                     Deductible:
                                   </p>
                                   {insurance.copay.Default.Deduct_details.map(
@@ -428,28 +480,73 @@ export const InsuranceDetailsSection: React.FC<
                         </div>
                       )}
 
-                      {/* Check Eligibility Button */}
+                      {/* Check Eligibility Button and Form */}
                       {(() => {
                         const insuranceKey = insurance.patient_insurance_tpa_policy_id || index;
-                        // Use pre-computed state if available, otherwise compute on the fly
-                        let shouldShowButton = eligibilityButtonStates[insuranceKey];
-                        if (shouldShowButton === undefined) {
-                          shouldShowButton = checkEligibilityButtonVisibility(insurance);
+                        const isActive = insurance.insurance_status?.toLowerCase() === "active";
+                        const showForm = showEligibilityFormFor.has(insuranceKey);
+
+                        // For active insurance, check visibility rules
+                        if (isActive) {
+                          let shouldShowButton = eligibilityButtonStates[insuranceKey];
+                          if (shouldShowButton === undefined) {
+                            shouldShowButton = checkEligibilityButtonVisibility(insurance);
+                          }
+
+                          if (shouldShowButton) {
+                            return (
+                              <div className={`pt-2 border-t mt-2 ${isExpired ? "border-gray-200" : "border-blue-200"}`}>
+                                <Button
+                                  onClick={() => handleCheckEligibility(insurance, insuranceKey)}
+                                  className={`w-full text-xs py-1.5 ${showForm
+                                    ? "bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-300"
+                                    : "bg-green-600 hover:bg-green-700 text-white"
+                                    }`}
+                                  size="sm"
+                                >
+                                  {showForm ? "▼ Hide Eligibility Form" : "✓ Check Eligibility with Mantys"}
+                                </Button>
+                                {showForm && (
+                                  <div className="mt-4">
+                                    <MantysEligibilityForm
+                                      patientData={patientData}
+                                      insuranceData={insurance}
+                                      onClose={() => handleCloseForm(insuranceKey)}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
                         }
 
-                        if (insurance.insurance_status?.toLowerCase() === "active" && shouldShowButton) {
+                        // For expired insurance, always show button with grey styling
+                        if (isExpired) {
                           return (
-                            <div className="pt-3 border-t border-blue-200 mt-3">
+                            <div className="pt-2 border-t border-gray-200 mt-2">
                               <Button
-                                onClick={() => handleCheckEligibility(insurance)}
-                                className="w-full bg-green-600 hover:bg-green-700 text-white"
+                                onClick={() => handleCheckEligibility(insurance, insuranceKey)}
+                                className={`w-full text-xs py-1.5 ${showForm
+                                  ? "bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-300"
+                                  : "bg-gray-500 hover:bg-gray-600 text-white"
+                                  }`}
                                 size="sm"
                               >
-                                ✓ Check Eligibility with Mantys
+                                {showForm ? "▼ Hide Eligibility Form" : "✓ Check Eligibility with Mantys"}
                               </Button>
+                              {showForm && (
+                                <div className="mt-4">
+                                  <MantysEligibilityForm
+                                    patientData={patientData}
+                                    insuranceData={insurance}
+                                    onClose={() => handleCloseForm(insuranceKey)}
+                                  />
+                                </div>
+                              )}
                             </div>
                           );
                         }
+
                         return null;
                       })()}
                     </div>
@@ -460,23 +557,6 @@ export const InsuranceDetailsSection: React.FC<
           </div>
         )}
 
-        {/* Mantys Eligibility Form in Sidebar */}
-        <Sidebar
-          isOpen={showEligibilitySidebar}
-          onClose={handleCloseSidebar}
-          title={
-            selectedInsuranceForEligibility
-              ? "Mantys Insurance Eligibility Check"
-              : "Search Across All TPAs"
-          }
-          width="700px"
-        >
-          <MantysEligibilityForm
-            patientData={patientData}
-            insuranceData={selectedInsuranceForEligibility}
-            onClose={handleCloseSidebar}
-          />
-        </Sidebar>
       </div>
     );
   };

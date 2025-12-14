@@ -28,6 +28,7 @@ interface MantysResultsDisplayProps {
   patientId?: number;
   appointmentId?: number;
   encounterId?: number;
+  physicianId?: number;
 }
 
 export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
@@ -39,6 +40,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   patientId,
   appointmentId,
   encounterId,
+  physicianId: propPhysicianId,
 }) => {
   const [expandedCopay, setExpandedCopay] = useState<string | null>(null);
   const [showRawJson, setShowRawJson] = useState(false);
@@ -53,6 +55,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [tpaConfig, setTpaConfig] = useState<any>(null);
   const [plansConfig, setPlansConfig] = useState<any[]>([]);
   const [networksConfig, setNetworksConfig] = useState<any[]>([]);
+  const [asterNetworksConfig, setAsterNetworksConfig] = useState<any[]>([]); // Networks with numeric IDs from Aster
   const [planMappings, setPlanMappings] = useState<any[]>([]);
   const [payersConfig, setPayersConfig] = useState<any[]>([]);
   const [showSavePolicyModal, setShowSavePolicyModal] = useState(false);
@@ -86,6 +89,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [enrichedPatientId, setEnrichedPatientId] = useState<number | undefined>(patientId);
   const [enrichedAppointmentId, setEnrichedAppointmentId] = useState<number | undefined>(appointmentId);
   const [enrichedEncounterId, setEnrichedEncounterId] = useState<number | undefined>(encounterId);
+  const [enrichedPhysicianId, setEnrichedPhysicianId] = useState<number | undefined>(propPhysicianId);
+  const [insTpaPatId, setInsTpaPatId] = useState<number | undefined>(undefined);
 
   // Fetch patient context from Redis if patientId or appointmentId are missing
   useEffect(() => {
@@ -143,6 +148,168 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     fetchPatientContext();
   }, [patientMPI, appointmentId, patientId, encounterId]);
 
+  // Fetch appointment data to get physician ID and insurance details to get insTpaPatId
+  useEffect(() => {
+    const fetchAppointmentAndInsuranceData = async () => {
+      // If we already have physicianId from props, use it
+      if (propPhysicianId) {
+        setEnrichedPhysicianId(propPhysicianId);
+      }
+
+      const finalAppointmentId = enrichedAppointmentId || appointmentId;
+      const finalPatientId = enrichedPatientId || patientId;
+      const finalEncounterId = enrichedEncounterId || encounterId;
+
+      // First, try to fetch from Redis using appointment ID
+      if (finalAppointmentId) {
+        try {
+          console.log("🔍 Fetching appointment context from Redis for appointment:", finalAppointmentId);
+          const contextResponse = await fetch("/api/patient/context", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              appointmentId: finalAppointmentId,
+            }),
+          });
+
+          if (contextResponse.ok) {
+            const context = await contextResponse.json();
+            console.log("✅ Found appointment context in Redis:", {
+              physician_id: context.physician_id,
+              hasInsuranceDetails: !!context.insuranceDetails,
+            });
+
+            // Extract physician_id from Redis context
+            if (!propPhysicianId && context.physician_id) {
+              console.log("✅ Found physician_id from Redis:", context.physician_id);
+              setEnrichedPhysicianId(context.physician_id);
+            }
+
+            // Extract insTpaPatId from nested insuranceDetails in Redis context
+            if (!insTpaPatId && context.insuranceDetails?.body?.Data && Array.isArray(context.insuranceDetails.body.Data)) {
+              const insuranceRecords = context.insuranceDetails.body.Data;
+              console.log(`📋 Found ${insuranceRecords.length} insurance record(s) in Redis context`);
+
+              // Use the first entry
+              const selectedInsurance = insuranceRecords[0];
+
+              // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
+              const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+              if (insTpaPatIdValue) {
+                console.log("✅ Selected insurance from Redis (first entry):", {
+                  insTpaPatId: insTpaPatIdValue,
+                  status: selectedInsurance.insurance_status,
+                  payer_name: selectedInsurance.payer_name,
+                  tpa_name: selectedInsurance.tpa_name,
+                  total_records: insuranceRecords.length,
+                });
+                setInsTpaPatId(insTpaPatIdValue);
+              } else {
+                console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
+              }
+            }
+          } else {
+            console.log("⚠️ Appointment context not found in Redis, will fetch from API");
+          }
+        } catch (error) {
+          console.error("❌ Error fetching appointment context from Redis:", error);
+        }
+      }
+
+      // Fallback: Fetch appointment data to get physician_id if not found in Redis
+      if (!propPhysicianId && !enrichedPhysicianId && finalAppointmentId) {
+        try {
+          const today = new Date();
+          const fromDate = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
+          const response = await fetch(`/api/appointments/today?fromDate=${fromDate}&toDate=${fromDate}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.body?.Data && Array.isArray(data.body.Data)) {
+              const appointment = data.body.Data.find(
+                (apt: any) => apt.appointment_id === finalAppointmentId
+              );
+              if (appointment?.physician_id) {
+                console.log("✅ Found physician_id from appointment API:", appointment.physician_id);
+                setEnrichedPhysicianId(appointment.physician_id);
+              }
+            }
+          }
+        } catch (error) {
+          console.error("❌ Error fetching appointment data:", error);
+        }
+      }
+
+      // Fallback: Fetch insurance details to get patient_insurance_tpa_policy_id (insTpaPatId) if not found in Redis
+      if (finalPatientId && !insTpaPatId && finalAppointmentId) {
+        try {
+          const { getInsuranceDetails } = await import("../lib/api");
+          const insuranceResponse = await getInsuranceDetails({
+            patientId: finalPatientId,
+            apntId: finalAppointmentId || null,
+            encounterId: finalEncounterId || 0,
+            customerId: 1,
+            primaryInsPolicyId: null,
+            siteId: 1,
+            isDiscard: 0,
+            hasTopUpCard: 0,
+          });
+
+          if (insuranceResponse?.body?.Data && Array.isArray(insuranceResponse.body.Data)) {
+            const insuranceRecords = insuranceResponse.body.Data;
+            console.log(`📋 Fetched ${insuranceRecords.length} insurance record(s) from API`);
+
+            // Use the first entry
+            const selectedInsurance = insuranceRecords[0];
+
+            // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
+            const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+            if (insTpaPatIdValue) {
+              console.log("✅ Selected insurance from API (first entry):", {
+                insTpaPatId: insTpaPatIdValue,
+                status: selectedInsurance.insurance_status,
+                payer_name: selectedInsurance.payer_name,
+                tpa_name: selectedInsurance.tpa_name,
+                total_records: insuranceRecords.length,
+              });
+              setInsTpaPatId(insTpaPatIdValue);
+            } else {
+              console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
+            }
+          }
+
+          // Store insurance details in Redis nested in appointment context
+          if (finalAppointmentId && insuranceResponse) {
+            try {
+              console.log("💾 Storing insurance details in Redis for appointment:", finalAppointmentId);
+              const updateResponse = await fetch("/api/patient/context/update", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  appointmentId: finalAppointmentId,
+                  updates: {
+                    insuranceDetails: insuranceResponse,
+                  },
+                }),
+              });
+
+              if (updateResponse.ok) {
+                console.log("✅ Stored insurance details in Redis");
+              } else {
+                console.warn("⚠️ Failed to store insurance details in Redis:", updateResponse.status);
+              }
+            } catch (updateError) {
+              console.error("❌ Error storing insurance details in Redis:", updateError);
+            }
+          }
+        } catch (error) {
+          console.error("❌ Error fetching insurance details:", error);
+        }
+      }
+    };
+
+    fetchAppointmentAndInsuranceData();
+  }, [enrichedAppointmentId, enrichedPatientId, enrichedEncounterId, appointmentId, patientId, encounterId, propPhysicianId, insTpaPatId, enrichedPhysicianId]);
+
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const { data } = response;
 
@@ -157,19 +324,53 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         if (configResponse.ok) {
           const configData = await configResponse.json();
           if (configData.configs && Array.isArray(configData.configs)) {
-            // Try to find config by ins_code, tpa_id, or payer_code
-            let config = configData.configs.find(
-              (c: any) => c.ins_code === response.tpa
-            );
-            if (!config) {
-              config = configData.configs.find(
-                (c: any) => c.tpa_id === response.tpa
-              );
+            let config: any = null;
+            let tpaInsCodeToUse: string | null = null;
+
+            // PRIORITY 1: Try to extract payer code from payer_name first (most reliable)
+            if (data?.policy_network?.payer_name) {
+              const payerName = data.policy_network.payer_name;
+              console.log("🔍 PRIORITY: Extracting payer code from payer_name:", payerName);
+              // Extract payer code from payer_name (e.g., "QATAR INSURANCE COMPANY - INS019" -> "INS019")
+              const codeMatch = payerName.match(/\b(INS|TPA|SP|A|D)\d+\b/i);
+              if (codeMatch) {
+                const extractedCode = codeMatch[0].toUpperCase().trim();
+                console.log("📋 Extracted payer code from payer_name:", extractedCode);
+                // Try to find TPA config by this extracted code
+                config = configData.configs.find((c: any) => c.ins_code === extractedCode);
+                if (!config) {
+                  config = configData.configs.find((c: any) => c.tpa_id === extractedCode);
+                }
+                if (!config) {
+                  config = configData.configs.find((c: any) => c.payer_code === extractedCode);
+                }
+                if (config) {
+                  console.log("✅ Found TPA config by extracted payer code from payer_name:", extractedCode);
+                  tpaInsCodeToUse = config.ins_code || extractedCode;
+                }
+              }
             }
+
+            // FALLBACK: If not found from payer_name, try to find config by response.tpa
             if (!config) {
+              console.log("🔍 FALLBACK: Trying to find TPA config by response.tpa:", response.tpa);
               config = configData.configs.find(
-                (c: any) => c.payer_code === response.tpa
+                (c: any) => c.ins_code === response.tpa
               );
+              if (!config) {
+                config = configData.configs.find(
+                  (c: any) => c.tpa_id === response.tpa
+                );
+              }
+              if (!config) {
+                config = configData.configs.find(
+                  (c: any) => c.payer_code === response.tpa
+                );
+              }
+              if (config) {
+                console.log("✅ Found TPA config by response.tpa:", response.tpa);
+                tpaInsCodeToUse = config.ins_code || response.tpa;
+              }
             }
 
             if (config) {
@@ -184,7 +385,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               setTpaConfig(config);
 
               // Load plans, networks, and plan mappings for this TPA
-              const tpaInsCode = config.ins_code || response.tpa;
+              const tpaInsCode = tpaInsCodeToUse || config.ins_code || response.tpa;
               try {
                 // Load plans
                 const plansResponse = await fetch(`/api/clinic-config/plans?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
@@ -203,13 +404,23 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                   }
                 }
 
-                // Load networks
+                // Load Mantys networks (for display/matching)
                 const networksResponse = await fetch(`/api/clinic-config/mantys-networks?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
                 if (networksResponse.ok) {
                   const networksData = await networksResponse.json();
                   if (networksData.networks && Array.isArray(networksData.networks)) {
                     setNetworksConfig(networksData.networks);
-                    console.log("✅ Loaded networks config:", networksData.networks.length, "networks for TPA:", tpaInsCode);
+                    console.log("✅ Loaded Mantys networks config:", networksData.networks.length, "networks for TPA:", tpaInsCode);
+                  }
+                }
+
+                // Load Aster networks config (with numeric network_id)
+                const asterNetworksResponse = await fetch(`/api/clinic-config/networks?clinic_id=${selectedClinicId}`);
+                if (asterNetworksResponse.ok) {
+                  const asterNetworksData = await asterNetworksResponse.json();
+                  if (asterNetworksData.configs && Array.isArray(asterNetworksData.configs)) {
+                    setAsterNetworksConfig(asterNetworksData.configs);
+                    console.log("✅ Loaded Aster networks config:", asterNetworksData.configs.length, "networks with IDs");
                   }
                 }
 
@@ -346,27 +557,31 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     // Extract payer code from multiple possible sources
     let payerCodeToMatch: string | null = null;
 
-    // 1. Check if payer_id is already a payer code (e.g., "INS038", "TPA002")
-    if (data.payer_id) {
-      const payerIdTrimmed = String(data.payer_id).trim().toUpperCase();
-      if (/^(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+$/.test(payerIdTrimmed)) {
-        payerCodeToMatch = payerIdTrimmed;
+    // 1. PRIORITY: Extract payer code from payer_name (e.g., "DUBAI INSURANCE COMPANY - INS005")
+    // Valid patterns: INS012, TPA102, A004, D001 (prefix followed by digits only)
+    if (data.policy_network?.payer_name) {
+      const payerName = data.policy_network.payer_name;
+      // Match patterns: INS, TPA, A, or D followed by digits only (not letters)
+      const codeMatch = payerName.match(/\b(INS|TPA|SP|A|D)\d+\b/i);
+      if (codeMatch) {
+        payerCodeToMatch = codeMatch[0].toUpperCase().trim();
       }
     }
 
-    // 2. Extract payer code from payer_name
-    if (!payerCodeToMatch && data.policy_network?.payer_name) {
-      const payerName = data.policy_network.payer_name;
-      const codeMatch = payerName.match(/\b(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+\b/i);
-      if (codeMatch) {
-        payerCodeToMatch = codeMatch[0].toUpperCase().trim();
+    // 2. Check if payer_id matches valid payer code pattern (INS, TPA, A, or D followed by digits only)
+    if (!payerCodeToMatch && data.payer_id) {
+      const payerIdTrimmed = String(data.payer_id).trim().toUpperCase();
+      // Valid patterns: INS012, TPA102, A004, D001 (prefix followed by digits only)
+      if (/^(INS|TPA|SP|A|D)\d+$/.test(payerIdTrimmed)) {
+        payerCodeToMatch = payerIdTrimmed;
       }
     }
 
     // 3. Fallback: try patient_info.payer_id as payer code
     if (!payerCodeToMatch && data.patient_info?.payer_id) {
       const patientPayerIdTrimmed = String(data.patient_info.payer_id).trim().toUpperCase();
-      if (/^(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+$/.test(patientPayerIdTrimmed)) {
+      // Valid patterns: INS012, TPA102, A004, D001 (prefix followed by digits only)
+      if (/^(INS|TPA|SP|A|D)\d+$/.test(patientPayerIdTrimmed)) {
         payerCodeToMatch = patientPayerIdTrimmed;
       }
     }
@@ -488,20 +703,58 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         }
 
         // Find TPA config
-        let config = configData.configs.find((c: any) => c.ins_code === response.tpa);
-        if (!config) {
-          config = configData.configs.find((c: any) => c.tpa_id === response.tpa);
+        let config: any = null;
+        let tpaInsCodeToUse: string | null = null;
+
+        // PRIORITY 1: Try to extract payer code from payer_name first (most reliable)
+        if (data.policy_network?.payer_name) {
+          const payerName = data.policy_network.payer_name;
+          console.log('🔍 PRIORITY: Extracting payer code from payer_name:', payerName);
+          // Extract payer code from payer_name (e.g., "QATAR INSURANCE COMPANY - INS019" -> "INS019")
+          const codeMatch = payerName.match(/\b(INS|TPA|SP|A|D)\d+\b/i);
+          if (codeMatch) {
+            const extractedCode = codeMatch[0].toUpperCase().trim();
+            console.log('📋 Extracted payer code from payer_name:', extractedCode);
+            // Try to find TPA config by this extracted code
+            config = configData.configs.find((c: any) => c.ins_code === extractedCode);
+            if (!config) {
+              config = configData.configs.find((c: any) => c.tpa_id === extractedCode);
+            }
+            if (!config) {
+              config = configData.configs.find((c: any) => c.payer_code === extractedCode);
+            }
+            if (config) {
+              console.log('✅ Found TPA config by extracted payer code from payer_name:', extractedCode);
+              tpaInsCodeToUse = config.ins_code || extractedCode;
+            }
+          }
         }
+
+        // FALLBACK: If not found from payer_name, try to find config by response.tpa
         if (!config) {
-          config = configData.configs.find((c: any) => c.payer_code === response.tpa);
+          console.log('🔍 FALLBACK: Trying to find TPA config by response.tpa:', response.tpa);
+          config = configData.configs.find((c: any) => c.ins_code === response.tpa);
+          if (!config) {
+            config = configData.configs.find((c: any) => c.tpa_id === response.tpa);
+          }
+          if (!config) {
+            config = configData.configs.find((c: any) => c.payer_code === response.tpa);
+          }
+          if (config) {
+            console.log('✅ Found TPA config by response.tpa:', response.tpa);
+            tpaInsCodeToUse = config.ins_code || response.tpa;
+          }
         }
 
         if (!config) {
           console.log('⚠️ No TPA config found for:', response.tpa);
+          if (data.policy_network?.payer_name) {
+            console.log('⚠️ Also tried extracting from payer_name:', data.policy_network.payer_name);
+          }
           return [];
         }
 
-        const tpaInsCode = config.ins_code || response.tpa;
+        const tpaInsCode = tpaInsCodeToUse || config.ins_code || response.tpa;
 
         // Load payers
         const payersResponse = await fetch(`/api/clinic-config/payers?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
@@ -677,35 +930,44 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     console.log('🔍 Attempting to match payer. PayersConfig length:', currentPayersConfig.length);
     if (currentPayersConfig.length > 0) {
       // Extract payer code from multiple possible sources
+      // NOTE: TPA codes (like TPA036) are NOT payer codes - payer codes are INS codes (like INS005, INS038)
       let payerCodeToMatch: string | null = null;
 
-      // 1. Check if payer_id is already a payer code (e.g., "INS038", "TPA002")
-      if (data.payer_id) {
-        const payerIdTrimmed = String(data.payer_id).trim().toUpperCase();
-        if (/^(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+$/.test(payerIdTrimmed)) {
-          payerCodeToMatch = payerIdTrimmed;
-          console.log('📋 Extracted payer code from data.payer_id:', payerCodeToMatch);
-        }
-      }
-
-      // 2. Extract payer code from payer_name (e.g., "NATIONAL GENERAL INSURANCE COMPANY - DHA - INS038")
-      if (!payerCodeToMatch && data.policy_network?.payer_name) {
+      // 1. PRIORITY: Extract payer code from payer_name (e.g., "DUBAI INSURANCE COMPANY - INS005" or "NATIONAL GENERAL INSURANCE COMPANY - DHA - INS038")
+      // This is the most reliable source as it contains the actual insurance company code
+      // Valid patterns: INS012, TPA102, A004, D001 (prefix followed by digits only)
+      if (data.policy_network?.payer_name) {
         const payerName = data.policy_network.payer_name;
         console.log('📋 Checking payer_name for code:', payerName);
-        // Look for patterns like INS###, TPA###, etc. in the payer name (case-insensitive)
-        const codeMatch = payerName.match(/\b(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+\b/i);
+        // Match patterns: INS, TPA, A, or D followed by digits only (not letters)
+        const codeMatch = payerName.match(/\b(INS|TPA|SP|A|D)\d+\b/i);
         if (codeMatch) {
           payerCodeToMatch = codeMatch[0].toUpperCase().trim();
           console.log('📋 Extracted payer code from payer_name:', payerCodeToMatch);
         }
       }
 
+      // 2. Check if payer_id matches valid payer code pattern (INS, TPA, A, or D followed by digits only)
+      if (!payerCodeToMatch && data.payer_id) {
+        const payerIdTrimmed = String(data.payer_id).trim().toUpperCase();
+        // Valid patterns: INS012, TPA102, A004, D001 (prefix followed by digits only)
+        if (/^(INS|TPA|SP|A|D)\d+$/.test(payerIdTrimmed)) {
+          payerCodeToMatch = payerIdTrimmed;
+          console.log('📋 Extracted payer code from data.payer_id:', payerCodeToMatch);
+        } else {
+          console.log('⚠️ payer_id does not match valid payer code pattern (INS/TPA/A/D followed by digits):', payerIdTrimmed);
+        }
+      }
+
       // 3. Fallback: try patient_info.payer_id as payer code
       if (!payerCodeToMatch && data.patient_info?.payer_id) {
         const patientPayerIdTrimmed = String(data.patient_info.payer_id).trim().toUpperCase();
-        if (/^(INS|TPA|D|DHPO|RIYATI|SP|A)[0-9A-Z]+$/.test(patientPayerIdTrimmed)) {
+        // Valid patterns: INS012, TPA102, A004, D001 (prefix followed by digits only)
+        if (/^(INS|TPA|SP|A|D)\d+$/.test(patientPayerIdTrimmed)) {
           payerCodeToMatch = patientPayerIdTrimmed;
           console.log('📋 Extracted payer code from patient_info.payer_id:', payerCodeToMatch);
+        } else {
+          console.log('⚠️ patient_info.payer_id does not match valid payer code pattern (INS/TPA/A/D followed by digits):', patientPayerIdTrimmed);
         }
       }
 
@@ -810,23 +1072,74 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         }
       }
 
-      // Get network ID from selected network or Mantys response
-      let networkIdToUse: string | null = null;
+      // Get numeric network ID from config by matching network name/code
+      let networkIdToUse: number | null = null;
       if (selectedNetwork) {
-        // Try to find network ID from Mantys response networks
-        const networkFromMantys = data.policy_network?.all_networks?.find(
-          (n: any) => n.network_value === selectedNetwork || n.network === selectedNetwork
-        );
-        networkIdToUse = networkFromMantys?.network || data.policy_network?.network_id || selectedNetwork;
-      } else {
-        networkIdToUse = data.policy_network?.network_id || null;
+        // First, try to find in Aster networks config by matching network name or code
+        const matchingAsterNetwork = asterNetworksConfig.find((n: any) => {
+          const networkName = (n.network_name || '').toLowerCase().trim();
+          const networkCode = (n.network_code || '').toLowerCase().trim();
+          const selectedNetworkLower = selectedNetwork.toLowerCase().trim();
+          return networkName === selectedNetworkLower ||
+            networkCode === selectedNetworkLower ||
+            networkName.includes(selectedNetworkLower) ||
+            selectedNetworkLower.includes(networkName);
+        });
+
+        if (matchingAsterNetwork && matchingAsterNetwork.network_id) {
+          // Convert to number if it's a string
+          networkIdToUse = typeof matchingAsterNetwork.network_id === 'string'
+            ? parseInt(matchingAsterNetwork.network_id, 10)
+            : matchingAsterNetwork.network_id;
+          console.log('✅ Found network ID from config:', networkIdToUse, 'for network:', selectedNetwork);
+        } else {
+          // Fallback: try to find network ID from Mantys response
+          const networkFromMantys = data.policy_network?.all_networks?.find(
+            (n: any) => n.network_value === selectedNetwork || n.network === selectedNetwork
+          );
+          if (networkFromMantys && (networkFromMantys as any).network_id) {
+            networkIdToUse = typeof (networkFromMantys as any).network_id === 'string'
+              ? parseInt((networkFromMantys as any).network_id, 10)
+              : (networkFromMantys as any).network_id;
+          } else if (data.policy_network && (data.policy_network as any).network_id) {
+            networkIdToUse = typeof (data.policy_network as any).network_id === 'string'
+              ? parseInt((data.policy_network as any).network_id, 10)
+              : (data.policy_network as any).network_id;
+          }
+          if (networkIdToUse) {
+            console.log('✅ Found network ID from Mantys response:', networkIdToUse);
+          } else {
+            console.warn('⚠️ Could not find numeric network ID for:', selectedNetwork);
+          }
+        }
+      } else if (data.policy_network && (data.policy_network as any).network_id) {
+        networkIdToUse = typeof (data.policy_network as any).network_id === 'string'
+          ? parseInt((data.policy_network as any).network_id, 10)
+          : (data.policy_network as any).network_id;
+      }
+
+      // Get payerId from selectedPayer (receiver_payer_id) or fallback
+      const payerIdToUse = selectedPayer?.reciever_payer_id
+        ? (typeof selectedPayer.reciever_payer_id === 'string'
+          ? parseInt(selectedPayer.reciever_payer_id, 10)
+          : selectedPayer.reciever_payer_id)
+        : (data.patient_info?.payer_id
+          ? (typeof data.patient_info.payer_id === 'string'
+            ? parseInt(data.patient_info.payer_id, 10)
+            : data.patient_info.payer_id)
+          : null);
+
+      if (selectedPayer && payerIdToUse) {
+        console.log('✅ Using payer ID from selected payer:', payerIdToUse, 'payer:', selectedPayer.ins_tpa_name);
+      } else if (!payerIdToUse) {
+        console.warn('⚠️ No payer ID available - selectedPayer:', selectedPayer, 'data.patient_info.payer_id:', data.patient_info?.payer_id);
       }
 
       // Extract policy data from Mantys response, using config values
       const policyData = {
         policyId: data.patient_info?.policy_id || null,
         isActive: 1,
-        payerId: data.patient_info?.payer_id || null,
+        payerId: payerIdToUse,
         insuranceCompanyId: null,
         networkId: networkIdToUse,
         siteId: siteId, // From config or default
@@ -926,7 +1239,12 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       return;
     }
 
-    const insTpaPatId = 8402049; // TODO: Get actual insurance TPA patient ID from response
+    // Use fetched insTpaPatId or null
+    const insTpaPatIdForUpload = insTpaPatId || null;
+    console.log("📤 Using insTpaPatId for upload:", {
+      fetched: insTpaPatId,
+      using: insTpaPatIdForUpload,
+    });
 
     setUploadingFiles(true);
     const newUploadProgress: { [key: string]: number } = {};
@@ -947,7 +1265,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           patientId: finalPatientId,
           encounterId: finalEncounterId || 0, // Default to 0 if not provided
           appointmentId: finalAppointmentId,
-          insTpaPatId,
+          insTpaPatId: insTpaPatIdForUpload,
           fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,
           fileUrl: doc.s3_url,
         };
@@ -1044,7 +1362,15 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
           // Use insTpaPatId for insuranceMappingId in ordObj (not hospital_insurance_mapping_id)
           // But we still need hospital_insurance_mapping_id for the main body
-          const insTpaPatIdForOrder = 8402049; // This should match the insTpaPatId used in uploads
+          const insTpaPatIdForOrder = insTpaPatId || null; // Use fetched insTpaPatId or null
+          const physicianIdForOrder = enrichedPhysicianId || null; // Use fetched physicianId or null
+
+          console.log("🔍 Using values for save order:", {
+            insTpaPatId: insTpaPatIdForOrder,
+            physicianId: physicianIdForOrder,
+            fetchedInsTpaPatId: insTpaPatId,
+            fetchedPhysicianId: enrichedPhysicianId,
+          });
 
           // Call the save eligibility order API
           console.log("📤 Calling save-eligibility-order API with:", {
@@ -1053,7 +1379,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             encounterId: finalEncounterId,
             insuranceMappingId, // hospital_insurance_mapping_id for main body
             insTpaPatId: insTpaPatIdForOrder, // insTpaPatId for ordObj
-            physicianId: 11260,
+            physicianId: physicianIdForOrder,
             vendorId: 24,
             siteId: 31,
           });
@@ -1069,7 +1395,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               encounterId: finalEncounterId,
               insuranceMappingId, // hospital_insurance_mapping_id for main body
               insTpaPatId: insTpaPatIdForOrder, // insTpaPatId for ordObj.insuranceMappingId
-              physicianId: 11260, // Default physician ID
+              physicianId: physicianIdForOrder,
               authorizationNumber: "",
               authorizationName: "",
               createdBy: 13295, // Default user ID

@@ -24,8 +24,6 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
             if (appointments.length === 0) return;
 
             const statusMap: EligibilityStatus = {};
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
 
             try {
                 // Fetch eligibility history
@@ -34,59 +32,54 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
 
                 const historyItems = await response.json();
 
-                // Filter for today's eligibility checks (complete, error, pending, processing)
-                const todayEligibilityChecks = historyItems.filter((item: any) => {
+                // Filter for eligibility checks (complete, error, pending, processing)
+                // Show most recent check for each MPI, not just today's
+                const validEligibilityChecks = historyItems.filter((item: any) => {
                     // Must be complete, error, pending, or processing status
-                    if (!['complete', 'error', 'pending', 'processing'].includes(item.status)) return false;
-
-                    // Check if created today
-                    const createdAt = new Date(item.createdAt);
-                    createdAt.setHours(0, 0, 0, 0);
-                    if (createdAt.getTime() !== today.getTime()) return false;
-
-                    return true;
+                    return ['complete', 'error', 'pending', 'processing'].includes(item.status);
                 });
 
-                // Map MPI to eligibility status with priority: success > processing > error
-                // First pass: collect all statuses for each MPI
-                const mpiStatuses: { [mpi: string]: Set<'success' | 'error' | 'processing'> } = {};
+                // Map MPI to most recent eligibility status with priority: success > processing > error
+                // Group by MPI and find the most recent check for each
+                const mpiChecks: { [mpi: string]: { item: any; timestamp: number }[] } = {};
 
-                todayEligibilityChecks.forEach((item: any) => {
-                    if (item.patientMPI) {
-                        const mpi = item.patientMPI;
-                        if (!mpiStatuses[mpi]) {
-                            mpiStatuses[mpi] = new Set();
+                validEligibilityChecks.forEach((item: any) => {
+                    // Try multiple possible MPI field names
+                    const mpi = item.patientMPI || item.mpi || item.patient_mpi;
+                    if (mpi) {
+                        if (!mpiChecks[mpi]) {
+                            mpiChecks[mpi] = [];
                         }
-
-                        // Determine this item's status
-                        if (item.status === 'error') {
-                            mpiStatuses[mpi].add('error');
-                        } else if (item.status === 'pending' || item.status === 'processing') {
-                            mpiStatuses[mpi].add('processing');
-                        } else if (item.status === 'complete') {
-                            if (item.result && item.result.data) {
-                                const resultData = item.result.data;
-                                if (resultData.is_eligible === true) {
-                                    mpiStatuses[mpi].add('success');
-                                } else {
-                                    mpiStatuses[mpi].add('error');
-                                }
-                            } else {
-                                mpiStatuses[mpi].add('error');
-                            }
-                        }
+                        const timestamp = item.createdAt ? new Date(item.createdAt).getTime() : 0;
+                        mpiChecks[mpi].push({ item, timestamp });
                     }
                 });
 
-                // Second pass: apply priority (success > processing > error)
-                Object.keys(mpiStatuses).forEach((mpi) => {
-                    const statuses = mpiStatuses[mpi];
-                    if (statuses.has('success')) {
-                        statusMap[mpi] = 'success';
-                    } else if (statuses.has('processing')) {
-                        statusMap[mpi] = 'processing';
-                    } else if (statuses.has('error')) {
+                // For each MPI, find the most recent check and determine status
+                Object.keys(mpiChecks).forEach((mpi) => {
+                    const checks = mpiChecks[mpi];
+                    // Sort by timestamp (most recent first)
+                    checks.sort((a, b) => b.timestamp - a.timestamp);
+
+                    // Use the most recent check
+                    const mostRecent = checks[0].item;
+
+                    // Determine status with priority: success > processing > error
+                    if (mostRecent.status === 'error') {
                         statusMap[mpi] = 'error';
+                    } else if (mostRecent.status === 'pending' || mostRecent.status === 'processing') {
+                        statusMap[mpi] = 'processing';
+                    } else if (mostRecent.status === 'complete') {
+                        if (mostRecent.result && mostRecent.result.data) {
+                            const resultData = mostRecent.result.data;
+                            if (resultData.is_eligible === true) {
+                                statusMap[mpi] = 'success';
+                            } else {
+                                statusMap[mpi] = 'error';
+                            }
+                        } else {
+                            statusMap[mpi] = 'error';
+                        }
                     }
                 });
 
