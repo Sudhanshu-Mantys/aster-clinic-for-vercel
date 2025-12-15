@@ -6,6 +6,8 @@ interface ModalProps {
   children: React.ReactNode
   title?: string
   showCloseButton?: boolean
+  onMinimize?: () => void
+  showMinimizeButton?: boolean
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -13,7 +15,9 @@ export const Modal: React.FC<ModalProps> = ({
   onClose,
   children,
   title,
-  showCloseButton = true
+  showCloseButton = true,
+  onMinimize,
+  showMinimizeButton = false
 }) => {
   // Handle escape key
   useEffect(() => {
@@ -48,24 +52,38 @@ export const Modal: React.FC<ModalProps> = ({
       {/* Modal Content */}
       <div className="relative bg-white rounded-lg shadow-xl max-w-4xl min-w-[500px] max-h-[90vh] w-full mx-4 overflow-hidden flex flex-col">
         {/* Header */}
-        {(title || showCloseButton) && (
+        {(title || showCloseButton || showMinimizeButton) && (
           <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
             {title && (
               <h2 className="text-xl font-semibold text-gray-900">
                 {title}
               </h2>
             )}
-            {showCloseButton && (
-              <button
-                onClick={onClose}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-                aria-label="Close modal"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {showMinimizeButton && onMinimize && (
+                <button
+                  onClick={onMinimize}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label="Minimize modal"
+                  title="Minimize (search continues in background)"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                  </svg>
+                </button>
+              )}
+              {showCloseButton && (
+                <button
+                  onClick={onClose}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label="Close modal"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         )}
 

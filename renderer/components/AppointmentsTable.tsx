@@ -18,6 +18,40 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
 }) => {
     const [eligibilityStatus, setEligibilityStatus] = useState<EligibilityStatus>({});
 
+    // Helper function to extract TPA name from appointment data
+    const getTPAName = (appointment: AppointmentData): string | null => {
+        // First, check if tpa_name exists (in case API provides it)
+        if ((appointment as any).tpa_name) {
+            return (appointment as any).tpa_name;
+        }
+
+        // receiver_name is likely the TPA name
+        if (appointment.receiver_name) {
+            return appointment.receiver_name;
+        }
+
+        // Try to extract TPA from network_name (e.g., "GN - NEXTCARE" -> "NEXTCARE")
+        if (appointment.network_name) {
+            const networkParts = appointment.network_name.split(' - ');
+            if (networkParts.length > 1) {
+                // Take the last part which is usually the TPA name
+                const tpaFromNetwork = networkParts[networkParts.length - 1].trim();
+                // Map common TPA names
+                const tpaMap: Record<string, string> = {
+                    'NEXTCARE': 'NextCare',
+                    'NAS': 'NAS',
+                    'NEURON': 'Neuron',
+                    'DAMAN': 'Daman',
+                    'MEDNET': 'Mednet',
+                    'OMAN': 'Oman Insurance',
+                };
+                return tpaMap[tpaFromNetwork.toUpperCase()] || tpaFromNetwork;
+            }
+        }
+
+        return null;
+    };
+
     // Check eligibility status for all appointments
     useEffect(() => {
         const checkEligibilityStatus = async () => {
@@ -230,19 +264,31 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                             <td className="px-4 py-3 text-sm text-gray-900">
                                 <div className="max-w-xs flex items-start gap-2">
                                     <div className="flex-1 min-w-0">
-                                        <p className="font-medium truncate">
-                                            {appointment.payer_name || appointment.receiver_name || appointment.payer_type || "N/A"}
-                                        </p>
-                                        {appointment.network_name && (
-                                            <p className="text-xs text-gray-500 truncate">
-                                                {appointment.network_name}
-                                            </p>
-                                        )}
-                                        {appointment.payer_type && appointment.payer_name && (
-                                            <p className="text-xs text-gray-500 truncate">
-                                                Type: {appointment.payer_type}
-                                            </p>
-                                        )}
+                                        {(() => {
+                                            const tpaName = getTPAName(appointment);
+                                            return (
+                                                <>
+                                                    <p className="font-medium truncate">
+                                                        {tpaName || appointment.network_name || appointment.payer_name || appointment.payer_type || "N/A"}
+                                                    </p>
+                                                    {tpaName && appointment.network_name && (
+                                                        <p className="text-xs text-gray-500 truncate">
+                                                            {appointment.network_name}
+                                                        </p>
+                                                    )}
+                                                    {tpaName && appointment.payer_name && (
+                                                        <p className="text-xs text-gray-500 truncate">
+                                                            {appointment.payer_name}
+                                                        </p>
+                                                    )}
+                                                    {appointment.payer_type && (
+                                                        <p className="text-xs text-gray-500 truncate">
+                                                            Type: {appointment.payer_type}
+                                                        </p>
+                                                    )}
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                     {/* Eligibility status indicator */}
                                     {eligibilityStatus[appointment.mpi] && (
@@ -274,7 +320,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                                             ) : (
                                                 <span
                                                     className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600"
-                                                    title="Eligibility check failed or error"
+                                                    title="Eligibility check failed"
                                                 >
                                                     <svg
                                                         className="w-3 h-3"

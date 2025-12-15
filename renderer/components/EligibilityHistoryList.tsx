@@ -254,7 +254,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
       pending: "Pending",
       processing: "Processing",
       complete: "Complete",
-      error: "Error",
+      error: "Failed",
     };
 
     return (

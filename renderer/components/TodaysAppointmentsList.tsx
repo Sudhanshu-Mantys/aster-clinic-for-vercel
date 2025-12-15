@@ -52,7 +52,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const [loadingEligibilityItem, setLoadingEligibilityItem] = useState(false);
   const [freshEligibilityResult, setFreshEligibilityResult] = useState<any>(null);
   const [isPreviousSearchesExpanded, setIsPreviousSearchesExpanded] = useState(false);
-  const [todaySearchesResults, setTodaySearchesResults] = useState<Record<string, { copay?: string; deductible?: string }>>({});
+  const [todaySearchesResults, setTodaySearchesResults] = useState<Record<string, { copay?: string; deductible?: string; isEligible?: boolean }>>({});
 
   const fetchAppointments = async (filters?: AppointmentFilters) => {
     setIsLoading(true);
@@ -198,45 +198,57 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
         setPreviousSearches(searches);
 
-        // Fetch eligibility results for today's searches to get copay/deductible
+        // Fetch eligibility results for today's searches to get copay/deductible and eligibility status
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const todaySearches = searches.filter((search) => {
           if (!search.createdAt) return false;
           const searchDate = new Date(search.createdAt);
           searchDate.setHours(0, 0, 0, 0);
-          return searchDate.getTime() === today.getTime() && search.status === "complete";
+          return searchDate.getTime() === today.getTime();
         });
 
-        // Fetch results for today's searches
-        const resultsMap: Record<string, { copay?: string; deductible?: string }> = {};
+        // Fetch results for today's searches (including complete and error statuses that might have results)
+        const resultsMap: Record<string, { copay?: string; deductible?: string; isEligible?: boolean }> = {};
         for (const search of todaySearches) {
-          try {
-            const historyItem = await EligibilityHistoryService.getByTaskId(search.taskId);
-            if (historyItem?.result?.data) {
-              const data = historyItem.result.data;
-              // Extract copay and deductible from the first copay detail
-              const copayDetail = data.copay_details_to_fill?.[0];
-              if (copayDetail?.values_to_fill) {
-                const values = copayDetail.values_to_fill;
-                // Try to find copay percentage (usually in MEDICINES or CONSULTATION)
-                const medicineCopay = values.MEDICINES?.copay;
-                const consultationCopay = values.CONSULTATION?.copay;
-                const copayValue = medicineCopay || consultationCopay || "0";
+          // Only fetch results for complete or error statuses (they might have result data)
+          if (search.status === "complete" || search.status === "error") {
+            try {
+              const historyItem = await EligibilityHistoryService.getByTaskId(search.taskId);
+              if (historyItem?.result?.data) {
+                const data = historyItem.result.data;
+                // Extract eligibility status
+                const isEligible = data.is_eligible ?? false;
 
-                // Try to find deductible
-                const medicineDeductible = values.MEDICINES?._maxDeductible || values.MEDICINES?.deductible;
-                const consultationDeductible = values.CONSULTATION?._maxDeductible || values.CONSULTATION?.deductible;
-                const deductibleValue = medicineDeductible || consultationDeductible || "0";
+                // Extract copay and deductible from the first copay detail
+                const copayDetail = data.copay_details_to_fill?.[0];
+                if (copayDetail?.values_to_fill) {
+                  const values = copayDetail.values_to_fill;
+                  // Try to find copay percentage (usually in MEDICINES or CONSULTATION)
+                  const medicineCopay = values.MEDICINES?.copay;
+                  const consultationCopay = values.CONSULTATION?.copay;
+                  const copayValue = medicineCopay || consultationCopay || "0";
 
-                resultsMap[search.taskId] = {
-                  copay: copayValue,
-                  deductible: deductibleValue,
-                };
+                  // Try to find deductible
+                  const medicineDeductible = values.MEDICINES?._maxDeductible || values.MEDICINES?.deductible;
+                  const consultationDeductible = values.CONSULTATION?._maxDeductible || values.CONSULTATION?.deductible;
+                  const deductibleValue = medicineDeductible || consultationDeductible || "0";
+
+                  resultsMap[search.taskId] = {
+                    copay: copayValue,
+                    deductible: deductibleValue,
+                    isEligible: isEligible,
+                  };
+                } else {
+                  // Store eligibility even if copay details are missing
+                  resultsMap[search.taskId] = {
+                    isEligible: isEligible,
+                  };
+                }
               }
+            } catch (error) {
+              console.error(`Error fetching result for task ${search.taskId}:`, error);
             }
-          } catch (error) {
-            console.error(`Error fetching result for task ${search.taskId}:`, error);
           }
         }
         setTodaySearchesResults(resultsMap);
@@ -621,12 +633,12 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                   {/* Eligibility Checks Today Section */}
                   {todaySearches.length > 0 && (
                     <div>
-                      <div className="bg-green-100 px-4 py-2 rounded-t">
+                      <div className="bg-gray-100 px-4 py-2 rounded-t">
                         <h3 className="text-sm font-bold text-gray-900">
-                          ✓ Eligibility Checks Today ({todaySearches.length})
+                          Eligibility Checks Today ({todaySearches.length})
                         </h3>
                       </div>
-                      <div className="bg-green-50 border-2 border-green-200 rounded-b p-3 space-y-3">
+                      <div className="bg-gray-50 border-2 border-gray-200 rounded-b p-3 space-y-3">
                         {todaySearches.map((search) => {
                           const date = search.createdAt ? new Date(search.createdAt) : null;
                           const timeString = date && !isNaN(date.getTime())
@@ -651,14 +663,43 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                             return tpaMap[code] || code;
                           };
 
+                          // Determine colors based on status and eligibility
+                          const result = todaySearchesResults[search.taskId];
+                          const isComplete = search.status === "complete";
+                          const isEligible = result?.isEligible ?? false;
+                          const isPendingOrError = search.status === "pending" || search.status === "processing" || search.status === "error";
+
+                          // Color logic: pending/error/failed → yellow, complete+eligible → green, complete+not eligible → red
+                          let bgColor = "bg-yellow-50";
+                          let borderColor = "border-yellow-300";
+                          let hoverBgColor = "hover:bg-yellow-100";
+                          let iconBgColor = "bg-yellow-500";
+                          let iconPath = "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"; // Clock icon for pending/default
+
+                          if (isComplete) {
+                            if (isEligible) {
+                              bgColor = "bg-green-50";
+                              borderColor = "border-green-300";
+                              hoverBgColor = "hover:bg-green-100";
+                              iconBgColor = "bg-green-500";
+                              iconPath = "M5 13l4 4L19 7"; // Checkmark icon
+                            } else {
+                              bgColor = "bg-red-50";
+                              borderColor = "border-red-300";
+                              hoverBgColor = "hover:bg-red-100";
+                              iconBgColor = "bg-red-500";
+                              iconPath = "M6 18L18 6M6 6l12 12"; // X icon
+                            }
+                          }
+
                           return (
                             <div
                               key={search.taskId}
                               onClick={() => handlePreviousSearchClick(search)}
-                              className="bg-green-50 border-2 border-green-300 rounded-lg p-4 cursor-pointer hover:bg-green-100 transition-colors"
+                              className={`${bgColor} border-2 ${borderColor} rounded-lg p-4 cursor-pointer ${hoverBgColor} transition-colors`}
                             >
                               <div className="flex items-start gap-3">
-                                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
+                                <div className={`flex-shrink-0 w-8 h-8 rounded-full ${iconBgColor} flex items-center justify-center`}>
                                   <svg
                                     className="w-5 h-5 text-white"
                                     fill="none"
@@ -669,7 +710,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                       strokeLinecap="round"
                                       strokeLinejoin="round"
                                       strokeWidth={3}
-                                      d="M5 13l4 4L19 7"
+                                      d={iconPath}
                                     />
                                   </svg>
                                 </div>
@@ -686,9 +727,8 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                     {getTPAName(search.tpaCode)} ({search.tpaCode})
                                   </div>
                                   <div className="text-sm text-gray-700">
-                                    Status: {search.status === "complete" ? "Active" : search.status}
+                                    Status: {search.status === "complete" ? "Active" : search.status === "error" ? "failed" : search.status}
                                     {search.status === "complete" && (() => {
-                                      const result = todaySearchesResults[search.taskId];
                                       const copay = result?.copay ? `${result.copay}%` : "30%";
                                       const deductible = result?.deductible || "20.00";
                                       return ` • Copay: ${copay} • Deductible: ${deductible}`;
@@ -740,7 +780,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                 >
                                   <span className="text-gray-900">
                                     {search.tpaCode}
-                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status}`}
+                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status === "error" ? "failed" : search.status}`}
                                   </span>
                                 </div>
                               );
@@ -755,7 +795,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                 >
                                   <span className="text-gray-900">
                                     {search.tpaCode}
-                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status}`}
+                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status === "error" ? "failed" : search.status}`}
                                   </span>
                                 </div>
                               );
@@ -790,7 +830,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                 className="bg-white hover:bg-gray-100 rounded px-3 py-2 text-sm cursor-pointer transition-colors"
                               >
                                 <span className="text-gray-900">
-                                  {formattedDate} - {getTPAName(search.tpaCode)} ({search.tpaCode}) - Status: {search.status === "complete" ? "Active" : search.status}
+                                  {formattedDate} - {getTPAName(search.tpaCode)} ({search.tpaCode}) - Status: {search.status === "complete" ? "Active" : search.status === "error" ? "failed" : search.status}
                                 </span>
                               </div>
                             );

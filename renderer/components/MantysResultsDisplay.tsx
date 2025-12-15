@@ -190,17 +190,24 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               const insuranceRecords = context.insuranceDetails.body.Data;
               console.log(`📋 Found ${insuranceRecords.length} insurance record(s) in Redis context`);
 
-              // Use the first entry
-              const selectedInsurance = insuranceRecords[0];
+              // Find entry with is_current: 1
+              const selectedInsurance = insuranceRecords.find((record: any) => record.is_current === 1);
+
+              if (!selectedInsurance) {
+                console.error("❌ No active insurance policy found (is_current: 1)");
+                alert("There is no active Insurance policy for this user, please add a policy to attach documents");
+                return;
+              }
 
               // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
               const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
               if (insTpaPatIdValue) {
-                console.log("✅ Selected insurance from Redis (first entry):", {
+                console.log("✅ Selected insurance from Redis (is_current: 1):", {
                   insTpaPatId: insTpaPatIdValue,
                   status: selectedInsurance.insurance_status,
                   payer_name: selectedInsurance.payer_name,
                   tpa_name: selectedInsurance.tpa_name,
+                  is_current: selectedInsurance.is_current,
                   total_records: insuranceRecords.length,
                 });
                 setInsTpaPatId(insTpaPatIdValue);
@@ -258,17 +265,24 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             const insuranceRecords = insuranceResponse.body.Data;
             console.log(`📋 Fetched ${insuranceRecords.length} insurance record(s) from API`);
 
-            // Use the first entry
-            const selectedInsurance = insuranceRecords[0];
+            // Find entry with is_current: 1
+            const selectedInsurance = insuranceRecords.find((record: any) => record.is_current === 1);
+
+            if (!selectedInsurance) {
+              console.error("❌ No active insurance policy found (is_current: 1)");
+              alert("There is no active Insurance policy for this user, please add a policy to attach documents");
+              return;
+            }
 
             // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
             const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
             if (insTpaPatIdValue) {
-              console.log("✅ Selected insurance from API (first entry):", {
+              console.log("✅ Selected insurance from API (is_current: 1):", {
                 insTpaPatId: insTpaPatIdValue,
                 status: selectedInsurance.insurance_status,
                 payer_name: selectedInsurance.payer_name,
                 tpa_name: selectedInsurance.tpa_name,
+                is_current: selectedInsurance.is_current,
                 total_records: insuranceRecords.length,
               });
               setInsTpaPatId(insTpaPatIdValue);
@@ -1973,11 +1987,11 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             <span className="font-medium text-gray-700">
               Network (Card Type):
             </span>
-            <p className="text-gray-900 mt-1">
+            <div className="text-gray-900 mt-1">
               <Badge className="bg-blue-100 text-blue-800 border-blue-200">
                 {keyFields.network || "N/A"}
               </Badge>
-            </p>
+            </div>
           </div>
           <div>
             <span className="font-medium text-gray-700">Policy Number:</span>

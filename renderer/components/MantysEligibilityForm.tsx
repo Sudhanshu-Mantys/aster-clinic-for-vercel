@@ -74,6 +74,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     string | null
   >(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
   // Status Polling State
@@ -333,8 +334,9 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         "";
       setPhoneNumber(phone);
 
-      // Pre-fill Emirates ID (uid_value)
-      if (patientData.uid_value) {
+      // Pre-fill Emirates ID (uid_value) - but only if we don't have insurance data with member ID
+      // This will be overridden by insurance data if available
+      if (patientData.uid_value && !insuranceData) {
         setEmiratesId(patientData.uid_value);
       }
     }
@@ -412,10 +414,30 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         }
       }
 
-      // Pre-fill member ID if available
-      if (insuranceData.tpa_policy_id) {
+      // Pre-fill member ID if available - check multiple fields in priority order
+      // Priority: tpa_policy_id > insurance_policy_id > policy_number > ins_holderid
+      const memberId =
+        (insuranceData.tpa_policy_id && insuranceData.tpa_policy_id.trim()) ||
+        (insuranceData.insurance_policy_id && insuranceData.insurance_policy_id.trim()) ||
+        (insuranceData.policy_number && insuranceData.policy_number.trim()) ||
+        (insuranceData.ins_holderid && insuranceData.ins_holderid.trim()) ||
+        null;
+
+      if (memberId) {
+        console.log("✅ Pre-filling member ID from insurance data:", memberId, "from fields:", {
+          tpa_policy_id: insuranceData.tpa_policy_id,
+          insurance_policy_id: insuranceData.insurance_policy_id,
+          policy_number: insuranceData.policy_number,
+          ins_holderid: insuranceData.ins_holderid
+        });
         setIdType("CARDNUMBER");
-        setEmiratesId(insuranceData.tpa_policy_id);
+        setEmiratesId(memberId);
+      } else {
+        // If no member ID found in insurance data, fall back to patient Emirates ID
+        if (patientData?.uid_value) {
+          console.log("⚠️ No member ID in insurance data, using patient Emirates ID:", patientData.uid_value);
+          setEmiratesId(patientData.uid_value);
+        }
       }
 
       // Pre-fill payer name
@@ -1096,14 +1118,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         setCurrentStatus("complete");
         setMantysResponse(historyItem.result);
         setShowResults(true);
-        setIsSubmitting(false);
+        setIsMinimized(false); // Reopen modal when complete to show results
+        // Keep isSubmitting true so modal stays open to show completion status
         if (monitoringIntervalRef.current) {
           clearInterval(monitoringIntervalRef.current);
           monitoringIntervalRef.current = null;
         }
       } else if (historyItem.status === "error") {
         setApiError(historyItem.error || "Eligibility check failed");
-        setIsSubmitting(false);
+        setIsMinimized(false); // Reopen modal when error occurs
+        // Keep isSubmitting true so modal stays open to show error
         if (monitoringIntervalRef.current) {
           clearInterval(monitoringIntervalRef.current);
           monitoringIntervalRef.current = null;
@@ -1322,11 +1346,15 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     <>
       {/* Extraction Progress Modal */}
       <ExtractionProgressModal
-        isOpen={isSubmitting}
+        isOpen={isSubmitting && !isMinimized}
         onClose={() => {
           if (currentStatus === "complete") {
             setIsSubmitting(false);
+            setIsMinimized(false);
           }
+        }}
+        onMinimize={() => {
+          setIsMinimized(true);
         }}
         status={currentStatus}
         statusMessage={statusMessage}
