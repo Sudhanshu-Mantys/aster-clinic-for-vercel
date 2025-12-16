@@ -23,6 +23,7 @@ import { EligibilityCheckMetadata } from "../lib/redis-eligibility-mapping";
 import { EligibilityHistoryService, EligibilityHistoryItem } from "../utils/eligibilityHistory";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
+import { fetchWithTimeout } from "../lib/request-cache";
 
 interface TodaysAppointmentsListProps {
   onRefresh?: () => void;
@@ -53,6 +54,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const [freshEligibilityResult, setFreshEligibilityResult] = useState<any>(null);
   const [isPreviousSearchesExpanded, setIsPreviousSearchesExpanded] = useState(false);
   const [todaySearchesResults, setTodaySearchesResults] = useState<Record<string, { copay?: string; deductible?: string; isEligible?: boolean }>>({});
+  const [emiratesIdFromRedis, setEmiratesIdFromRedis] = useState<string | null>(null);
 
   const fetchAppointments = async (filters?: AppointmentFilters) => {
     setIsLoading(true);
@@ -113,6 +115,35 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     setInsuranceError(null);
     setExpandedInsurance(new Set());
     setPreviousSearches([]);
+    setEmiratesIdFromRedis(null);
+
+    // Fetch Emirates ID from appointment Redis (nationality_id)
+    if (appointment.appointment_id) {
+      try {
+        const contextResponse = await fetchWithTimeout(
+          "/api/patient/context",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              appointmentId: appointment.appointment_id,
+              mpi: appointment.mpi,
+            }),
+          },
+          3000 // 3 second timeout
+        );
+
+        if (contextResponse.ok) {
+          const context = await contextResponse.json();
+          if (context.nationality_id) {
+            setEmiratesIdFromRedis(context.nationality_id);
+            console.log("✅ Fetched Emirates ID from appointment Redis (nationality_id):", context.nationality_id);
+          }
+        }
+      } catch (error) {
+        console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+      }
+    }
 
     // Fetch insurance details for the patient
     if (appointment.patient_id) {
@@ -270,6 +301,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       setInsuranceDetails([]);
       setInsuranceError(null);
       setExpandedInsurance(new Set());
+      setEmiratesIdFromRedis(null);
     }, 300);
   };
 
@@ -286,26 +318,32 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
         // Use drawer for completed checks, modal for active checks
         if (historyItem.status === "complete" && historyItem.result) {
-          // Try to fetch fresh result from API
-          try {
-            const response = await fetch('/api/mantys/check-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ task_id: search.taskId }),
-            });
+          // Only fetch fresh result from API if we don't have complete data in localStorage
+          // This reduces unnecessary API calls
+          if (historyItem.result?.data) {
+            // We already have the result data, use cached result directly
+            setFreshEligibilityResult(null); // Will use cached result from historyItem
+          } else {
+            // Only fetch from API if result data is missing
+            try {
+              const response = await fetch('/api/mantys/check-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: search.taskId }),
+              });
 
-            if (response.ok) {
-              const apiResponse = await response.json();
-              if (apiResponse.status === 'complete' && apiResponse.result) {
-                if (apiResponse.result.data) {
-                  setFreshEligibilityResult(apiResponse.result);
+              if (response.ok) {
+                const apiResponse = await response.json();
+                if (apiResponse.status === 'complete' && apiResponse.result) {
+                  if (apiResponse.result.data) {
+                    setFreshEligibilityResult(apiResponse.result);
+                  }
                 }
               }
+            } catch (error) {
+              console.error('Error fetching fresh result:', error);
             }
-          } catch (error) {
-            console.error('Error fetching fresh result:', error);
           }
-
           setShowEligibilityDrawer(true);
         } else {
           setShowEligibilityModal(true);
@@ -391,6 +429,10 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
     // Create a minimal PatientData object from appointment data
     const nameParts = apt.full_name?.split(" ") || [];
+    // Use nationality_id from appointment as uid_value for Emirates ID
+    // This ensures the form can use it immediately, while still preferring Redis value if available
+    // Prefer Redis value if available (fetched asynchronously), otherwise use appointment's nationality_id
+    const emiratesId = emiratesIdFromRedis || apt.nationality_id;
     return {
       patient_id: apt.patient_id,
       mpi: apt.mpi,
@@ -404,6 +446,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       email: apt.email || "",
       appointment_id: apt.appointment_id,
       encounter_id: (apt as any).encounter_id, // May be in the data
+      uid_value: emiratesId || undefined, // Set nationality_id as uid_value so form can use it
     } as PatientData;
   };
 
@@ -555,6 +598,14 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                     </span>
                   </div>
                 )}
+                {(emiratesIdFromRedis || selectedAppointment.nationality_id) && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-gray-700">Emirates ID:</span>
+                    <span className="text-gray-900">
+                      {emiratesIdFromRedis || selectedAppointment.nationality_id}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-gray-700">
                     Appointment ID:
@@ -666,29 +717,54 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                           // Determine colors based on status and eligibility
                           const result = todaySearchesResults[search.taskId];
                           const isComplete = search.status === "complete";
+                          const isError = search.status === "error";
                           const isEligible = result?.isEligible ?? false;
-                          const isPendingOrError = search.status === "pending" || search.status === "processing" || search.status === "error";
+                          // If status is complete and we have copay/deductible data, it means the policy is active
+                          // Even if isEligible is false, if we have copay/deductible, the policy is active
+                          const hasActivePolicyData = isComplete && (result?.copay || result?.deductible);
+                          const isPendingOrProcessing = search.status === "pending" || search.status === "processing";
 
-                          // Color logic: pending/error/failed → yellow, complete+eligible → green, complete+not eligible → red
+                          // Color logic: error → yellow, pending/processing → yellow, complete → green (default), complete+explicitly not eligible → red
                           let bgColor = "bg-yellow-50";
                           let borderColor = "border-yellow-300";
                           let hoverBgColor = "hover:bg-yellow-100";
                           let iconBgColor = "bg-yellow-500";
                           let iconPath = "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"; // Clock icon for pending/default
 
-                          if (isComplete) {
-                            if (isEligible) {
+                          if (isError) {
+                            // Error status always shows yellow
+                            bgColor = "bg-yellow-50";
+                            borderColor = "border-yellow-300";
+                            hoverBgColor = "hover:bg-yellow-100";
+                            iconBgColor = "bg-yellow-500";
+                            iconPath = "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"; // Clock icon
+                          } else if (isComplete) {
+                            // Complete status means the check succeeded and shows "Active" with copay/deductible
+                            // Default to green unless we explicitly know it's not eligible AND has no policy data
+                            // If result is not loaded yet, default to green (since complete status means active policy)
+                            if (result !== undefined) {
+                              // We have result data - check if explicitly not eligible and no policy data
+                              if (!isEligible && !hasActivePolicyData) {
+                                bgColor = "bg-red-50";
+                                borderColor = "border-red-300";
+                                hoverBgColor = "hover:bg-red-100";
+                                iconBgColor = "bg-red-500";
+                                iconPath = "M6 18L18 6M6 6l12 12"; // X icon
+                              } else {
+                                // Has policy data or is eligible - show green
+                                bgColor = "bg-green-50";
+                                borderColor = "border-green-300";
+                                hoverBgColor = "hover:bg-green-100";
+                                iconBgColor = "bg-green-500";
+                                iconPath = "M5 13l4 4L19 7"; // Checkmark icon
+                              }
+                            } else {
+                              // Result not loaded yet, but status is complete - default to green (active policy)
                               bgColor = "bg-green-50";
                               borderColor = "border-green-300";
                               hoverBgColor = "hover:bg-green-100";
                               iconBgColor = "bg-green-500";
                               iconPath = "M5 13l4 4L19 7"; // Checkmark icon
-                            } else {
-                              bgColor = "bg-red-50";
-                              borderColor = "border-red-300";
-                              hoverBgColor = "hover:bg-red-100";
-                              iconBgColor = "bg-red-500";
-                              iconPath = "M6 18L18 6M6 6l12 12"; // X icon
                             }
                           }
 

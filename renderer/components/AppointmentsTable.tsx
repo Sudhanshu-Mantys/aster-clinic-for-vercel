@@ -125,10 +125,11 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
 
         checkEligibilityStatus();
 
-        // Refresh eligibility status every 5 seconds to catch status updates (especially for processing -> complete/error)
+        // Refresh eligibility status every 15 seconds to catch status updates (especially for processing -> complete/error)
+        // Reduced from 5 seconds to reduce API load
         const interval = setInterval(() => {
             checkEligibilityStatus();
-        }, 5000);
+        }, 15000);
 
         return () => clearInterval(interval);
     }, [appointments]);

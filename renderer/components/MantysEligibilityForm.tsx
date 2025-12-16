@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import Select from "react-select";
 import { PatientData, InsuranceData } from "../lib/api";
 import { Button } from "./ui/button";
+import { cachedFetch, fetchWithTimeout } from "../lib/request-cache";
 import {
   MantysEligibilityResponse,
   TPACode,
@@ -110,6 +111,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   const [tpaConfig, setTpaConfig] = useState<any>(null);
   const [doctorsList, setDoctorsList] = useState<any[]>([]);
   const [isDoctorCompulsory, setIsDoctorCompulsory] = useState(false);
+  const [isLoadingTPAConfig, setIsLoadingTPAConfig] = useState(false);
+  const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
 
   // Previous Searches State
   const [previousSearches, setPreviousSearches] = useState<EligibilityCheckMetadata[]>([]);
@@ -133,9 +136,13 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
   const loadTPAConfig = async (identifier: string) => {
     if (!selectedClinicId || !identifier) return;
+    // Skip if already loading
+    if (isLoadingTPAConfig) return;
+
+    setIsLoadingTPAConfig(true);
     try {
       console.log("🔍 Loading TPA config for identifier:", identifier, "clinic:", selectedClinicId);
-      const response = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
+      const response = await cachedFetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
       if (response.ok) {
         const data = await response.json();
         console.log("📦 Received TPA configs:", data.configs?.length || 0, "configs");
@@ -191,19 +198,27 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       }
     } catch (error) {
       console.error("❌ Failed to load TPA config:", error);
+    } finally {
+      setIsLoadingTPAConfig(false);
     }
   };
 
   const loadDoctors = async () => {
     if (!selectedClinicId) return;
+    // Skip if already loading or already loaded
+    if (isLoadingDoctors || doctorsList.length > 0) return;
+
+    setIsLoadingDoctors(true);
     try {
-      const response = await fetch(`/api/clinic-config/doctors?clinic_id=${selectedClinicId}`);
+      const response = await cachedFetch(`/api/clinic-config/doctors?clinic_id=${selectedClinicId}`);
       if (response.ok) {
         const data = await response.json();
         setDoctorsList(data.configs || []);
       }
     } catch (error) {
       console.error("Failed to load doctors:", error);
+    } finally {
+      setIsLoadingDoctors(false);
     }
   };
 
@@ -315,137 +330,255 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   }, [patientData?.appointment_id, doctorsList.length, selectedClinicId]);
 
   useEffect(() => {
-    if (patientData) {
-      // Pre-fill name
-      const fullName = [
-        patientData.firstname,
-        patientData.middlename,
-        patientData.lastname,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      setName(fullName);
+    const loadPatientData = async () => {
+      if (patientData) {
+        // Pre-fill name
+        const fullName = [
+          patientData.firstname,
+          patientData.middlename,
+          patientData.lastname,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        setName(fullName);
 
-      // Pre-fill phone
-      const phone =
-        patientData.phone ||
-        patientData.home_phone ||
-        patientData.phone_other ||
-        "";
-      setPhoneNumber(phone);
+        // Pre-fill phone
+        const phone =
+          patientData.phone ||
+          patientData.home_phone ||
+          patientData.phone_other ||
+          "";
+        setPhoneNumber(phone);
 
-      // Pre-fill Emirates ID (uid_value) - but only if we don't have insurance data with member ID
-      // This will be overridden by insurance data if available
-      if (patientData.uid_value && !insuranceData) {
-        setEmiratesId(patientData.uid_value);
-      }
-    }
+        // Pre-fill Emirates ID from appointment Redis (nationality_id) - but only if we don't have insurance data with member ID
+        // This will be overridden by insurance data if available
+        if (!insuranceData) {
+          let emiratesIdValue: string | null = null;
 
-    if (insuranceData) {
-      // Try to map insurance TPA name to options
-      // This is a simplified mapping - you may need to enhance this
-      const tpaMapping: Record<string, string> = {
-        Neuron: "TPA001",
-        NextCare: "TPA002",
-        "Al Madallah": "TPA003",
-        NAS: "TPA004",
-        "First Med": "TPA010",
-        FMC: "TPA010",
-        Daman: "INS026",
-        "Daman Thiqa": "TPA023",
-        AXA: "INS010",
-        ADNIC: "INS017",
-        Mednet: "TPA036",
-        Oman: "INS012",
-        Inayah: "TPA008",
-      };
+          // First, use uid_value if available (it may already contain nationality_id from appointment)
+          if (patientData.uid_value && patientData.uid_value.trim()) {
+            emiratesIdValue = patientData.uid_value.trim();
+            console.log("✅ Using Emirates ID from patientData.uid_value:", emiratesIdValue);
+          }
 
-      // Check both tpa_name and insurance_name for mapping
-      const tpaName = insuranceData.tpa_name;
-      const insuranceName = insuranceData.insurance_name;
-      const payerName = insuranceData.payer_name;
-      const receiverCode = insuranceData.receiver_code;
-      const payerCode = insuranceData.payer_code;
+          // Then try to get nationality_id from appointment Redis if we have appointment_id (this will override if found)
+          if (patientData.appointment_id && (!emiratesIdValue || emiratesIdValue.length === 0)) {
+            try {
+              const contextResponse = await fetchWithTimeout(
+                "/api/patient/context",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    appointmentId: patientData.appointment_id,
+                    mpi: patientData.mpi,
+                  }),
+                },
+                3000 // 3 second timeout
+              );
 
-      // First, try to map by name
-      const mappedTpa = Object.entries(tpaMapping).find(([key]) => {
-        const keyLower = key.toLowerCase();
-        if (tpaName && tpaName.toLowerCase().includes(keyLower)) {
-          return true;
-        }
-        if (insuranceName && insuranceName.toLowerCase().includes(keyLower)) {
-          return true;
-        }
-        if (payerName && payerName.toLowerCase().includes(keyLower)) {
-          return true;
-        }
-        // Also check if payer_code matches directly (e.g., INS026 for DAMAN)
-        if (payerCode === "INS026" && keyLower === "daman") {
-          return true;
-        }
-        return false;
-      });
+              if (contextResponse.ok) {
+                const context = await contextResponse.json();
+                if (context.nationality_id && context.nationality_id.trim()) {
+                  emiratesIdValue = context.nationality_id.trim();
+                  console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
+                }
+              }
+            } catch (error) {
+              console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+            }
+          }
 
-      if (mappedTpa) {
-        console.log("🎯 Mapped insurance to TPA:", mappedTpa[1], "from:", { tpaName, insuranceName, payerName, payer_code: payerCode, receiver_code: receiverCode });
-        setOptions(mappedTpa[1]);
-      } else {
-        // If no name mapping found, check codes directly
-        // Priority: TPA codes > INS codes (TPA gets priority when both are available)
-        const tpaCode = receiverCode?.match(/^TPA[0-9A-Z]+$/) ? receiverCode :
-          payerCode?.match(/^TPA[0-9A-Z]+$/) ? payerCode : null;
-        const insCode = receiverCode?.match(/^INS[0-9A-Z]+$/) ? receiverCode :
-          payerCode?.match(/^INS[0-9A-Z]+$/) ? payerCode : null;
-        const otherCode = receiverCode?.match(/^(D|DHPO|RIYATI)[0-9A-Z]*$/) ? receiverCode :
-          payerCode?.match(/^(D|DHPO|RIYATI)[0-9A-Z]*$/) ? payerCode : null;
-
-        // Prioritize TPA codes over INS codes
-        if (tpaCode) {
-          console.log("✅ Using TPA code (priority):", tpaCode, "from:", { receiver_code: receiverCode, payer_code: payerCode });
-          setOptions(tpaCode);
-        } else if (insCode) {
-          console.log("⚠️ Using INS code (fallback):", insCode, "from:", { receiver_code: receiverCode, payer_code: payerCode });
-          setOptions(insCode);
-        } else if (otherCode) {
-          console.log("⚠️ Using other code:", otherCode, "from:", { receiver_code: receiverCode, payer_code: payerCode });
-          setOptions(otherCode);
-        } else {
-          console.log("❌ No valid code found in:", { receiver_code: receiverCode, payer_code: payerCode });
+          // Only set if we found a value AND the field is currently empty (to avoid overwriting user input)
+          if (emiratesIdValue && emiratesIdValue.length > 0 && !emiratesId) {
+            setEmiratesId(emiratesIdValue);
+            // Ensure ID type is set to EMIRATESID
+            if (idType !== "EMIRATESID") {
+              setIdType("EMIRATESID");
+            }
+          }
         }
       }
 
-      // Pre-fill member ID if available - check multiple fields in priority order
-      // Priority: tpa_policy_id > insurance_policy_id > policy_number > ins_holderid
-      const memberId =
-        (insuranceData.tpa_policy_id && insuranceData.tpa_policy_id.trim()) ||
-        (insuranceData.insurance_policy_id && insuranceData.insurance_policy_id.trim()) ||
-        (insuranceData.policy_number && insuranceData.policy_number.trim()) ||
-        (insuranceData.ins_holderid && insuranceData.ins_holderid.trim()) ||
-        null;
+      if (insuranceData) {
+        // Try to map insurance TPA name to options
+        // This is a simplified mapping - you may need to enhance this
+        const tpaMapping: Record<string, string> = {
+          Neuron: "TPA001",
+          NextCare: "TPA002",
+          "Al Madallah": "TPA003",
+          NAS: "TPA004",
+          "First Med": "TPA010",
+          FMC: "TPA010",
+          Daman: "INS026",
+          "Daman Thiqa": "TPA023",
+          AXA: "INS010",
+          ADNIC: "INS017",
+          Mednet: "TPA036",
+          Oman: "INS012",
+          Inayah: "TPA008",
+        };
 
-      if (memberId) {
-        console.log("✅ Pre-filling member ID from insurance data:", memberId, "from fields:", {
-          tpa_policy_id: insuranceData.tpa_policy_id,
-          insurance_policy_id: insuranceData.insurance_policy_id,
-          policy_number: insuranceData.policy_number,
-          ins_holderid: insuranceData.ins_holderid
+        // Check both tpa_name and insurance_name for mapping
+        const tpaName = insuranceData.tpa_name;
+        const insuranceName = insuranceData.insurance_name;
+        const payerName = insuranceData.payer_name;
+        const receiverCode = insuranceData.receiver_code;
+        const payerCode = insuranceData.payer_code;
+
+        // First, try to map by name
+        const mappedTpa = Object.entries(tpaMapping).find(([key]) => {
+          const keyLower = key.toLowerCase();
+          if (tpaName && tpaName.toLowerCase().includes(keyLower)) {
+            return true;
+          }
+          if (insuranceName && insuranceName.toLowerCase().includes(keyLower)) {
+            return true;
+          }
+          if (payerName && payerName.toLowerCase().includes(keyLower)) {
+            return true;
+          }
+          // Also check if payer_code matches directly (e.g., INS026 for DAMAN)
+          if (payerCode === "INS026" && keyLower === "daman") {
+            return true;
+          }
+          return false;
         });
-        setIdType("CARDNUMBER");
-        setEmiratesId(memberId);
-      } else {
-        // If no member ID found in insurance data, fall back to patient Emirates ID
-        if (patientData?.uid_value) {
-          console.log("⚠️ No member ID in insurance data, using patient Emirates ID:", patientData.uid_value);
-          setEmiratesId(patientData.uid_value);
+
+        if (mappedTpa) {
+          console.log("🎯 Mapped insurance to TPA:", mappedTpa[1], "from:", { tpaName, insuranceName, payerName, payer_code: payerCode, receiver_code: receiverCode });
+          setOptions(mappedTpa[1]);
+        } else {
+          // If no name mapping found, check codes directly
+          // Priority: TPA codes > INS codes (TPA gets priority when both are available)
+          const tpaCode = receiverCode?.match(/^TPA[0-9A-Z]+$/) ? receiverCode :
+            payerCode?.match(/^TPA[0-9A-Z]+$/) ? payerCode : null;
+          const insCode = receiverCode?.match(/^INS[0-9A-Z]+$/) ? receiverCode :
+            payerCode?.match(/^INS[0-9A-Z]+$/) ? payerCode : null;
+          const otherCode = receiverCode?.match(/^(D|DHPO|RIYATI)[0-9A-Z]*$/) ? receiverCode :
+            payerCode?.match(/^(D|DHPO|RIYATI)[0-9A-Z]*$/) ? payerCode : null;
+
+          // Prioritize TPA codes over INS codes
+          if (tpaCode) {
+            console.log("✅ Using TPA code (priority):", tpaCode, "from:", { receiver_code: receiverCode, payer_code: payerCode });
+            setOptions(tpaCode);
+          } else if (insCode) {
+            console.log("⚠️ Using INS code (fallback):", insCode, "from:", { receiver_code: receiverCode, payer_code: payerCode });
+            setOptions(insCode);
+          } else if (otherCode) {
+            console.log("⚠️ Using other code:", otherCode, "from:", { receiver_code: receiverCode, payer_code: payerCode });
+            setOptions(otherCode);
+          } else {
+            console.log("❌ No valid code found in:", { receiver_code: receiverCode, payer_code: payerCode });
+          }
+        }
+
+        // Pre-fill member ID if available - check multiple fields in priority order
+        // Priority: tpa_policy_id > insurance_policy_id > policy_number > ins_holderid
+        const memberId =
+          (insuranceData.tpa_policy_id && insuranceData.tpa_policy_id.trim()) ||
+          (insuranceData.insurance_policy_id && insuranceData.insurance_policy_id.trim()) ||
+          (insuranceData.policy_number && insuranceData.policy_number.trim()) ||
+          (insuranceData.ins_holderid && insuranceData.ins_holderid.trim()) ||
+          null;
+
+        if (memberId) {
+          console.log("✅ Pre-filling member ID from insurance data:", memberId, "from fields:", {
+            tpa_policy_id: insuranceData.tpa_policy_id,
+            insurance_policy_id: insuranceData.insurance_policy_id,
+            policy_number: insuranceData.policy_number,
+            ins_holderid: insuranceData.ins_holderid
+          });
+          setIdType("CARDNUMBER");
+          setEmiratesId(memberId);
+        } else {
+          // If no member ID found in insurance data, fall back to Emirates ID from appointment Redis (nationality_id)
+          let emiratesIdValue: string | null = null;
+
+          // First, use uid_value if available (it may already contain nationality_id from appointment)
+          if (patientData?.uid_value) {
+            emiratesIdValue = patientData.uid_value;
+            console.log("✅ Using Emirates ID from patientData.uid_value:", emiratesIdValue);
+          }
+
+          // Then try to get nationality_id from appointment Redis if we have appointment_id (this will override if found)
+          if (patientData?.appointment_id) {
+            try {
+              const contextResponse = await fetchWithTimeout(
+                "/api/patient/context",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    appointmentId: patientData.appointment_id,
+                    mpi: patientData.mpi,
+                  }),
+                },
+                3000 // 3 second timeout
+              );
+
+              if (contextResponse.ok) {
+                const context = await contextResponse.json();
+                if (context.nationality_id) {
+                  emiratesIdValue = context.nationality_id;
+                  console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
+                }
+              }
+            } catch (error) {
+              console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+            }
+          }
+
+          // Only set Emirates ID if we found a value AND the field is currently empty or we're using EMIRATESID type
+          // This prevents overwriting user input, but allows initial prefill
+          if (emiratesIdValue && (idType === "EMIRATESID" || !emiratesId)) {
+            setEmiratesId(emiratesIdValue);
+            // Also ensure ID type is set to EMIRATESID if it's currently empty
+            if (!emiratesId) {
+              setIdType("EMIRATESID");
+            }
+          }
+        }
+
+        // Pre-fill payer name
+        if (insuranceData.payer_name) {
+          setPayerName(insuranceData.payer_name);
         }
       }
+    };
 
-      // Pre-fill payer name
-      if (insuranceData.payer_name) {
-        setPayerName(insuranceData.payer_name);
+    loadPatientData();
+  }, [patientData, insuranceData, selectedClinicId]);
+
+  // Additional effect to handle cases where uid_value becomes available after initial render
+  // This handles the async Redis fetch scenario where patientData.uid_value is set later
+  useEffect(() => {
+    // Only update if:
+    // 1. We have patientData with uid_value (non-empty)
+    // 2. Emirates ID field is currently empty
+    // 3. We don't have insurance data, OR insurance data exists but has no member ID
+    // 4. ID type should be EMIRATESID (we'll set it if needed)
+    const hasInsuranceMemberId = insuranceData && (
+      (insuranceData.tpa_policy_id && insuranceData.tpa_policy_id.trim()) ||
+      (insuranceData.insurance_policy_id && insuranceData.insurance_policy_id.trim()) ||
+      (insuranceData.policy_number && insuranceData.policy_number.trim()) ||
+      (insuranceData.ins_holderid && insuranceData.ins_holderid.trim())
+    );
+
+    if (
+      patientData?.uid_value &&
+      patientData.uid_value.trim() &&
+      !emiratesId &&
+      !hasInsuranceMemberId
+    ) {
+      console.log("✅ Pre-filling Emirates ID from patientData.uid_value (late update):", patientData.uid_value);
+      setEmiratesId(patientData.uid_value.trim());
+      // Ensure ID type is set to EMIRATESID if not already
+      if (idType !== "EMIRATESID") {
+        setIdType("EMIRATESID");
       }
     }
-  }, [patientData, insuranceData, selectedClinicId]);
+  }, [patientData?.uid_value, emiratesId, idType, insuranceData]);
 
   // ============================================================================
   // INSURANCE PROVIDER OPTIONS (50+ TPAs)
@@ -1133,7 +1266,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           monitoringIntervalRef.current = null;
         }
       }
-    }, 500); // Check every 500ms for UI updates
+    }, 2000); // Check every 2 seconds for UI updates (reduced from 500ms to reduce API load)
   };
 
   const handleSubmit = async () => {
@@ -1155,14 +1288,18 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       if (patientData?.appointment_id && !patientData?.patient_id) {
         try {
           setStatusMessage("Fetching patient details...");
-          const contextResponse = await fetch("/api/patient/context", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              appointmentId: patientData.appointment_id,
-              mpi: patientData.mpi,
-            }),
-          });
+          const contextResponse = await fetchWithTimeout(
+            "/api/patient/context",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                appointmentId: patientData.appointment_id,
+                mpi: patientData.mpi,
+              }),
+            },
+            3000 // 3 second timeout
+          );
 
           if (contextResponse.ok) {
             const context = await contextResponse.json();
@@ -1366,6 +1503,37 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       />
 
       <div className="space-y-6">
+        {/* Loading Indicator for Config/Doctor Loading */}
+        {(isLoadingTPAConfig || isLoadingDoctors) && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <svg
+                className="animate-spin h-5 w-5 text-blue-600"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              <span className="text-sm text-blue-800 font-medium">
+                Loading eligibility options...
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* API Error Display */}
         {apiError && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">

@@ -18,6 +18,7 @@ import { LifetrenzEligibilityPreview } from "./LifetrenzEligibilityPreview";
 import { useAuth } from "../contexts/AuthContext";
 import { Modal } from "./ui/modal";
 import Select from "react-select";
+import { fetchWithTimeout } from "../lib/request-cache";
 
 interface MantysResultsDisplayProps {
   response: MantysEligibilityResponse;
@@ -112,15 +113,19 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             mpi: patientMPI,
           });
 
-          const contextResponse = await fetch("/api/patient/context", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              appointmentId: appointmentId,
-              patientId: patientId,
-              mpi: patientMPI,
-            }),
-          });
+          const contextResponse = await fetchWithTimeout(
+            "/api/patient/context",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                appointmentId: appointmentId,
+                patientId: patientId,
+                mpi: patientMPI,
+              }),
+            },
+            3000 // 3 second timeout
+          );
 
           if (contextResponse.ok) {
             const context = await contextResponse.json();
@@ -164,13 +169,17 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       if (finalAppointmentId) {
         try {
           console.log("🔍 Fetching appointment context from Redis for appointment:", finalAppointmentId);
-          const contextResponse = await fetch("/api/patient/context", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              appointmentId: finalAppointmentId,
-            }),
-          });
+          const contextResponse = await fetchWithTimeout(
+            "/api/patient/context",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                appointmentId: finalAppointmentId,
+              }),
+            },
+            3000 // 3 second timeout
+          );
 
           if (contextResponse.ok) {
             const context = await contextResponse.json();
@@ -194,25 +203,24 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               const selectedInsurance = insuranceRecords.find((record: any) => record.is_current === 1);
 
               if (!selectedInsurance) {
-                console.error("❌ No active insurance policy found (is_current: 1)");
-                alert("There is no active Insurance policy for this user, please add a policy to attach documents");
-                return;
-              }
-
-              // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
-              const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
-              if (insTpaPatIdValue) {
-                console.log("✅ Selected insurance from Redis (is_current: 1):", {
-                  insTpaPatId: insTpaPatIdValue,
-                  status: selectedInsurance.insurance_status,
-                  payer_name: selectedInsurance.payer_name,
-                  tpa_name: selectedInsurance.tpa_name,
-                  is_current: selectedInsurance.is_current,
-                  total_records: insuranceRecords.length,
-                });
-                setInsTpaPatId(insTpaPatIdValue);
+                console.warn("⚠️ No active insurance policy found (is_current: 1) in Redis context");
+                // Don't show alert here - will check on upload button click
               } else {
-                console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
+                // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
+                const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+                if (insTpaPatIdValue) {
+                  console.log("✅ Selected insurance from Redis (is_current: 1):", {
+                    insTpaPatId: insTpaPatIdValue,
+                    status: selectedInsurance.insurance_status,
+                    payer_name: selectedInsurance.payer_name,
+                    tpa_name: selectedInsurance.tpa_name,
+                    is_current: selectedInsurance.is_current,
+                    total_records: insuranceRecords.length,
+                  });
+                  setInsTpaPatId(insTpaPatIdValue);
+                } else {
+                  console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
+                }
               }
             }
           } else {
@@ -269,25 +277,24 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             const selectedInsurance = insuranceRecords.find((record: any) => record.is_current === 1);
 
             if (!selectedInsurance) {
-              console.error("❌ No active insurance policy found (is_current: 1)");
-              alert("There is no active Insurance policy for this user, please add a policy to attach documents");
-              return;
-            }
-
-            // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
-            const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
-            if (insTpaPatIdValue) {
-              console.log("✅ Selected insurance from API (is_current: 1):", {
-                insTpaPatId: insTpaPatIdValue,
-                status: selectedInsurance.insurance_status,
-                payer_name: selectedInsurance.payer_name,
-                tpa_name: selectedInsurance.tpa_name,
-                is_current: selectedInsurance.is_current,
-                total_records: insuranceRecords.length,
-              });
-              setInsTpaPatId(insTpaPatIdValue);
+              console.warn("⚠️ No active insurance policy found (is_current: 1) from API");
+              // Don't show alert here - will check on upload button click
             } else {
-              console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
+              // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
+              const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+              if (insTpaPatIdValue) {
+                console.log("✅ Selected insurance from API (is_current: 1):", {
+                  insTpaPatId: insTpaPatIdValue,
+                  status: selectedInsurance.insurance_status,
+                  payer_name: selectedInsurance.payer_name,
+                  tpa_name: selectedInsurance.tpa_name,
+                  is_current: selectedInsurance.is_current,
+                  total_records: insuranceRecords.length,
+                });
+                setInsTpaPatId(insTpaPatIdValue);
+              } else {
+                console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
+              }
             }
           }
 
@@ -1253,8 +1260,76 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       return;
     }
 
-    // Use fetched insTpaPatId or null
-    const insTpaPatIdForUpload = insTpaPatId || null;
+    // Check if insTpaPatId is available, if not try to fetch and validate active policy
+    let insTpaPatIdForUpload = insTpaPatId || null;
+
+    // If insTpaPatId is not set, try to fetch insurance details and check for active policy
+    if (!insTpaPatIdForUpload && finalPatientId && finalAppointmentId) {
+      try {
+        const { getInsuranceDetails } = await import("../lib/api");
+        const insuranceResponse = await getInsuranceDetails({
+          patientId: finalPatientId,
+          apntId: finalAppointmentId || null,
+          encounterId: finalEncounterId || 0,
+          customerId: 1,
+          primaryInsPolicyId: null,
+          siteId: 1,
+          isDiscard: 0,
+          hasTopUpCard: 0,
+        });
+
+        if (insuranceResponse?.body?.Data && Array.isArray(insuranceResponse.body.Data)) {
+          const insuranceRecords = insuranceResponse.body.Data;
+          console.log(`📋 Fetched ${insuranceRecords.length} insurance record(s) for upload validation`);
+
+          // Find entry with is_current: 1
+          const selectedInsurance = insuranceRecords.find((record: any) => record.is_current === 1);
+
+          if (!selectedInsurance) {
+            console.error("❌ No active insurance policy found (is_current: 1)");
+            alert("There is no active Insurance policy for this user, please add a policy to attach documents");
+            setUploadingFiles(false);
+            return;
+          }
+
+          // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
+          insTpaPatIdForUpload = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id || null;
+
+          if (insTpaPatIdForUpload) {
+            console.log("✅ Found active insurance policy for upload:", {
+              insTpaPatId: insTpaPatIdForUpload,
+              status: selectedInsurance.insurance_status,
+              payer_name: selectedInsurance.payer_name,
+              tpa_name: selectedInsurance.tpa_name,
+              is_current: selectedInsurance.is_current,
+            });
+            setInsTpaPatId(insTpaPatIdForUpload);
+          } else {
+            console.error("❌ Active insurance policy found but no insTpaPatId value");
+            alert("There is no active Insurance policy for this user, please add a policy to attach documents");
+            setUploadingFiles(false);
+            return;
+          }
+        } else {
+          console.error("❌ No insurance records found in API response");
+          alert("There is no active Insurance policy for this user, please add a policy to attach documents");
+          setUploadingFiles(false);
+          return;
+        }
+      } catch (error) {
+        console.error("❌ Error fetching insurance details for upload:", error);
+        alert("There is no active Insurance policy for this user, please add a policy to attach documents");
+        setUploadingFiles(false);
+        return;
+      }
+    } else if (!insTpaPatIdForUpload) {
+      // If we still don't have insTpaPatId and can't fetch it, show error
+      console.error("❌ No insTpaPatId available and cannot fetch insurance details");
+      alert("There is no active Insurance policy for this user, please add a policy to attach documents");
+      setUploadingFiles(false);
+      return;
+    }
+
     console.log("📤 Using insTpaPatId for upload:", {
       fetched: insTpaPatId,
       using: insTpaPatIdForUpload,
@@ -1263,117 +1338,66 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     setUploadingFiles(true);
     const newUploadProgress: { [key: string]: number } = {};
     const newUploadedFiles: string[] = [];
+    let savedReqId: string | null = null;
+    let savedStatusText: string | null = null;
 
     try {
-      // Upload each referral document
-      for (let i = 0; i < keyFields.referralDocuments.length; i++) {
-        const doc = keyFields.referralDocuments[i];
-        const progressKey = `${doc.tag}_${i}`;
-
-        newUploadProgress[progressKey] = 0;
-        setUploadProgress({ ...newUploadProgress });
-
-        console.log(`Uploading ${doc.tag}...`);
-
-        const uploadRequest = {
-          patientId: finalPatientId,
-          encounterId: finalEncounterId || 0, // Default to 0 if not provided
-          appointmentId: finalAppointmentId,
-          insTpaPatId: insTpaPatIdForUpload,
-          fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,
-          fileUrl: doc.s3_url,
-        };
-
-        const response = await fetch("/api/aster/upload-attachment", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(uploadRequest),
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-          newUploadProgress[progressKey] = 100;
-          newUploadedFiles.push(doc.tag);
-          console.log(`✅ Uploaded ${doc.tag} successfully`);
-        } else {
-          console.error(`❌ Failed to upload ${doc.tag}:`, result.error);
-          newUploadProgress[progressKey] = -1; // Mark as failed
-        }
-
-        setUploadProgress({ ...newUploadProgress });
-      }
-
-      setUploadedFiles(newUploadedFiles);
-
-      console.log("📊 Upload summary:", {
-        uploadedFilesCount: newUploadedFiles.length,
-        totalDocumentsCount: keyFields.referralDocuments.length,
-        uploadedFiles: newUploadedFiles,
-        allDocuments: keyFields.referralDocuments.map(d => d.tag),
+      // STEP 1: First, save the eligibility order details
+      console.log("📋 Step 1: Saving eligibility order details...");
+      console.log("📋 Debug info:", {
+        tpaConfig: tpaConfig ? {
+          ins_code: tpaConfig.ins_code,
+          hospital_insurance_mapping_id: tpaConfig.hospital_insurance_mapping_id,
+        } : null,
+        patient_info_insurance_mapping_id: data.patient_info?.insurance_mapping_id,
+        response_tpa: response.tpa,
+        selectedClinicId,
       });
 
-      // If all files uploaded successfully, save the eligibility order details
-      if (newUploadedFiles.length === keyFields.referralDocuments.length) {
-        console.log("✅ All files uploaded. Now saving eligibility order details...");
-        console.log("📋 Debug info:", {
-          tpaConfig: tpaConfig ? {
-            ins_code: tpaConfig.ins_code,
-            hospital_insurance_mapping_id: tpaConfig.hospital_insurance_mapping_id,
-          } : null,
-          patient_info_insurance_mapping_id: data.patient_info?.insurance_mapping_id,
-          response_tpa: response.tpa,
-          selectedClinicId,
-        });
-
-        try {
-          // If tpaConfig is not loaded, try to load it now
-          let currentTpaConfig = tpaConfig;
-          if (!currentTpaConfig && selectedClinicId && response.tpa) {
-            console.log("⚠️ TPA config not loaded, attempting to load now...");
-            try {
-              const configResponse = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
-              if (configResponse.ok) {
-                const configData = await configResponse.json();
-                if (configData.configs && Array.isArray(configData.configs)) {
-                  currentTpaConfig = configData.configs.find(
-                    (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
-                  );
-                  if (currentTpaConfig) {
-                    console.log("✅ Loaded TPA config on-demand:", {
-                      ins_code: currentTpaConfig.ins_code,
-                      hospital_insurance_mapping_id: currentTpaConfig.hospital_insurance_mapping_id,
-                    });
-                  }
+      try {
+        // If tpaConfig is not loaded, try to load it now
+        let currentTpaConfig = tpaConfig;
+        if (!currentTpaConfig && selectedClinicId && response.tpa) {
+          console.log("⚠️ TPA config not loaded, attempting to load now...");
+          try {
+            const configResponse = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
+            if (configResponse.ok) {
+              const configData = await configResponse.json();
+              if (configData.configs && Array.isArray(configData.configs)) {
+                currentTpaConfig = configData.configs.find(
+                  (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
+                );
+                if (currentTpaConfig) {
+                  console.log("✅ Loaded TPA config on-demand:", {
+                    ins_code: currentTpaConfig.ins_code,
+                    hospital_insurance_mapping_id: currentTpaConfig.hospital_insurance_mapping_id,
+                  });
                 }
               }
-            } catch (loadError) {
-              console.error("❌ Failed to load TPA config on-demand:", loadError);
             }
+          } catch (loadError) {
+            console.error("❌ Failed to load TPA config on-demand:", loadError);
           }
+        }
 
-          // Get insurance mapping ID from config (preferred) or Mantys response
-          const insuranceMappingId = currentTpaConfig?.hospital_insurance_mapping_id
-            ? currentTpaConfig.hospital_insurance_mapping_id
-            : (data.patient_info?.insurance_mapping_id ? parseInt(data.patient_info.insurance_mapping_id, 10) : null);
+        // Get insurance mapping ID from config (preferred) or Mantys response
+        const insuranceMappingId = currentTpaConfig?.hospital_insurance_mapping_id
+          ? currentTpaConfig.hospital_insurance_mapping_id
+          : (data.patient_info?.insurance_mapping_id ? parseInt(data.patient_info.insurance_mapping_id, 10) : null);
 
-          console.log("🔍 Insurance Mapping ID lookup:", {
-            fromTpaConfig: currentTpaConfig?.hospital_insurance_mapping_id,
-            fromPatientInfo: data.patient_info?.insurance_mapping_id,
-            finalValue: insuranceMappingId,
-          });
+        console.log("🔍 Insurance Mapping ID lookup:", {
+          fromTpaConfig: currentTpaConfig?.hospital_insurance_mapping_id,
+          fromPatientInfo: data.patient_info?.insurance_mapping_id,
+          finalValue: insuranceMappingId,
+        });
 
-          if (!insuranceMappingId) {
-            console.warn("⚠️ No insurance mapping ID found. Skipping eligibility order save.");
-            console.warn("💡 To fix this, ensure TPA config has hospital_insurance_mapping_id set for TPA:", response.tpa);
-            alert(
-              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nNote: Could not save eligibility order details (missing insurance mapping ID).\n\nPlease check TPA configuration for: ${response.tpa || 'Unknown TPA'}`,
-            );
-            return;
-          }
-
+        if (!insuranceMappingId) {
+          console.warn("⚠️ No insurance mapping ID found. Skipping eligibility order save.");
+          console.warn("💡 To fix this, ensure TPA config has hospital_insurance_mapping_id set for TPA:", response.tpa);
+          alert(
+            `⚠️ Could not save eligibility order details (missing insurance mapping ID).\n\nPlease check TPA configuration for: ${response.tpa || 'Unknown TPA'}\n\nProceeding with file uploads...`,
+          );
+        } else {
           // Use insTpaPatId for insuranceMappingId in ordObj (not hospital_insurance_mapping_id)
           // But we still need hospital_insurance_mapping_id for the main body
           const insTpaPatIdForOrder = insTpaPatId || null; // Use fetched insTpaPatId or null
@@ -1427,42 +1451,36 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             console.log("✅ Eligibility order saved successfully:", orderResult);
 
             // Extract reqid from response - check both possible response structures
-            const reqId = orderResult?.data?.body?.Data?.[0]?.reqid ||
+            savedReqId = orderResult?.data?.body?.Data?.[0]?.reqid ||
               orderResult?.body?.Data?.[0]?.reqid ||
               null;
 
-            const statusText = orderResult?.data?.body?.Data?.[0]?.status_text ||
+            savedStatusText = orderResult?.data?.body?.Data?.[0]?.status_text ||
               orderResult?.body?.Data?.[0]?.status_text ||
               "Eligibility Details Captured Successfully";
 
-            const successMessage = reqId
-              ? `✅ SUCCESS!\n\nAll ${newUploadedFiles.length} documents uploaded successfully!\n\nEligibility order saved to Aster.\n\n📋 Request ID: ${reqId}\n📝 Status: ${statusText}\n\nYou can view this order in Aster's eligibility system.`
-              : `✅ SUCCESS!\n\nAll ${newUploadedFiles.length} documents uploaded successfully!\n\nEligibility order details saved to Aster.\n\nStatus: ${statusText}`;
-
             console.log("📋 Order saved with details:", {
-              reqId,
-              statusText,
+              reqId: savedReqId,
+              statusText: savedStatusText,
               patientId: finalPatientId,
               appointmentId: finalAppointmentId,
               insuranceMappingId,
               fullResponse: orderResult,
             });
 
-            alert(successMessage);
-
             // Trigger a custom event to notify other components (like eligibility history)
             // The order is saved in Aster, so it should be visible in Aster's UI
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('eligibilityOrderSaved', {
                 detail: {
-                  reqId,
+                  reqId: savedReqId,
                   patientId: finalPatientId,
                   appointmentId: finalAppointmentId,
                   insuranceMappingId,
-                  statusText,
+                  statusText: savedStatusText,
                 }
               }));
-              console.log("📢 Dispatched eligibilityOrderSaved event with reqId:", reqId);
+              console.log("📢 Dispatched eligibilityOrderSaved event with reqId:", savedReqId);
             }
           } else {
             console.error("❌ Failed to save eligibility order:", {
@@ -1474,19 +1492,81 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             const errorMessage = orderResult.error || orderResult.message || "Unknown error";
             const errorDetails = orderResult.details ? `\n\nDetails: ${JSON.stringify(orderResult.details)}` : "";
             alert(
-              `All ${newUploadedFiles.length} documents uploaded successfully!\n\nWarning: Failed to save eligibility order details.\n\nError: ${errorMessage}${errorDetails}\n\nPlease check the browser console for more details.`,
+              `⚠️ Failed to save eligibility order details.\n\nError: ${errorMessage}${errorDetails}\n\nProceeding with file uploads...\n\nPlease check the browser console for more details.`,
             );
           }
-        } catch (orderError) {
-          console.error("❌ Error saving eligibility order:", orderError);
-          alert(
-            `All ${newUploadedFiles.length} documents uploaded successfully!\n\nWarning: Error occurred while saving eligibility order details. See console for details.`,
-          );
         }
-      } else {
+      } catch (orderError) {
+        console.error("❌ Error saving eligibility order:", orderError);
         alert(
-          `Uploaded ${newUploadedFiles.length} out of ${keyFields.referralDocuments.length} documents. Check console for errors.`,
+          `⚠️ Error occurred while saving eligibility order details. See console for details.\n\nProceeding with file uploads...`,
         );
+      }
+
+      // STEP 2: Now upload each referral document
+      console.log("📤 Step 2: Uploading referral documents...");
+      for (let i = 0; i < keyFields.referralDocuments.length; i++) {
+        const doc = keyFields.referralDocuments[i];
+        const progressKey = `${doc.tag}_${i}`;
+
+        newUploadProgress[progressKey] = 0;
+        setUploadProgress({ ...newUploadProgress });
+
+        console.log(`Uploading ${doc.tag}...`);
+
+        const uploadRequest = {
+          patientId: finalPatientId,
+          encounterId: finalEncounterId || 0, // Default to 0 if not provided
+          appointmentId: finalAppointmentId,
+          insTpaPatId: insTpaPatIdForUpload,
+          fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,
+          fileUrl: doc.s3_url,
+        };
+
+        const response = await fetch("/api/aster/upload-attachment", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(uploadRequest),
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          newUploadProgress[progressKey] = 100;
+          newUploadedFiles.push(doc.tag);
+          console.log(`✅ Uploaded ${doc.tag} successfully`);
+        } else {
+          console.error(`❌ Failed to upload ${doc.tag}:`, result.error);
+          newUploadProgress[progressKey] = -1; // Mark as failed
+        }
+
+        setUploadProgress({ ...newUploadProgress });
+      }
+
+      setUploadedFiles(newUploadedFiles);
+
+      console.log("📊 Upload summary:", {
+        uploadedFilesCount: newUploadedFiles.length,
+        totalDocumentsCount: keyFields.referralDocuments.length,
+        uploadedFiles: newUploadedFiles,
+        allDocuments: keyFields.referralDocuments.map(d => d.tag),
+      });
+
+      // Show final success message
+      if (newUploadedFiles.length === keyFields.referralDocuments.length) {
+        const successMessage = savedReqId
+          ? `✅ SUCCESS!\n\nEligibility order saved to Aster.\n\n📋 Request ID: ${savedReqId}\n📝 Status: ${savedStatusText}\n\nAll ${newUploadedFiles.length} documents uploaded successfully!\n\nYou can view this order in Aster's eligibility system.`
+          : savedStatusText
+            ? `✅ SUCCESS!\n\nEligibility order details saved to Aster.\n\nStatus: ${savedStatusText}\n\nAll ${newUploadedFiles.length} documents uploaded successfully!`
+            : `✅ SUCCESS!\n\nAll ${newUploadedFiles.length} documents uploaded successfully!`;
+        alert(successMessage);
+      } else {
+        const partialMessage = savedReqId
+          ? `⚠️ Uploaded ${newUploadedFiles.length} out of ${keyFields.referralDocuments.length} documents.\n\nEligibility order saved (Request ID: ${savedReqId}).\n\nCheck console for errors.`
+          : `⚠️ Uploaded ${newUploadedFiles.length} out of ${keyFields.referralDocuments.length} documents. Check console for errors.`;
+        alert(partialMessage);
       }
     } catch (error) {
       console.error("Upload error:", error);

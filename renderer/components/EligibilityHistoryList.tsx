@@ -6,6 +6,7 @@ import {
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { Drawer } from "./ui/drawer";
+import { fetchWithTimeout } from "../lib/request-cache";
 
 interface EligibilityHistoryListProps {
   onRefresh?: () => void;
@@ -46,14 +47,18 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
               mpi: item.patientMPI,
             });
 
-            const contextResponse = await fetch("/api/patient/context", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                appointmentId: item.appointmentId,
-                mpi: item.patientMPI,
-              }),
-            });
+            const contextResponse = await fetchWithTimeout(
+              "/api/patient/context",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  appointmentId: item.appointmentId,
+                  mpi: item.patientMPI,
+                }),
+              },
+              3000 // 3 second timeout
+            );
 
             if (contextResponse.ok) {
               const context = await contextResponse.json();

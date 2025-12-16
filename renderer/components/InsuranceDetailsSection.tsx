@@ -4,6 +4,7 @@ import { InsuranceData, PatientData } from "../lib/api";
 import { MantysEligibilityForm } from "./MantysEligibilityForm";
 import { Button } from "./ui/button";
 import { useAuth } from "../contexts/AuthContext";
+import { cachedFetch } from "../lib/request-cache";
 
 interface InsuranceDetailsSectionProps {
   isLoadingInsurance: boolean;
@@ -29,6 +30,8 @@ export const InsuranceDetailsSection: React.FC<
     const [tpaConfigs, setTpaConfigs] = useState<Record<string, any>>({});
     const [doctors, setDoctors] = useState<any[]>([]);
     const [eligibilityButtonStates, setEligibilityButtonStates] = useState<Record<number, boolean>>({});
+    const [isLoadingConfigs, setIsLoadingConfigs] = useState(false);
+    const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
 
     const clinicId = user?.selected_team_id || "";
 
@@ -42,8 +45,12 @@ export const InsuranceDetailsSection: React.FC<
 
     const loadTPAConfigs = async () => {
       if (!clinicId) return;
+      // Skip if already loading or already loaded
+      if (isLoadingConfigs || Object.keys(tpaConfigs).length > 0) return;
+
+      setIsLoadingConfigs(true);
       try {
-        const response = await fetch(`/api/clinic-config/tpa?clinic_id=${clinicId}`);
+        const response = await cachedFetch(`/api/clinic-config/tpa?clinic_id=${clinicId}`);
         if (response.ok) {
           const data = await response.json();
           const configsMap: Record<string, any> = {};
@@ -62,19 +69,27 @@ export const InsuranceDetailsSection: React.FC<
         }
       } catch (error) {
         console.error("Failed to load TPA configs:", error);
+      } finally {
+        setIsLoadingConfigs(false);
       }
     };
 
     const loadDoctors = async () => {
       if (!clinicId) return;
+      // Skip if already loading or already loaded
+      if (isLoadingDoctors || doctors.length > 0) return;
+
+      setIsLoadingDoctors(true);
       try {
-        const response = await fetch(`/api/clinic-config/doctors?clinic_id=${clinicId}`);
+        const response = await cachedFetch(`/api/clinic-config/doctors?clinic_id=${clinicId}`);
         if (response.ok) {
           const data = await response.json();
           setDoctors(data.configs || []);
         }
       } catch (error) {
         console.error("Failed to load doctors:", error);
+      } finally {
+        setIsLoadingDoctors(false);
       }
     };
 
@@ -186,11 +201,49 @@ export const InsuranceDetailsSection: React.FC<
       }
     };
 
+    // Check if all insurance details are expired
+    const allExpired = insuranceDetails.length > 0 &&
+      insuranceDetails.every(insurance =>
+        insurance.insurance_status?.toLowerCase() === "expired"
+      );
+
+    // Filter to show only active insurances (if any exist)
+    const activeInsurances = insuranceDetails.filter(insurance =>
+      insurance.insurance_status?.toLowerCase() === "active"
+    );
+
     return (
-      <div>
-        <h3 className="font-semibold text-gray-900 mb-2 text-sm">
+      <div className="p-4">
+        <h3 className="font-semibold text-gray-900 mb-4 text-sm">
           Insurance Details (Lifetrenz)
         </h3>
+
+        {/* Loading indicators for config/doctor loading */}
+        {(isLoadingConfigs || isLoadingDoctors) && (
+          <div className="flex items-center text-xs text-gray-600 mb-2">
+            <svg
+              className="animate-spin h-3 w-3 mr-2"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              ></circle>
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+            Loading eligibility options...
+          </div>
+        )}
 
         {isLoadingInsurance && (
           <div className="flex items-center text-xs text-gray-600">
@@ -227,10 +280,12 @@ export const InsuranceDetailsSection: React.FC<
 
         {!isLoadingInsurance &&
           !insuranceError &&
-          insuranceDetails.length === 0 && (
-            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+          (insuranceDetails.length === 0 || allExpired) && (
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
               <p className="text-xs text-gray-500 mb-2">
-                No insurance records found for this patient
+                {insuranceDetails.length === 0
+                  ? "No insurance records found for this patient"
+                  : "All insurance policies are expired"}
               </p>
               <Button
                 onClick={handleSearchAcrossAllTPAs}
@@ -255,7 +310,7 @@ export const InsuranceDetailsSection: React.FC<
           )}
 
         {!isLoadingInsurance && insuranceDetails.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {insuranceDetails.map((insurance, index) => {
               const insuranceKey = insurance.patient_insurance_tpa_policy_id || index;
               const isExpanded = expandedInsurance.has(insuranceKey);
@@ -265,7 +320,7 @@ export const InsuranceDetailsSection: React.FC<
               return (
                 <div
                   key={insuranceKey}
-                  className={`border rounded-lg p-3 transition-all ${isExpired
+                  className={`border rounded-lg p-4 transition-all ${isExpired
                     ? "bg-gray-50 border-gray-200"
                     : "bg-blue-50 border-blue-200"
                     }`}
