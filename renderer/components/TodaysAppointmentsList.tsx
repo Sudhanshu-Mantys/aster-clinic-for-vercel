@@ -23,6 +23,7 @@ import { EligibilityCheckMetadata } from "../lib/redis-eligibility-mapping";
 import { EligibilityHistoryService, EligibilityHistoryItem } from "../utils/eligibilityHistory";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
+import { fetchWithTimeout } from "../lib/request-cache";
 
 interface TodaysAppointmentsListProps {
   onRefresh?: () => void;
@@ -52,7 +53,8 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const [loadingEligibilityItem, setLoadingEligibilityItem] = useState(false);
   const [freshEligibilityResult, setFreshEligibilityResult] = useState<any>(null);
   const [isPreviousSearchesExpanded, setIsPreviousSearchesExpanded] = useState(false);
-  const [todaySearchesResults, setTodaySearchesResults] = useState<Record<string, { copay?: string; deductible?: string }>>({});
+  const [todaySearchesResults, setTodaySearchesResults] = useState<Record<string, { copay?: string; deductible?: string; isEligible?: boolean }>>({});
+  const [emiratesIdFromRedis, setEmiratesIdFromRedis] = useState<string | null>(null);
 
   const fetchAppointments = async (filters?: AppointmentFilters) => {
     setIsLoading(true);
@@ -113,6 +115,35 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     setInsuranceError(null);
     setExpandedInsurance(new Set());
     setPreviousSearches([]);
+    setEmiratesIdFromRedis(null);
+
+    // Fetch Emirates ID from appointment Redis (nationality_id)
+    if (appointment.appointment_id) {
+      try {
+        const contextResponse = await fetchWithTimeout(
+          "/api/patient/context",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              appointmentId: appointment.appointment_id,
+              mpi: appointment.mpi,
+            }),
+          },
+          3000 // 3 second timeout
+        );
+
+        if (contextResponse.ok) {
+          const context = await contextResponse.json();
+          if (context.nationality_id) {
+            setEmiratesIdFromRedis(context.nationality_id);
+            console.log("✅ Fetched Emirates ID from appointment Redis (nationality_id):", context.nationality_id);
+          }
+        }
+      } catch (error) {
+        console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+      }
+    }
 
     // Fetch insurance details for the patient
     if (appointment.patient_id) {
@@ -198,45 +229,57 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
         setPreviousSearches(searches);
 
-        // Fetch eligibility results for today's searches to get copay/deductible
+        // Fetch eligibility results for today's searches to get copay/deductible and eligibility status
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const todaySearches = searches.filter((search) => {
           if (!search.createdAt) return false;
           const searchDate = new Date(search.createdAt);
           searchDate.setHours(0, 0, 0, 0);
-          return searchDate.getTime() === today.getTime() && search.status === "complete";
+          return searchDate.getTime() === today.getTime();
         });
 
-        // Fetch results for today's searches
-        const resultsMap: Record<string, { copay?: string; deductible?: string }> = {};
+        // Fetch results for today's searches (including complete and error statuses that might have results)
+        const resultsMap: Record<string, { copay?: string; deductible?: string; isEligible?: boolean }> = {};
         for (const search of todaySearches) {
-          try {
-            const historyItem = await EligibilityHistoryService.getByTaskId(search.taskId);
-            if (historyItem?.result?.data) {
-              const data = historyItem.result.data;
-              // Extract copay and deductible from the first copay detail
-              const copayDetail = data.copay_details_to_fill?.[0];
-              if (copayDetail?.values_to_fill) {
-                const values = copayDetail.values_to_fill;
-                // Try to find copay percentage (usually in MEDICINES or CONSULTATION)
-                const medicineCopay = values.MEDICINES?.copay;
-                const consultationCopay = values.CONSULTATION?.copay;
-                const copayValue = medicineCopay || consultationCopay || "0";
+          // Only fetch results for complete or error statuses (they might have result data)
+          if (search.status === "complete" || search.status === "error") {
+            try {
+              const historyItem = await EligibilityHistoryService.getByTaskId(search.taskId);
+              if (historyItem?.result?.data) {
+                const data = historyItem.result.data;
+                // Extract eligibility status
+                const isEligible = data.is_eligible ?? false;
 
-                // Try to find deductible
-                const medicineDeductible = values.MEDICINES?._maxDeductible || values.MEDICINES?.deductible;
-                const consultationDeductible = values.CONSULTATION?._maxDeductible || values.CONSULTATION?.deductible;
-                const deductibleValue = medicineDeductible || consultationDeductible || "0";
+                // Extract copay and deductible from the first copay detail
+                const copayDetail = data.copay_details_to_fill?.[0];
+                if (copayDetail?.values_to_fill) {
+                  const values = copayDetail.values_to_fill;
+                  // Try to find copay percentage (usually in MEDICINES or CONSULTATION)
+                  const medicineCopay = values.MEDICINES?.copay;
+                  const consultationCopay = values.CONSULTATION?.copay;
+                  const copayValue = medicineCopay || consultationCopay || "0";
 
-                resultsMap[search.taskId] = {
-                  copay: copayValue,
-                  deductible: deductibleValue,
-                };
+                  // Try to find deductible
+                  const medicineDeductible = values.MEDICINES?._maxDeductible || values.MEDICINES?.deductible;
+                  const consultationDeductible = values.CONSULTATION?._maxDeductible || values.CONSULTATION?.deductible;
+                  const deductibleValue = medicineDeductible || consultationDeductible || "0";
+
+                  resultsMap[search.taskId] = {
+                    copay: copayValue,
+                    deductible: deductibleValue,
+                    isEligible: isEligible,
+                  };
+                } else {
+                  // Store eligibility even if copay details are missing
+                  resultsMap[search.taskId] = {
+                    isEligible: isEligible,
+                  };
+                }
               }
+            } catch (error) {
+              console.error(`Error fetching result for task ${search.taskId}:`, error);
             }
-          } catch (error) {
-            console.error(`Error fetching result for task ${search.taskId}:`, error);
           }
         }
         setTodaySearchesResults(resultsMap);
@@ -258,6 +301,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       setInsuranceDetails([]);
       setInsuranceError(null);
       setExpandedInsurance(new Set());
+      setEmiratesIdFromRedis(null);
     }, 300);
   };
 
@@ -274,26 +318,32 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
         // Use drawer for completed checks, modal for active checks
         if (historyItem.status === "complete" && historyItem.result) {
-          // Try to fetch fresh result from API
-          try {
-            const response = await fetch('/api/mantys/check-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ task_id: search.taskId }),
-            });
+          // Only fetch fresh result from API if we don't have complete data in localStorage
+          // This reduces unnecessary API calls
+          if (historyItem.result?.data) {
+            // We already have the result data, use cached result directly
+            setFreshEligibilityResult(null); // Will use cached result from historyItem
+          } else {
+            // Only fetch from API if result data is missing
+            try {
+              const response = await fetch('/api/mantys/check-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: search.taskId }),
+              });
 
-            if (response.ok) {
-              const apiResponse = await response.json();
-              if (apiResponse.status === 'complete' && apiResponse.result) {
-                if (apiResponse.result.data) {
-                  setFreshEligibilityResult(apiResponse.result);
+              if (response.ok) {
+                const apiResponse = await response.json();
+                if (apiResponse.status === 'complete' && apiResponse.result) {
+                  if (apiResponse.result.data) {
+                    setFreshEligibilityResult(apiResponse.result);
+                  }
                 }
               }
+            } catch (error) {
+              console.error('Error fetching fresh result:', error);
             }
-          } catch (error) {
-            console.error('Error fetching fresh result:', error);
           }
-
           setShowEligibilityDrawer(true);
         } else {
           setShowEligibilityModal(true);
@@ -379,6 +429,10 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
     // Create a minimal PatientData object from appointment data
     const nameParts = apt.full_name?.split(" ") || [];
+    // Use nationality_id from appointment as uid_value for Emirates ID
+    // This ensures the form can use it immediately, while still preferring Redis value if available
+    // Prefer Redis value if available (fetched asynchronously), otherwise use appointment's nationality_id
+    const emiratesId = emiratesIdFromRedis || apt.nationality_id;
     return {
       patient_id: apt.patient_id,
       mpi: apt.mpi,
@@ -392,6 +446,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       email: apt.email || "",
       appointment_id: apt.appointment_id,
       encounter_id: (apt as any).encounter_id, // May be in the data
+      uid_value: emiratesId || undefined, // Set nationality_id as uid_value so form can use it
     } as PatientData;
   };
 
@@ -543,6 +598,14 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                     </span>
                   </div>
                 )}
+                {(emiratesIdFromRedis || selectedAppointment.nationality_id) && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-gray-700">Emirates ID:</span>
+                    <span className="text-gray-900">
+                      {emiratesIdFromRedis || selectedAppointment.nationality_id}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-gray-700">
                     Appointment ID:
@@ -621,12 +684,12 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                   {/* Eligibility Checks Today Section */}
                   {todaySearches.length > 0 && (
                     <div>
-                      <div className="bg-green-100 px-4 py-2 rounded-t">
+                      <div className="bg-gray-100 px-4 py-2 rounded-t">
                         <h3 className="text-sm font-bold text-gray-900">
-                          ✓ Eligibility Checks Today ({todaySearches.length})
+                          Eligibility Checks Today ({todaySearches.length})
                         </h3>
                       </div>
-                      <div className="bg-green-50 border-2 border-green-200 rounded-b p-3 space-y-3">
+                      <div className="bg-gray-50 border-2 border-gray-200 rounded-b p-3 space-y-3">
                         {todaySearches.map((search) => {
                           const date = search.createdAt ? new Date(search.createdAt) : null;
                           const timeString = date && !isNaN(date.getTime())
@@ -651,14 +714,68 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                             return tpaMap[code] || code;
                           };
 
+                          // Determine colors based on status and eligibility
+                          const result = todaySearchesResults[search.taskId];
+                          const isComplete = search.status === "complete";
+                          const isError = search.status === "error";
+                          const isEligible = result?.isEligible ?? false;
+                          // If status is complete and we have copay/deductible data, it means the policy is active
+                          // Even if isEligible is false, if we have copay/deductible, the policy is active
+                          const hasActivePolicyData = isComplete && (result?.copay || result?.deductible);
+                          const isPendingOrProcessing = search.status === "pending" || search.status === "processing";
+
+                          // Color logic: error → yellow, pending/processing → yellow, complete → green (default), complete+explicitly not eligible → red
+                          let bgColor = "bg-yellow-50";
+                          let borderColor = "border-yellow-300";
+                          let hoverBgColor = "hover:bg-yellow-100";
+                          let iconBgColor = "bg-yellow-500";
+                          let iconPath = "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"; // Clock icon for pending/default
+
+                          if (isError) {
+                            // Error status always shows yellow
+                            bgColor = "bg-yellow-50";
+                            borderColor = "border-yellow-300";
+                            hoverBgColor = "hover:bg-yellow-100";
+                            iconBgColor = "bg-yellow-500";
+                            iconPath = "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"; // Clock icon
+                          } else if (isComplete) {
+                            // Complete status means the check succeeded and shows "Active" with copay/deductible
+                            // Default to green unless we explicitly know it's not eligible AND has no policy data
+                            // If result is not loaded yet, default to green (since complete status means active policy)
+                            if (result !== undefined) {
+                              // We have result data - check if explicitly not eligible and no policy data
+                              if (!isEligible && !hasActivePolicyData) {
+                                bgColor = "bg-red-50";
+                                borderColor = "border-red-300";
+                                hoverBgColor = "hover:bg-red-100";
+                                iconBgColor = "bg-red-500";
+                                iconPath = "M6 18L18 6M6 6l12 12"; // X icon
+                              } else {
+                                // Has policy data or is eligible - show green
+                                bgColor = "bg-green-50";
+                                borderColor = "border-green-300";
+                                hoverBgColor = "hover:bg-green-100";
+                                iconBgColor = "bg-green-500";
+                                iconPath = "M5 13l4 4L19 7"; // Checkmark icon
+                              }
+                            } else {
+                              // Result not loaded yet, but status is complete - default to green (active policy)
+                              bgColor = "bg-green-50";
+                              borderColor = "border-green-300";
+                              hoverBgColor = "hover:bg-green-100";
+                              iconBgColor = "bg-green-500";
+                              iconPath = "M5 13l4 4L19 7"; // Checkmark icon
+                            }
+                          }
+
                           return (
                             <div
                               key={search.taskId}
                               onClick={() => handlePreviousSearchClick(search)}
-                              className="bg-green-50 border-2 border-green-300 rounded-lg p-4 cursor-pointer hover:bg-green-100 transition-colors"
+                              className={`${bgColor} border-2 ${borderColor} rounded-lg p-4 cursor-pointer ${hoverBgColor} transition-colors`}
                             >
                               <div className="flex items-start gap-3">
-                                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
+                                <div className={`flex-shrink-0 w-8 h-8 rounded-full ${iconBgColor} flex items-center justify-center`}>
                                   <svg
                                     className="w-5 h-5 text-white"
                                     fill="none"
@@ -669,7 +786,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                       strokeLinecap="round"
                                       strokeLinejoin="round"
                                       strokeWidth={3}
-                                      d="M5 13l4 4L19 7"
+                                      d={iconPath}
                                     />
                                   </svg>
                                 </div>
@@ -686,9 +803,8 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                     {getTPAName(search.tpaCode)} ({search.tpaCode})
                                   </div>
                                   <div className="text-sm text-gray-700">
-                                    Status: {search.status === "complete" ? "Active" : search.status}
+                                    Status: {search.status === "complete" ? "Active" : search.status === "error" ? "failed" : search.status}
                                     {search.status === "complete" && (() => {
-                                      const result = todaySearchesResults[search.taskId];
                                       const copay = result?.copay ? `${result.copay}%` : "30%";
                                       const deductible = result?.deductible || "20.00";
                                       return ` • Copay: ${copay} • Deductible: ${deductible}`;
@@ -740,7 +856,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                 >
                                   <span className="text-gray-900">
                                     {search.tpaCode}
-                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status}`}
+                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status === "error" ? "failed" : search.status}`}
                                   </span>
                                 </div>
                               );
@@ -755,7 +871,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                 >
                                   <span className="text-gray-900">
                                     {search.tpaCode}
-                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status}`}
+                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status === "error" ? "failed" : search.status}`}
                                   </span>
                                 </div>
                               );
@@ -790,7 +906,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                                 className="bg-white hover:bg-gray-100 rounded px-3 py-2 text-sm cursor-pointer transition-colors"
                               >
                                 <span className="text-gray-900">
-                                  {formattedDate} - {getTPAName(search.tpaCode)} ({search.tpaCode}) - Status: {search.status === "complete" ? "Active" : search.status}
+                                  {formattedDate} - {getTPAName(search.tpaCode)} ({search.tpaCode}) - Status: {search.status === "complete" ? "Active" : search.status === "error" ? "failed" : search.status}
                                 </span>
                               </div>
                             );

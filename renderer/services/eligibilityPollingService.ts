@@ -167,8 +167,36 @@ class EligibilityPollingService {
         body: JSON.stringify({ task_id: task.taskId }),
       });
 
+      // Handle HTTP errors - try to parse error response
       if (!response.ok) {
-        throw new Error(`Status check failed: ${response.statusText}`);
+        let errorMessage = `Status check failed: ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          if (errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } catch {
+          // If JSON parsing fails, use the default error message
+        }
+
+        // For 500 errors, be more aggressive about stopping
+        if (response.status === 500 && task.attempts >= 5) {
+          console.error(`[PollingService] Task ${task.taskId} failed after ${task.attempts} attempts with server error`);
+          try {
+            await EligibilityHistoryService.updateByTaskId(task.taskId, {
+              status: 'error',
+              error: errorMessage || 'Server error while checking status',
+              completedAt: new Date().toISOString(),
+              pollingAttempts: task.attempts,
+            });
+          } catch (updateError: any) {
+            console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, updateError.message);
+          }
+          await this.removeTask(task.taskId);
+          return;
+        }
+
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
@@ -257,8 +285,11 @@ class EligibilityPollingService {
     } catch (error: any) {
       console.error(`[PollingService] Error polling task ${task.taskId}:`, error);
 
+      // For network errors or repeated failures, stop after fewer attempts
+      const maxErrorAttempts = error.message?.includes('Status check failed') ? 5 : 3;
+
       // Only mark as error if we've tried multiple times
-      if (task.attempts >= 3) {
+      if (task.attempts >= maxErrorAttempts) {
         try {
           await EligibilityHistoryService.updateByTaskId(task.taskId, {
             status: 'error',
@@ -342,8 +373,9 @@ class EligibilityPollingService {
     console.log(`[PollingService] Resuming polling for ${activeItems.length} active check(s)`);
 
     for (const item of activeItems) {
-      // Only resume if not already being polled
-      if (!this.activeTasks.has(item.taskId)) {
+      // Only resume if not already being polled and status is actually active
+      if (!this.activeTasks.has(item.taskId) &&
+        (item.status === 'pending' || item.status === 'processing')) {
         await this.addTask(item.taskId, item.id);
       }
     }

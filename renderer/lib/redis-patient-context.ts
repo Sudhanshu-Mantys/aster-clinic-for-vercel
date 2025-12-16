@@ -9,25 +9,106 @@ if (!REDIS_URL) {
 
 // Singleton Redis client
 let redisClient: Redis | null = null;
+let isConnecting = false;
+let connectionPromise: Promise<Redis> | null = null;
 
-function getRedisClient(): Redis {
-  if (!redisClient) {
-    redisClient = new Redis(REDIS_URL, {
-      tls: {
-        rejectUnauthorized: false,
-      },
-      retryStrategy(times) {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-      },
-      maxRetriesPerRequest: 3,
-    });
-
-    redisClient.on("error", (err) => {
-      console.error("Redis Client Error:", err);
-    });
+async function getRedisClient(): Promise<Redis> {
+  // If client exists and is ready, return it immediately
+  if (redisClient && redisClient.status === 'ready') {
+    return redisClient;
   }
-  return redisClient;
+
+  // If already connecting, wait for that connection
+  if (isConnecting && connectionPromise) {
+    return connectionPromise;
+  }
+
+  // Start new connection
+  isConnecting = true;
+  connectionPromise = new Promise((resolve, reject) => {
+    let timeout: NodeJS.Timeout | null = null;
+    let resolved = false;
+
+    const cleanup = () => {
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+      isConnecting = false;
+    };
+
+    const resolveOnce = (client: Redis) => {
+      if (!resolved) {
+        resolved = true;
+        cleanup();
+        resolve(client);
+      }
+    };
+
+    const rejectOnce = (error: Error) => {
+      if (!resolved) {
+        resolved = true;
+        cleanup();
+        connectionPromise = null;
+        reject(error);
+      }
+    };
+
+    try {
+      redisClient = new Redis(REDIS_URL, {
+        tls: {
+          rejectUnauthorized: false,
+        },
+        retryStrategy(times) {
+          if (times > 10) {
+            console.error('Redis: Too many retry attempts');
+            return null; // Stop retrying
+          }
+          const delay = Math.min(times * 50, 500);
+          return delay;
+        },
+        maxRetriesPerRequest: 3,
+        connectTimeout: 5000, // 5 second connection timeout
+        lazyConnect: false, // Connect immediately
+      });
+
+      redisClient.on("error", (err) => {
+        console.error("Redis Client Error:", err);
+        // Don't reject on error if we're still connecting - let timeout handle it
+        if (redisClient && redisClient.status === 'end') {
+          rejectOnce(new Error(`Redis connection failed: ${err.message}`));
+        }
+      });
+
+      redisClient.on("connect", () => {
+        console.log("✅ Redis patient context client connected");
+      });
+
+      redisClient.on("ready", () => {
+        console.log("✅ Redis patient context client ready");
+        if (redisClient) {
+          resolveOnce(redisClient);
+        }
+      });
+
+      // Handle connection timeout
+      timeout = setTimeout(() => {
+        if (redisClient && redisClient.status !== 'ready') {
+          console.error("Redis connection timeout after 5 seconds");
+          rejectOnce(new Error("Redis connection timeout after 5 seconds"));
+        }
+      }, 5000);
+
+      // If already ready, resolve immediately
+      if (redisClient.status === 'ready') {
+        resolveOnce(redisClient);
+      }
+    } catch (error) {
+      rejectOnce(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+
+  return connectionPromise;
 }
 
 /**
@@ -98,18 +179,21 @@ export interface PatientContext {
  */
 
 export class PatientContextRedisService {
-  private redis: Redis;
   private readonly TTL = 60 * 60 * 24 * 30; // 30 days
 
-  constructor() {
-    this.redis = getRedisClient();
+  /**
+   * Get Redis client, ensuring it's connected
+   */
+  private async getRedis(): Promise<Redis> {
+    return await getRedisClient();
   }
 
   /**
    * Store patient context by MPI
    */
   async storePatientContext(context: PatientContext): Promise<void> {
-    const pipeline = this.redis.pipeline();
+    const redis = await this.getRedis();
+    const pipeline = redis.pipeline();
 
     // Store by MPI
     const mpiKey = `patient:mpi:${context.mpi}`;
@@ -139,7 +223,8 @@ export class PatientContextRedisService {
 
     console.log(`📦 Starting bulk store of ${contexts.length} contexts in Redis`);
 
-    const pipeline = this.redis.pipeline();
+    const redis = await this.getRedis();
+    const pipeline = redis.pipeline();
     let keysToStore = 0;
 
     for (const context of contexts) {
@@ -220,8 +305,9 @@ export class PatientContextRedisService {
    * Get patient context by MPI
    */
   async getPatientContextByMPI(mpi: string): Promise<PatientContext | null> {
+    const redis = await this.getRedis();
     const mpiKey = `patient:mpi:${mpi}`;
-    const data = await this.redis.get(mpiKey);
+    const data = await redis.get(mpiKey);
 
     if (data) {
       return JSON.parse(data);
@@ -235,8 +321,9 @@ export class PatientContextRedisService {
   async getPatientContextByPatientId(
     patientId: number
   ): Promise<PatientContext | null> {
+    const redis = await this.getRedis();
     const patientIdKey = `patient:id:${patientId}`;
-    const data = await this.redis.get(patientIdKey);
+    const data = await redis.get(patientIdKey);
 
     if (data) {
       return JSON.parse(data);
@@ -250,8 +337,9 @@ export class PatientContextRedisService {
   async getPatientContextByAppointmentId(
     appointmentId: number
   ): Promise<PatientContext | null> {
+    const redis = await this.getRedis();
     const appointmentKey = `appointment:${appointmentId}`;
-    const data = await this.redis.get(appointmentKey);
+    const data = await redis.get(appointmentKey);
 
     if (data) {
       return JSON.parse(data);
@@ -304,7 +392,8 @@ export class PatientContextRedisService {
     const context = await this.getPatientContextByMPI(mpi);
 
     if (context) {
-      const pipeline = this.redis.pipeline();
+      const redis = await this.getRedis();
+      const pipeline = redis.pipeline();
 
       pipeline.del(`patient:mpi:${context.mpi}`);
       pipeline.del(`patient:id:${context.patientId}`);
@@ -321,8 +410,11 @@ export class PatientContextRedisService {
    * Close Redis connection
    */
   async disconnect(): Promise<void> {
-    if (this.redis) {
-      await this.redis.quit();
+    if (redisClient) {
+      await redisClient.quit();
+      redisClient = null;
+      isConnecting = false;
+      connectionPromise = null;
     }
   }
 }
