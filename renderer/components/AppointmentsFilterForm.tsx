@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { useAuth } from "../contexts/AuthContext";
+import { cachedFetch } from "../lib/request-cache";
 
 export interface AppointmentFilters {
     // Date filters
@@ -92,6 +94,50 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
 
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
+    // Doctors from clinic-config
+    const { user } = useAuth();
+    const selectedClinicId = user?.selected_team_id || null;
+    const [doctorsList, setDoctorsList] = useState<any[]>([]);
+    const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
+
+    // Load doctors from clinic-config
+    useEffect(() => {
+        if (!selectedClinicId) {
+            setDoctorsList([]);
+            return;
+        }
+
+        // Reset doctors list when clinic changes
+        setDoctorsList([]);
+
+        let isCancelled = false;
+
+        const loadDoctors = async () => {
+            setIsLoadingDoctors(true);
+            try {
+                const response = await cachedFetch(`/api/clinic-config/doctors?clinic_id=${selectedClinicId}`);
+                if (response.ok && !isCancelled) {
+                    const data = await response.json();
+                    setDoctorsList(data.configs || []);
+                }
+            } catch (error) {
+                if (!isCancelled) {
+                    console.error("Failed to load doctors:", error);
+                }
+            } finally {
+                if (!isCancelled) {
+                    setIsLoadingDoctors(false);
+                }
+            }
+        };
+
+        loadDoctors();
+
+        return () => {
+            isCancelled = true;
+        };
+    }, [selectedClinicId]);
+
     const handleInputChange = (field: keyof AppointmentFilters, value: any) => {
         setFilters((prev) => ({
             ...prev,
@@ -161,19 +207,19 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
     // Appointment status options
     const statusOptions = [
         { value: "16,3,21,22,6,23,24,17,25,18,7,8,15,11,26,27", label: "All Statuses" },
-        { value: "3", label: "Open" },
+        { value: "16", label: "Open" },
+        { value: "3", label: "Arrived" },
+        { value: "8", label: "Cancelled" },
+        { value: "11", label: "Pending Reconcilation" },
+        { value: "17", label: "Ready to Bill" },
+        { value: "18", label: "Billed" },
+        { value: "21", label: "Nursing" },
+        { value: "24", label: "Not Conducted" },
         { value: "6", label: "Confirmed" },
-        { value: "7", label: "Arrived" },
-        { value: "8", label: "In Progress" },
-        { value: "11", label: "Completed" },
-        { value: "15", label: "Cancelled" },
-        { value: "16", label: "Scheduled" },
-        { value: "17", label: "Checked In" },
-        { value: "18", label: "Waiting" },
-        { value: "21", label: "Pending" },
+        { value: "7", label: "In Progress" },
+        { value: "15", label: "Completed" },
         { value: "22", label: "Approved" },
         { value: "23", label: "No Show" },
-        { value: "24", label: "Rescheduled" },
         { value: "25", label: "Walk In" },
         { value: "26", label: "On Hold" },
         { value: "27", label: "Ready" },
@@ -255,6 +301,75 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                         className="w-full"
                     />
                 </div>
+
+                <div className="space-y-2">
+                    <Label htmlFor="patientName" className="text-sm font-medium">
+                        Patient Name
+                    </Label>
+                    <Input
+                        id="patientName"
+                        type="text"
+                        placeholder="Enter patient name"
+                        value={filters.patientName || ""}
+                        onChange={(e) => handleInputChange("patientName", e.target.value)}
+                        onKeyPress={handleKeyPress}
+                        className="w-full"
+                    />
+                </div>
+
+                <div className="space-y-2">
+                    <Label htmlFor="appStatus" className="text-sm font-medium">
+                        Appointment Status
+                    </Label>
+                    <select
+                        id="appStatus"
+                        value={filters.appStatusId}
+                        onChange={(e) => handleInputChange("appStatusId", e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                        {statusOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                <div className="space-y-2">
+                    <Label htmlFor="physicianId" className="text-sm font-medium">
+                        Physician
+                    </Label>
+                    <select
+                        id="physicianId"
+                        value={filters.physicianId || ""}
+                        onChange={(e) => {
+                            const value = e.target.value;
+                            // Convert doctor_id (string) to number for physicianId
+                            const physicianId = value ? Number(value) : null;
+                            handleInputChange("physicianId", physicianId);
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={isLoadingDoctors}
+                    >
+                        <option value="">All Physicians</option>
+                        {doctorsList.map((doctor) => {
+                            // Try to convert doctor_id to number, fallback to lt_user_id if available
+                            const doctorIdNum = doctor.doctor_id ? Number(doctor.doctor_id) : null;
+                            const ltUserIdNum = doctor.lt_user_id ? Number(doctor.lt_user_id) : null;
+                            const physicianId = doctorIdNum || ltUserIdNum;
+
+                            if (!physicianId || isNaN(physicianId)) {
+                                return null; // Skip doctors without valid numeric IDs
+                            }
+
+                            return (
+                                <option key={doctor.doctor_id} value={physicianId}>
+                                    {doctor.doctor_name} {doctor.doctor_code ? `(${doctor.doctor_code})` : ""}
+                                </option>
+                            );
+                        })}
+                    </select>
+                </div>
             </div>
 
             {/* Advanced Filters Toggle */}
@@ -284,23 +399,8 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
             {/* Advanced Filters - Collapsible */}
             {showAdvancedFilters && (
                 <div className="space-y-4 pt-2 border-t border-gray-200">
-                    {/* First Row - Patient Name, Encounter #, Status, Payer Type */}
+                    {/* First Row - Encounter #, Payer Type */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="patientName" className="text-sm font-medium">
-                                Patient Name
-                            </Label>
-                            <Input
-                                id="patientName"
-                                type="text"
-                                placeholder="Enter patient name"
-                                value={filters.patientName || ""}
-                                onChange={(e) => handleInputChange("patientName", e.target.value)}
-                                onKeyPress={handleKeyPress}
-                                className="w-full"
-                            />
-                        </div>
-
                         <div className="space-y-2">
                             <Label htmlFor="encounterNumber" className="text-sm font-medium">
                                 Encounter #
@@ -316,24 +416,6 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                                 onKeyPress={handleKeyPress}
                                 className="w-full"
                             />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="appStatus" className="text-sm font-medium">
-                                Appointment Status
-                            </Label>
-                            <select
-                                id="appStatus"
-                                value={filters.appStatusId}
-                                onChange={(e) => handleInputChange("appStatusId", e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                                {statusOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
                         </div>
 
                         <div className="space-y-2">
@@ -357,29 +439,6 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                                     </option>
                                 ))}
                             </select>
-                        </div>
-                    </div>
-
-                    {/* Second Row - Physician ID, Visit Type, Room, Encounter Type */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="physicianId" className="text-sm font-medium">
-                                Physician ID
-                            </Label>
-                            <Input
-                                id="physicianId"
-                                type="number"
-                                placeholder="Physician ID"
-                                value={filters.physicianId || ""}
-                                onChange={(e) =>
-                                    handleInputChange(
-                                        "physicianId",
-                                        e.target.value ? Number(e.target.value) : null
-                                    )
-                                }
-                                onKeyPress={handleKeyPress}
-                                className="w-full"
-                            />
                         </div>
 
                         <div className="space-y-2">
@@ -421,7 +480,10 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                                 className="w-full"
                             />
                         </div>
+                    </div>
 
+                    {/* Second Row - Encounter Type */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="encounterType" className="text-sm font-medium">
                                 Appointment Level
