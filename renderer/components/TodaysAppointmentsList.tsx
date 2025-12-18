@@ -24,6 +24,7 @@ import { EligibilityHistoryService, EligibilityHistoryItem } from "../utils/elig
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
 import { fetchWithTimeout } from "../lib/request-cache";
+import { useAuth } from "../contexts/AuthContext";
 
 interface TodaysAppointmentsListProps {
   onRefresh?: () => void;
@@ -32,6 +33,9 @@ interface TodaysAppointmentsListProps {
 export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   onRefresh,
 }) => {
+  const { user } = useAuth();
+  const selectedClinicId = user?.selected_team_id || "";
+
   const [appointments, setAppointments] = useState<AppointmentData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -365,6 +369,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                 // Create a synthetic history item
                 const syntheticItem: EligibilityHistoryItem = {
                   id: search.taskId,
+                  clinicId: selectedClinicId,
                   taskId: search.taskId,
                   patientId: search.patientId.toString(),
                   patientName: search.patientName,
