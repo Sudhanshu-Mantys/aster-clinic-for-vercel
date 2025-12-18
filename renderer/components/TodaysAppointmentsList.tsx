@@ -982,36 +982,12 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       )}
 
       {/* Modal for pending/processing/error eligibility checks */}
-      {showEligibilityModal && selectedEligibilityItem && (
+      {showEligibilityModal && selectedEligibilityItem && selectedEligibilityItem.taskId && (
         <ExtractionProgressModal
           isOpen={showEligibilityModal}
           onClose={handleCloseEligibilityModal}
-          status={
-            selectedEligibilityItem.status === "error" ? "complete" : selectedEligibilityItem.status
-          }
-          statusMessage={
-            selectedEligibilityItem.status === "pending"
-              ? "Navigating Insurance Portal..."
-              : selectedEligibilityItem.status === "processing"
-                ? "Extracting eligibility data from TPA portal..."
-                : selectedEligibilityItem.status === "complete"
-                  ? "Eligibility check complete!"
-                  : "Check Failed"
-          }
-          interimScreenshot={selectedEligibilityItem.interimResults?.screenshot || null}
-          interimDocuments={
-            selectedEligibilityItem.interimResults?.documents?.map((doc) => ({
-              id: doc.name,
-              tag: doc.type,
-              url: doc.url,
-            })) || []
-          }
-          pollingAttempts={selectedEligibilityItem.pollingAttempts || 0}
-          maxAttempts={150}
+          taskId={selectedEligibilityItem.taskId}
           viewMode="history"
-          errorMessage={
-            selectedEligibilityItem.status === "error" ? selectedEligibilityItem.error : null
-          }
         />
       )}
     </>

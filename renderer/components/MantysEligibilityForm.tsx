@@ -1482,25 +1482,25 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   return (
     <>
       {/* Extraction Progress Modal */}
-      <ExtractionProgressModal
-        isOpen={isSubmitting && !isMinimized}
-        onClose={() => {
-          if (currentStatus === "complete") {
+      {taskId && (
+        <ExtractionProgressModal
+          isOpen={isSubmitting && !isMinimized}
+          onClose={() => {
             setIsSubmitting(false);
             setIsMinimized(false);
-          }
-        }}
-        onMinimize={() => {
-          setIsMinimized(true);
-        }}
-        status={currentStatus}
-        statusMessage={statusMessage}
-        interimScreenshot={interimScreenshot}
-        interimDocuments={interimDocuments}
-        pollingAttempts={pollingAttempts}
-        maxAttempts={150}
-        viewMode="live"
-      />
+          }}
+          onMinimize={() => {
+            setIsMinimized(true);
+          }}
+          taskId={taskId}
+          viewMode="live"
+          onComplete={(result) => {
+            setMantysResponse(result);
+            setShowResults(true);
+            setIsMinimized(false);
+          }}
+        />
+      )}
 
       <div className="space-y-6">
         {/* Loading Indicator for Config/Doctor Loading */}
