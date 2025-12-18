@@ -62,16 +62,20 @@ Redis is used for **server-side persistent storage** across all users and device
 - **Stored**: TPA mappings, networks, plans, doctors, etc.
 - **Used For**: Dropdown options, form validation
 
-### 2. **localStorage** (Client-Side Cache)
+### 2. **Eligibility History** (`redis-eligibility-history.ts`)
+- **Purpose**: Store eligibility check history in Redis (clinic-wide)
+- **Keys**:
+  - `eligibility:history:item:{historyId}` → Full history item (JSON)
+  - `eligibility:history:clinic:{clinicId}` → Set of historyIds for this clinic
+  - `eligibility:history:task:{taskId}` → historyId (for quick lookup by taskId)
+  - `eligibility:history:patient:{patientId}` → Set of historyIds for this patient
+- **TTL**: 30 days
+- **Stored When**: Eligibility check is created
+- **Used For**: History tracking, status updates, clinic-wide visibility
+
+### 3. **localStorage** (Client-Side Cache)
 
 Used for **browser-specific temporary storage**:
-
-#### **Eligibility History** (`utils/eligibilityHistory.ts`)
-- **Purpose**: Store eligibility check history in user's browser
-- **Key**: `eligibility_history`
-- **Stored**: All eligibility checks performed by this user
-- **TTL**: Until user clears browser data
-- **Used For**: Quick access to recent checks, UI state
 
 #### **Request Cache** (`lib/request-cache.ts`)
 - **Purpose**: Cache API responses to reduce network calls
@@ -79,7 +83,7 @@ Used for **browser-specific temporary storage**:
 - **TTL**: Short-lived (seconds to minutes)
 - **Used For**: Performance optimization
 
-### 3. **In-Memory** (Runtime State)
+### 4. **In-Memory** (Runtime State)
 
 #### **React State** (Components)
 - Component-level state (useState)
@@ -333,7 +337,7 @@ ASTER_API_KEY=...
 |-----------|---------|-------|-----|---------|
 | Patient Context | Redis | Clinic-wide | 30 days | Quick patient lookup |
 | Eligibility Metadata | Redis | Clinic-wide | 90 days | Track eligibility checks |
-| Eligibility History | localStorage | User-specific | Until cleared | Recent checks UI |
+| Eligibility History | Redis | Clinic-wide | 30 days | History tracking, status updates |
 | Clinic Config | Redis | Clinic-wide | Persistent | Dropdowns, validation |
 | Active Polling Tasks | Redis + Memory | App-wide | Until complete | Background polling |
 | Request Cache | Memory | Request | Seconds | Performance |
@@ -345,7 +349,7 @@ ASTER_API_KEY=...
 
 1. **Stateless Components**: `ExtractionProgressModal` fetches fresh data on open
 2. **Background Services**: Polling continues independently of UI
-3. **Dual Storage**: Redis for persistence, localStorage for UI state
+3. **Redis-First Storage**: All persistent data stored in Redis with proper indexing
 4. **API Proxy**: All external APIs called through Next.js API routes
 5. **Context Pattern**: Auth state managed via React Context
 6. **Service Layer**: Business logic in services, not components

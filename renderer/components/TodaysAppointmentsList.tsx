@@ -181,11 +181,12 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         }
       } catch (err) {
         console.error("Insurance fetch error:", err);
-        setInsuranceError(
-          err instanceof Error
-            ? err.message
-            : "Failed to fetch insurance details",
-        );
+        const errorMessage = err instanceof Error
+          ? err.message
+          : "Failed to fetch insurance details";
+        setInsuranceError(errorMessage);
+        // Don't throw - just log and set error state
+        // This prevents the error from crashing the UI
       } finally {
         setIsLoadingInsurance(false);
       }

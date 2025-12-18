@@ -2,6 +2,7 @@
 
 export interface EligibilityHistoryItem {
   id: string; // unique ID for this check
+  clinicId: string; // Clinic ID for clinic-wide storage
   patientId: string;
   taskId: string;
   patientName?: string;
@@ -35,14 +36,18 @@ export class EligibilityHistoryService {
   /**
    * Get all history items
    */
-  static async getAll(): Promise<EligibilityHistoryItem[]> {
+  static async getAll(clinicId?: string): Promise<EligibilityHistoryItem[]> {
     try {
       // Use cache if available and recent
       if (cachedItems && Date.now() - lastFetchTime < CACHE_DURATION) {
         return cachedItems;
       }
 
-      const response = await fetch('/api/eligibility-history');
+      const url = clinicId 
+        ? `/api/eligibility-history?clinic_id=${encodeURIComponent(clinicId)}`
+        : '/api/eligibility-history';
+      
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch history');
       }
@@ -225,9 +230,13 @@ export class EligibilityHistoryService {
   /**
    * Get active (pending or processing) checks
    */
-  static async getActive(): Promise<EligibilityHistoryItem[]> {
+  static async getActive(clinicId?: string): Promise<EligibilityHistoryItem[]> {
     try {
-      const response = await fetch('/api/eligibility-history?status=active');
+      const url = clinicId
+        ? `/api/eligibility-history?status=active&clinic_id=${encodeURIComponent(clinicId)}`
+        : '/api/eligibility-history?status=active';
+      
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch active history items');
       }
@@ -241,9 +250,13 @@ export class EligibilityHistoryService {
   /**
    * Get completed checks
    */
-  static async getCompleted(): Promise<EligibilityHistoryItem[]> {
+  static async getCompleted(clinicId?: string): Promise<EligibilityHistoryItem[]> {
     try {
-      const response = await fetch('/api/eligibility-history?status=completed');
+      const url = clinicId
+        ? `/api/eligibility-history?status=completed&clinic_id=${encodeURIComponent(clinicId)}`
+        : '/api/eligibility-history?status=completed';
+      
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch completed history items');
       }

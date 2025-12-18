@@ -1394,6 +1394,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       const actualPatientId = enrichedPatientData?.patient_id?.toString();
 
       const historyItem = await EligibilityHistoryService.add({
+        clinicId: selectedClinicId,
         patientId: actualPatientId || emiratesId, // Use patient ID if available, fall back to Emirates ID
         taskId: createdTaskId,
         patientName:
