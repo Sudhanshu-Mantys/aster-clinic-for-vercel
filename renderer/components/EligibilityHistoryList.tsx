@@ -633,36 +633,12 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
       )}
 
       {/* Modal for pending/processing/error checks */}
-      {showModal && selectedItem && (
+      {showModal && selectedItem && selectedItem.taskId && (
         <ExtractionProgressModal
           isOpen={showModal}
           onClose={handleCloseModal}
-          status={
-            selectedItem.status === "error" ? "complete" : selectedItem.status
-          }
-          statusMessage={
-            selectedItem.status === "pending"
-              ? "Navigating Insurance Portal..."
-              : selectedItem.status === "processing"
-                ? "Extracting eligibility data from TPA portal..."
-                : selectedItem.status === "complete"
-                  ? "Eligibility check complete!"
-                  : "Check Failed"
-          }
-          interimScreenshot={selectedItem.interimResults?.screenshot || null}
-          interimDocuments={
-            selectedItem.interimResults?.documents?.map((doc) => ({
-              id: doc.name,
-              tag: doc.type,
-              url: doc.url,
-            })) || []
-          }
-          pollingAttempts={selectedItem.pollingAttempts || 0}
-          maxAttempts={150}
+          taskId={selectedItem.taskId}
           viewMode="history"
-          errorMessage={
-            selectedItem.status === "error" ? selectedItem.error : null
-          }
         />
       )}
     </div>

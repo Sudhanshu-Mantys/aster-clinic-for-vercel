@@ -10,8 +10,8 @@ interface PollingTask {
   startedAt: number;
 }
 
-const MAX_ATTEMPTS = 150; // 150 attempts * 2 seconds = 5 minutes
-const POLL_INTERVAL = 2000; // 2 seconds
+const MAX_ATTEMPTS = 400; // 150 attempts * 2 seconds = 5 minutes
+const POLL_INTERVAL = 3000; // 2 seconds
 
 class EligibilityPollingService {
   private pollingInterval: NodeJS.Timeout | null = null;
@@ -270,7 +270,7 @@ class EligibilityPollingService {
         try {
           await EligibilityHistoryService.updateByTaskId(task.taskId, {
             status: 'error',
-            error: 'Eligibility check timed out after 5 minutes. Please try again.',
+            error: 'Eligibility check timed out after 10 minutes. Please try again.',
             completedAt: new Date().toISOString(),
             pollingAttempts: task.attempts,
           });

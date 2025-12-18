@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Eligibility History feature allows users to run multiple eligibility checks simultaneously and track all past and current checks in a centralized history view. All data is stored in browser localStorage for quick access and persistence across sessions.
+The Eligibility History feature allows users to run multiple eligibility checks simultaneously and track all past and current checks in a centralized history view. All data is stored in Redis for clinic-wide persistence and scalability.
 
 ## Features
 
@@ -24,10 +24,11 @@ The Eligibility History feature allows users to run multiple eligibility checks 
 - Delete individual checks or clear all history
 
 ### 4. **Persistent Storage**
-- Uses browser localStorage
-- Survives page refreshes
+- Uses Redis for clinic-wide storage
+- Survives page refreshes and device changes
 - Automatically cleaned up after 30 days
-- Maximum 100 items to prevent storage overflow
+- Maximum 100 items per clinic to prevent storage overflow
+- Individual keys per item for efficient queries
 
 ## Architecture
 
@@ -36,7 +37,16 @@ The Eligibility History feature allows users to run multiple eligibility checks 
 #### `EligibilityHistoryService`
 Location: `renderer/utils/eligibilityHistory.ts`
 
-Central service for managing history data in localStorage.
+Client-side service for managing history data. Calls API routes that use Redis storage.
+
+#### `EligibilityHistoryRedisService`
+Location: `renderer/lib/redis-eligibility-history.ts`
+
+Server-side Redis service for managing eligibility history with proper indexing:
+- Individual keys per history item
+- Clinic-wide indexing for fast queries
+- Task ID indexing for quick lookups
+- Patient ID indexing for patient-specific queries
 
 **Key Methods:**
 - `add(item)` - Add new check to history
@@ -56,11 +66,15 @@ Central service for managing history data in localStorage.
 ```typescript
 interface EligibilityHistoryItem {
   id: string;                    // Unique ID for this check
+  clinicId: string;               // Clinic ID for clinic-wide storage
   patientId: string;             // Patient ID (Emirates ID, etc.)
   taskId: string;                // Mantys task ID
   patientName?: string;          // Patient name
   dateOfBirth?: string;          // Date of birth
   insurancePayer?: string;       // Insurance company
+  patientMPI?: string;           // Patient MPI
+  appointmentId?: number;        // Appointment ID
+  encounterId?: number;          // Encounter ID
   status: 'pending' | 'processing' | 'complete' | 'error';
   createdAt: string;             // ISO timestamp
   completedAt?: string;          // ISO timestamp
@@ -77,6 +91,12 @@ interface EligibilityHistoryItem {
   pollingAttempts?: number;      // Current polling attempt
 }
 ```
+
+**Redis Key Structure:**
+- `eligibility:history:item:{historyId}` → Full history item (JSON)
+- `eligibility:history:clinic:{clinicId}` → Set of historyIds for this clinic
+- `eligibility:history:task:{taskId}` → historyId (for quick lookup by taskId)
+- `eligibility:history:patient:{patientId}` → Set of historyIds for this patient
 
 #### `EligibilityHistoryList`
 Location: `renderer/components/EligibilityHistoryList.tsx`
@@ -142,10 +162,11 @@ Dedicated page for eligibility checks with history.
 ### Storage Management
 
 History is automatically managed:
-- Maximum 100 items stored
-- Old items removed after 30 days
-- Can manually clear all with "Clear All" button
+- Maximum 100 items per clinic stored
+- Old items removed after 30 days (TTL)
+- Can manually clear all with "Clear All" button (clears clinic history)
 - Each item includes all check data
+- Clinic-wide visibility (all users in a clinic see the same history)
 
 ## Integration Flow
 
@@ -191,11 +212,14 @@ The backend polling should return interim results:
 
 ## Future Enhancements
 
-### Backend Integration (Recommended)
-Currently using localStorage, but should move to backend:
-- Persist across devices
-- Share history across team
-- Better search capabilities
+### Additional Features
+- Export history to CSV/Excel
+- Print eligibility reports
+- Email reports to patients
+- Batch eligibility checks
+- Scheduled checks
+- Notifications when check completes
+- Advanced search and filtering
 - Analytics and reporting
 - Audit trail
 
@@ -207,33 +231,33 @@ Currently using localStorage, but should move to backend:
 - Scheduled checks
 - Notifications when check completes
 
-## Browser Compatibility
+## Storage Architecture
 
-Works in all modern browsers with localStorage support:
-- Chrome 4+
-- Firefox 3.5+
-- Safari 4+
-- Edge (all versions)
-- Opera 10.5+
+### Redis Storage
+- All history stored in Redis with individual keys per item
+- Clinic-wide scope (all users in a clinic share history)
+- Efficient queries using Redis sets for indexing
+- Automatic TTL expiration (30 days)
+- Maximum 100 items per clinic (oldest items auto-removed)
 
-## Storage Limits
-
-- localStorage typically has 5-10MB limit
-- Each check ~5-50KB depending on screenshots
-- 100 items should fit comfortably
-- Automatic cleanup prevents overflow
-- Screenshots stored as base64 (larger size)
+### Performance
+- O(1) lookups by historyId, taskId
+- Fast clinic-wide queries using Redis sets
+- Efficient bulk operations using Redis pipelines
+- No need to load all items for queries
 
 ## Troubleshooting
 
 ### History not appearing
-- Check browser localStorage is enabled
-- Try clearing browser cache
+- Check Redis connection is working
+- Verify clinicId is correctly passed in API calls
 - Check console for errors
+- Verify user has access to the clinic
 
 ### Too many items
-- Manually clear old items
-- Run `EligibilityHistoryService.cleanup(7)` to keep only last 7 days
+- Oldest items are automatically removed (max 100 per clinic)
+- Manually clear all with "Clear All" button
+- TTL automatically removes items after 30 days
 
 ### Screenshots not loading
 - Ensure backend returns base64 images
@@ -284,12 +308,13 @@ completedIds.forEach(id => EligibilityHistoryService.delete(id));
 
 ## Security Considerations
 
-- Data stored in browser localStorage (unencrypted)
+- Data stored in Redis (server-side)
 - Screenshots may contain PHI/PII
-- Consider security implications before production
-- Recommend backend storage with encryption
-- Implement proper access controls
+- Clinic-wide access (all users in clinic can see history)
+- Implement proper access controls at API level
 - Follow HIPAA/PHI guidelines if applicable
+- Redis should be secured with authentication
+- Consider encryption at rest for sensitive data
 
 ## Performance Tips
 
@@ -304,4 +329,4 @@ completedIds.forEach(id => EligibilityHistoryService.delete(id));
 
 The Eligibility History feature provides a powerful way to manage multiple eligibility checks efficiently. With real-time updates, comprehensive history tracking, and parallel processing capabilities, users can handle high volumes of checks while maintaining full visibility into the process.
 
-For production use, strongly recommend migrating from localStorage to a proper backend database for better security, scalability, and team collaboration.
+The Redis-based storage ensures clinic-wide visibility, scalability, and persistence across devices and sessions. The individual key structure with proper indexing provides efficient queries and operations even with large histories.

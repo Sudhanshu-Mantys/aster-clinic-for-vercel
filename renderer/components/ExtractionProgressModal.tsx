@@ -1,18 +1,26 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Modal } from "./ui/modal";
+import { EligibilityHistoryService } from "../utils/eligibilityHistory";
 
 interface ExtractionProgressModalProps {
   isOpen: boolean;
   onClose: () => void;
-  status: "idle" | "pending" | "processing" | "complete";
+  taskId: string; // Task ID in format: actual_task_id or tasksFor:{appointment_id}
+  viewMode?: "live" | "history"; // 'live' = monitoring active check, 'history' = viewing completed check
+  onMinimize?: () => void; // Callback when minimize button is clicked
+  onComplete?: (result: any) => void; // Callback when task completes
+}
+
+interface TaskStatusData {
+  status: "idle" | "pending" | "processing" | "complete" | "error";
   statusMessage: string;
   interimScreenshot: string | null;
   interimDocuments: Array<{ id: string; tag: string; url: string }>;
   pollingAttempts: number;
-  maxAttempts: number;
-  viewMode?: "live" | "history"; // 'live' = monitoring active check, 'history' = viewing completed check
-  errorMessage?: string | null; // Error message for failed checks
-  onMinimize?: () => void; // Callback when minimize button is clicked
+  errorMessage: string | null;
+  isSearchAll?: boolean;
+  searchAllStatus?: string;
+  aggregatedResults?: any[];
 }
 
 export const ExtractionProgressModal: React.FC<
@@ -20,16 +28,203 @@ export const ExtractionProgressModal: React.FC<
 > = ({
   isOpen,
   onClose,
-  status,
-  statusMessage,
-  interimScreenshot,
-  interimDocuments,
-  pollingAttempts,
-  maxAttempts,
+  taskId,
   viewMode = "live",
-  errorMessage = null,
   onMinimize,
+  onComplete,
 }) => {
+    const [taskData, setTaskData] = useState<TaskStatusData>({
+      status: "idle",
+      statusMessage: "Loading...",
+      interimScreenshot: null,
+      interimDocuments: [],
+      pollingAttempts: 0,
+      errorMessage: null,
+    });
+    const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const actualTaskIdRef = useRef<string | null>(null);
+
+    // Extract actual task_id from tasksFor:{appointment_id} format
+    const extractTaskId = async (taskIdOrKey: string): Promise<string | null> => {
+      // If it's already a task_id (UUID format), return it
+      if (taskIdOrKey.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+        return taskIdOrKey;
+      }
+
+      // If it's in format tasksFor:{appointment_id}, we need to fetch the task_id
+      if (taskIdOrKey.startsWith("tasksFor:")) {
+        const appointmentId = taskIdOrKey.replace("tasksFor:", "");
+        try {
+          // Get all eligibility history items and filter by appointment_id
+          const allItems = await EligibilityHistoryService.getAll();
+
+          // Filter by appointment_id and get the most recent one
+          const itemsForAppointment = allItems
+            .filter((item) => item.appointmentId?.toString() === appointmentId)
+            .sort((a, b) =>
+              new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+            );
+
+          if (itemsForAppointment.length > 0) {
+            return itemsForAppointment[0].taskId;
+          }
+        } catch (error) {
+          console.error("Error fetching task_id for appointment:", error);
+        }
+        return null;
+      }
+
+      return taskIdOrKey;
+    };
+
+    // Fetch status from API (which calls Mantys API)
+    const fetchTaskStatus = async (actualTaskId: string) => {
+      try {
+        const response = await fetch("/api/mantys/check-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task_id: actualTaskId }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch status: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        // Check if it's a search_all task
+        const isSearchAll = data.isSearchAll === true;
+        const searchAllStatus = data.searchAllStatus;
+        const aggregatedResults = data.aggregatedResults || [];
+
+        // Determine the effective status
+        let effectiveStatus: "pending" | "processing" | "complete" | "error" = data.status;
+        let statusMessage = data.message || "Task is being processed...";
+        let isComplete = false;
+
+        if (isSearchAll) {
+          // For search_all, check search_all_status
+          if (searchAllStatus === "SEARCH_ALL_COMPLETE") {
+            effectiveStatus = "complete";
+            statusMessage = "Search all complete!";
+            isComplete = true;
+          } else if (searchAllStatus === "SEARCH_ALL_PROCESSING" || data.status === "processing") {
+            effectiveStatus = "processing";
+            statusMessage = "Searching across all TPAs...";
+          } else {
+            effectiveStatus = "pending";
+            statusMessage = "Starting search across all TPAs...";
+          }
+        } else {
+          // For regular tasks, use the status from the API
+          if (data.status === "complete" || data.status === "error") {
+            isComplete = true;
+          }
+        }
+
+        // Update task data
+        setTaskData((prev) => ({
+          ...prev,
+          status: effectiveStatus,
+          statusMessage,
+          interimScreenshot: data.interimResults?.screenshot || null,
+          interimDocuments: data.interimResults?.documents || [],
+          pollingAttempts: prev.pollingAttempts + 1,
+          errorMessage: data.status === "error" ? data.message : null,
+          isSearchAll,
+          searchAllStatus,
+          aggregatedResults,
+        }));
+
+        // If complete, stop polling and call onComplete
+        if (isComplete) {
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          if (onComplete && data.result) {
+            onComplete(data.result);
+          }
+        }
+      } catch (error: any) {
+        console.error("Error fetching task status:", error);
+        setTaskData((prev) => ({
+          ...prev,
+          status: "error",
+          statusMessage: "Failed to fetch status",
+          errorMessage: error.message || "An error occurred while checking status",
+        }));
+      }
+    };
+
+    // Start polling when modal opens
+    useEffect(() => {
+      if (!isOpen) {
+        // Reset state when modal closes
+        setTaskData({
+          status: "idle",
+          statusMessage: "Loading...",
+          interimScreenshot: null,
+          interimDocuments: [],
+          pollingAttempts: 0,
+          errorMessage: null,
+        });
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+        return;
+      }
+
+      // Extract task_id and start polling
+      const initializeAndPoll = async () => {
+        const actualTaskId = await extractTaskId(taskId);
+        if (!actualTaskId) {
+          setTaskData({
+            status: "error",
+            statusMessage: "Invalid task ID",
+            interimScreenshot: null,
+            interimDocuments: [],
+            pollingAttempts: 0,
+            errorMessage: `Could not find task ID for: ${taskId}`,
+          });
+          return;
+        }
+
+        actualTaskIdRef.current = actualTaskId;
+
+        // Fetch immediately
+        await fetchTaskStatus(actualTaskId);
+
+        // Then poll every 5 seconds
+        pollingIntervalRef.current = setInterval(() => {
+          if (actualTaskIdRef.current) {
+            fetchTaskStatus(actualTaskIdRef.current);
+          }
+        }, 5000);
+      };
+
+      initializeAndPoll();
+
+      // Cleanup on unmount
+      return () => {
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+      };
+    }, [isOpen, taskId]);
+
+    const {
+      status,
+      statusMessage,
+      interimScreenshot,
+      interimDocuments,
+      pollingAttempts,
+      errorMessage,
+      isSearchAll,
+      aggregatedResults,
+    } = taskData;
     const getStatusColor = () => {
       switch (status) {
         case "pending":
@@ -38,6 +233,8 @@ export const ExtractionProgressModal: React.FC<
           return "text-blue-600";
         case "complete":
           return "text-green-600";
+        case "error":
+          return "text-red-600";
         default:
           return "text-gray-600";
       }
@@ -46,9 +243,8 @@ export const ExtractionProgressModal: React.FC<
     const getProgressPercentage = () => {
       if (status === "complete") return 100;
       if (status === "processing" && pollingAttempts > 0) {
-        // Estimate progress based on attempts (slower growth as it approaches 100%)
-        const rawProgress = (pollingAttempts / maxAttempts) * 100;
-        return Math.min(rawProgress * 0.8, 95); // Cap at 95% until complete
+        // Estimate progress based on attempts
+        return Math.min(pollingAttempts * 2, 95); // Cap at 95% until complete
       }
       return 10; // Show some progress when pending
     };
@@ -149,7 +345,34 @@ export const ExtractionProgressModal: React.FC<
             {/* Status Message */}
             {pollingAttempts > 0 && status !== "complete" && (
               <div className="flex justify-between text-sm text-gray-600">
-                <span>Checking status...</span>
+                <span>Checking status... (Attempt {pollingAttempts})</span>
+              </div>
+            )}
+
+            {/* Search All Status */}
+            {isSearchAll && aggregatedResults && aggregatedResults.length > 0 && (
+              <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                  Search All Progress ({aggregatedResults.length} TPAs checked)
+                </h4>
+                <div className="space-y-2">
+                  {aggregatedResults.slice(0, 5).map((result: any, index: number) => (
+                    <div key={index} className="text-xs text-gray-600">
+                      <span className="font-medium">{result.tpa_name}:</span>{" "}
+                      <span className={result.status === "failed" ? "text-red-600" : result.status === "backoff" ? "text-yellow-600" : "text-gray-600"}>
+                        {result.status}
+                      </span>
+                      {result.message && (
+                        <span className="text-gray-500 ml-2">- {result.message}</span>
+                      )}
+                    </div>
+                  ))}
+                  {aggregatedResults.length > 5 && (
+                    <div className="text-xs text-gray-500">
+                      + {aggregatedResults.length - 5} more TPAs...
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

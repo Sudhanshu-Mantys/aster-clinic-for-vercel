@@ -25,6 +25,9 @@ interface StatusResponse {
     documents?: Array<{ id: string; tag: string; url: string }>;
   };
   result?: any;
+  isSearchAll?: boolean;
+  searchAllStatus?: string;
+  aggregatedResults?: any[];
 }
 
 export default async function handler(
@@ -65,10 +68,61 @@ export default async function handler(
       });
     }
 
-    const resultData: MantysTaskResultResponse = await resultResponse.json();
+    const resultData: any = await resultResponse.json();
     console.log(`Task status: ${resultData.status}`);
 
-    // Handle different states
+    // Check if this is a search_all task
+    const isSearchAll = resultData.is_search_all === true;
+    const searchAllStatus = resultData.search_all_status;
+    const aggregatedResults = resultData.aggregated_results || [];
+
+    // For search_all tasks, check search_all_status instead of status
+    if (isSearchAll) {
+      if (searchAllStatus === "SEARCH_ALL_COMPLETE") {
+        // Search all is complete
+        return res.status(200).json({
+          status: "complete",
+          taskStatus: resultData.status,
+          message: "Search all complete!",
+          isSearchAll: true,
+          searchAllStatus: searchAllStatus,
+          aggregatedResults: aggregatedResults,
+          result: resultData,
+        });
+      } else if (searchAllStatus === "SEARCH_ALL_PROCESSING" || resultData.status === "EXTRACTING_DATA" || resultData.status === "NAVIGATING_WEBSITE") {
+        // Search all is processing
+        return res.status(200).json({
+          status: "processing",
+          taskStatus: resultData.status,
+          message: "Searching across all TPAs...",
+          interimResults: resultData.interim_results ? {
+            screenshot: resultData.interim_results.screenshot_key,
+            documents: resultData.interim_results.referral_documents?.map(
+              (doc: any) => ({
+                id: doc.id,
+                tag: doc.tag,
+                url: doc.s3_url,
+              }),
+            ) || [],
+          } : undefined,
+          isSearchAll: true,
+          searchAllStatus: searchAllStatus,
+          aggregatedResults: aggregatedResults,
+        });
+      } else {
+        // Search all is pending
+        return res.status(200).json({
+          status: "pending",
+          taskStatus: resultData.status,
+          message: "Starting search across all TPAs...",
+          isSearchAll: true,
+          searchAllStatus: searchAllStatus,
+          aggregatedResults: aggregatedResults,
+        });
+      }
+    }
+
+    // Handle different states for regular (non-search_all) tasks
     if (resultData.status === "EXTRACTING_DATA" && resultData.interim_results) {
       // Task is processing - update Redis status
       try {
@@ -102,6 +156,8 @@ export default async function handler(
       resultData.status === "PROCESS_COMPLETE" &&
       resultData.eligibility_result
     ) {
+      // Only process PROCESS_COMPLETE for non-search_all tasks
+      // (search_all tasks are handled above)
       // Task is complete - check if result contains an error
       const dataDump = resultData.eligibility_result.data_dump;
 
@@ -165,6 +221,9 @@ export default async function handler(
       status: "pending",
       taskStatus: resultData.status,
       message: "Task is being processed...",
+      isSearchAll: isSearchAll,
+      searchAllStatus: searchAllStatus,
+      aggregatedResults: aggregatedResults,
     });
   } catch (error: any) {
     console.error("Error checking Mantys status:", error);

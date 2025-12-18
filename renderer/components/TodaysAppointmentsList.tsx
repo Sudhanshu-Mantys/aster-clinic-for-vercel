@@ -24,6 +24,7 @@ import { EligibilityHistoryService, EligibilityHistoryItem } from "../utils/elig
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
 import { fetchWithTimeout } from "../lib/request-cache";
+import { useAuth } from "../contexts/AuthContext";
 
 interface TodaysAppointmentsListProps {
   onRefresh?: () => void;
@@ -32,6 +33,9 @@ interface TodaysAppointmentsListProps {
 export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   onRefresh,
 }) => {
+  const { user } = useAuth();
+  const selectedClinicId = user?.selected_team_id || "";
+
   const [appointments, setAppointments] = useState<AppointmentData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -181,11 +185,12 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         }
       } catch (err) {
         console.error("Insurance fetch error:", err);
-        setInsuranceError(
-          err instanceof Error
-            ? err.message
-            : "Failed to fetch insurance details",
-        );
+        const errorMessage = err instanceof Error
+          ? err.message
+          : "Failed to fetch insurance details";
+        setInsuranceError(errorMessage);
+        // Don't throw - just log and set error state
+        // This prevents the error from crashing the UI
       } finally {
         setIsLoadingInsurance(false);
       }
@@ -364,6 +369,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                 // Create a synthetic history item
                 const syntheticItem: EligibilityHistoryItem = {
                   id: search.taskId,
+                  clinicId: selectedClinicId,
                   taskId: search.taskId,
                   patientId: search.patientId.toString(),
                   patientName: search.patientName,
@@ -982,36 +988,12 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       )}
 
       {/* Modal for pending/processing/error eligibility checks */}
-      {showEligibilityModal && selectedEligibilityItem && (
+      {showEligibilityModal && selectedEligibilityItem && selectedEligibilityItem.taskId && (
         <ExtractionProgressModal
           isOpen={showEligibilityModal}
           onClose={handleCloseEligibilityModal}
-          status={
-            selectedEligibilityItem.status === "error" ? "complete" : selectedEligibilityItem.status
-          }
-          statusMessage={
-            selectedEligibilityItem.status === "pending"
-              ? "Navigating Insurance Portal..."
-              : selectedEligibilityItem.status === "processing"
-                ? "Extracting eligibility data from TPA portal..."
-                : selectedEligibilityItem.status === "complete"
-                  ? "Eligibility check complete!"
-                  : "Check Failed"
-          }
-          interimScreenshot={selectedEligibilityItem.interimResults?.screenshot || null}
-          interimDocuments={
-            selectedEligibilityItem.interimResults?.documents?.map((doc) => ({
-              id: doc.name,
-              tag: doc.type,
-              url: doc.url,
-            })) || []
-          }
-          pollingAttempts={selectedEligibilityItem.pollingAttempts || 0}
-          maxAttempts={150}
+          taskId={selectedEligibilityItem.taskId}
           viewMode="history"
-          errorMessage={
-            selectedEligibilityItem.status === "error" ? selectedEligibilityItem.error : null
-          }
         />
       )}
     </>
