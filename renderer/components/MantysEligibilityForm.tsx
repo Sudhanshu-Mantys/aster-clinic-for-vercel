@@ -26,6 +26,25 @@ import {
   useCreateEligibilityHistoryItem,
   useEligibilityHistoryItem,
 } from "../hooks/useEligibility";
+import {
+  validateIdByType,
+  validateName,
+  validatePhoneNumber,
+  validateDoctorName,
+  validatePodId,
+  validateReferralCode,
+  validateVisitType,
+  validateVisitCategory,
+  validateMaternityType,
+  validatePayerName,
+  validateUAEMobileCode,
+  validateUAEMobileSuffix,
+  sanitizeInput,
+  sanitizeNumericInput,
+  sanitizeAlphanumericInput,
+  formatEmiratesId,
+  formatDhaMemberId,
+} from "../utils/form-validations";
 
 interface MantysEligibilityFormProps {
   patientData: PatientData | null;
@@ -907,103 +926,63 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // ============================================================================
 
   const handleEmiratesIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawValue = e.target.value.trim();
-    const digits = rawValue.replace(/\D/g, "");
-    const containsLetters = /[a-zA-Z]/.test(rawValue);
+    const rawValue = e.target.value;
 
     // Clear warnings
     setEmiratesIdInputWarning(null);
 
+    // Clear error for this field
+    if (errors.emiratesId) {
+      setErrors({ ...errors, emiratesId: "" });
+    }
+
     // ========== EMIRATES ID HANDLING ==========
     if (idType === "EMIRATESID") {
-      // If letters detected, show warning
-      if (containsLetters) {
-        setEmiratesIdInputWarning(
-          "Emirates ID contains numbers and dashes only. Please switch to Member ID if needed.",
-        );
-        // Format only the digits found
-        let formattedId = digits;
-        if (digits.length > 3) {
-          formattedId = `${digits.slice(0, 3)}-${digits.slice(3)}`;
-        }
-        if (digits.length > 7) {
-          formattedId = `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-        }
-        setEmiratesId(formattedId.slice(0, 18));
-        return;
-      }
+      const sanitized = sanitizeNumericInput(rawValue);
+      const formatted = formatEmiratesId(sanitized);
+      setEmiratesId(formatted);
 
-      // If too many digits
-      if (digits.length > 15) {
-        setEmiratesIdInputWarning("Emirates ID has only 15 digits.");
-        const limitedDigits = digits.slice(0, 15);
-        const formattedId = `${limitedDigits.slice(0, 3)}-${limitedDigits.slice(3, 7)}-${limitedDigits.slice(7, 14)}-${limitedDigits.slice(14, 15)}`;
-        setEmiratesId(formattedId.slice(0, 18));
-        return;
+      // Real-time validation feedback
+      if (formatted.length > 0) {
+        const validation = validateIdByType(formatted, idType);
+        if (!validation.isValid) {
+          setEmiratesIdInputWarning(validation.error);
+        }
       }
-
-      // Format progressively: XXX-XXXX-XXXXXXX-X
-      let formattedId = digits;
-      if (digits.length > 3) {
-        formattedId = `${digits.slice(0, 3)}-${digits.slice(3)}`;
-      }
-      if (digits.length > 7) {
-        formattedId = `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-      }
-      if (digits.length > 14) {
-        formattedId = `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 14)}-${digits.slice(14, 15)}`;
-      }
-      setEmiratesId(formattedId.slice(0, 18));
     }
     // ========== DHA MEMBER ID HANDLING ==========
     else if (idType === "DHAMEMBERID") {
-      // DHA Member ID format: XXXX-XXX-XXXXXXXXX-XX (alphanumeric)
-      const alphanumericOnly = rawValue
-        .replace(/[^A-Za-z0-9]/g, "")
-        .toUpperCase();
+      const sanitized = sanitizeAlphanumericInput(rawValue);
+      const formatted = formatDhaMemberId(sanitized);
+      setEmiratesId(formatted);
 
-      let formattedDhaId = "";
-
-      if (alphanumericOnly.length > 0) {
-        formattedDhaId += alphanumericOnly.substring(
-          0,
-          Math.min(4, alphanumericOnly.length),
-        );
-      }
-      if (alphanumericOnly.length > 4) {
-        formattedDhaId +=
-          "-" +
-          alphanumericOnly.substring(4, Math.min(7, alphanumericOnly.length));
-      }
-      if (alphanumericOnly.length > 7) {
-        formattedDhaId +=
-          "-" +
-          alphanumericOnly.substring(7, Math.min(16, alphanumericOnly.length));
-      }
-      if (alphanumericOnly.length > 16) {
-        formattedDhaId +=
-          "-" +
-          alphanumericOnly.substring(16, Math.min(18, alphanumericOnly.length));
-      }
-
-      setEmiratesId(formattedDhaId.slice(0, 21)); // Max 21 chars with dashes
-
-      // Validation warning
-      const dhaMemberIdRegex =
-        /^[A-Za-z0-9]{4}-[A-Za-z0-9]{3}-[A-Za-z0-9]{9}-[A-Za-z0-9]{2}$/;
-      if (
-        formattedDhaId.length > 0 &&
-        alphanumericOnly.length <= 18 &&
-        !dhaMemberIdRegex.test(formattedDhaId)
-      ) {
-        setEmiratesIdInputWarning(
-          "Please ensure the DHA Member ID is in the format XXXX-XXX-XXXXXXXXX-XX.",
-        );
+      // Real-time validation feedback
+      if (formatted.length > 0) {
+        const validation = validateIdByType(formatted, idType);
+        if (!validation.isValid) {
+          setEmiratesIdInputWarning(validation.error);
+        }
       }
     }
     // ========== OTHER ID TYPES (Member ID, Policy Number, etc.) ==========
     else {
-      setEmiratesId(rawValue);
+      // Sanitize based on ID type
+      let sanitized = rawValue;
+      if (idType === "CARDNUMBER" || idType === "POLICYNUMBER") {
+        sanitized = sanitizeAlphanumericInput(rawValue);
+      } else if (idType === "Passport") {
+        sanitized = sanitizeAlphanumericInput(rawValue).toUpperCase();
+      }
+
+      setEmiratesId(sanitized);
+
+      // Real-time validation feedback
+      if (sanitized.length > 0) {
+        const validation = validateIdByType(sanitized, idType);
+        if (!validation.isValid) {
+          setEmiratesIdInputWarning(validation.error);
+        }
+      }
     }
   };
 
@@ -1015,79 +994,218 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   };
 
   // ============================================================================
+  // ENHANCED INPUT HANDLERS WITH VALIDATION
+  // ============================================================================
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeInput(rawValue);
+    setName(sanitized);
+
+    // Clear error for this field
+    if (errors.name) {
+      setErrors({ ...errors, name: "" });
+    }
+  };
+
+  const handlePhoneNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeNumericInput(rawValue);
+    setPhoneNumber(sanitized);
+
+    // Clear error for this field
+    if (errors.phoneNumber) {
+      setErrors({ ...errors, phoneNumber: "" });
+    }
+  };
+
+  const handleDoctorNameChange = (selected: any) => {
+    setDoctorName(selected?.value || "");
+
+    // Clear error for this field
+    if (errors.doctorName) {
+      setErrors({ ...errors, doctorName: "" });
+    }
+  };
+
+  const handleVisitTypeChange = (selected: any) => {
+    setVisitType(selected?.value || "");
+
+    // Clear error for this field
+    if (errors.visitType) {
+      setErrors({ ...errors, visitType: "" });
+    }
+  };
+
+  const handleVisitCategoryChange = (selected: any) => {
+    setVisitCategory(selected?.value || "");
+
+    // Clear error for this field
+    if (errors.visitCategory) {
+      setErrors({ ...errors, visitCategory: "" });
+    }
+  };
+
+  const handleMaternityTypeChange = (selected: any) => {
+    setMaternityType(selected?.value || "");
+
+    // Clear error for this field
+    if (errors.maternityType) {
+      setErrors({ ...errors, maternityType: "" });
+    }
+  };
+
+  const handlePayerNameChange = (selected: any) => {
+    setPayerName(selected?.value || null);
+
+    // Clear error for this field
+    if (errors.payerName) {
+      setErrors({ ...errors, payerName: "" });
+    }
+  };
+
+  const handlePodIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeAlphanumericInput(rawValue);
+    setPodId(sanitized);
+
+    // Clear error for this field
+    if (errors.pod) {
+      setErrors({ ...errors, pod: "" });
+    }
+  };
+
+  const handleReferralCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeAlphanumericInput(rawValue);
+    setReferralCode(sanitized);
+  };
+
+  const handlePhoneCodeChange = (selected: any) => {
+    const code = selected?.value || "";
+    setPhoneNumberParts(code, phoneSuffix);
+
+    // Clear error for this field
+    if (errors.phoneNumber) {
+      setErrors({ ...errors, phoneNumber: "" });
+    }
+  };
+
+  const handlePhoneSuffixChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeNumericInput(rawValue).slice(0, 7);
+    setPhoneNumberParts(phoneCode, sanitized);
+
+    // Clear error for this field
+    if (errors.phoneNumber) {
+      setErrors({ ...errors, phoneNumber: "" });
+    }
+  };
+
+  // ============================================================================
   // FORM VALIDATION
   // ============================================================================
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    // Emirates ID / Member ID validation
-    if (!emiratesId) {
-      newErrors.emiratesId = "This field is required";
-    } else if (idType === "EMIRATESID") {
-      const emiratesIdRegex = /^\d{3}-\d{4}-\d{7}-\d{1}$/;
-      if (!emiratesIdRegex.test(emiratesId)) {
-        newErrors.emiratesId =
-          "Invalid Emirates ID format (must be XXX-XXXX-XXXXXXX-X)";
-      }
+    // Emirates ID / Member ID validation using comprehensive utility
+    const idValidation = validateIdByType(emiratesId, idType);
+    if (!idValidation.isValid) {
+      newErrors.emiratesId = idValidation.error || "Invalid ID";
     }
 
     // Visit type validation
-    if (!visitType) {
-      newErrors.visitType = "Visit type is required";
+    const visitTypeValidation = validateVisitType(visitType);
+    if (!visitTypeValidation.isValid) {
+      newErrors.visitType = visitTypeValidation.error || "Visit type is required";
     }
 
     // Doctor name validation
-    if (showDoctorsNameField && !doctorName) {
-      newErrors.doctorName = "Doctor name is required";
-    }
+    if (showDoctorsNameField) {
+      const doctorValidation = validateDoctorName(doctorName);
+      if (!doctorValidation.isValid) {
+        newErrors.doctorName = doctorValidation.error || "Doctor name is required";
+      }
 
-    // DHA ID validation when doctor is compulsory
-    if (isDoctorCompulsory && doctorName) {
-      const selectedDoctor = doctorsList.find(
-        (doc) => doc.dha_id === doctorName || doc.doctor_id === doctorName
-      );
-      if (!selectedDoctor || !selectedDoctor.dha_id || selectedDoctor.dha_id.trim() === "") {
-        newErrors.doctorName = "Selected doctor must have a DHA ID";
+      // DHA ID validation when doctor is compulsory
+      if (isDoctorCompulsory && doctorName) {
+        const selectedDoctor = doctorsList.find(
+          (doc) => doc.dha_id === doctorName || doc.doctor_id === doctorName
+        );
+        if (!selectedDoctor || !selectedDoctor.dha_id || selectedDoctor.dha_id.trim() === "") {
+          newErrors.doctorName = "Selected doctor must have a DHA ID";
+        }
       }
     }
 
     // Name validation
-    if (showNameField && !name) {
-      newErrors.name = "Name is required";
+    if (showNameField) {
+      const nameValidation = validateName(name);
+      if (!nameValidation.isValid) {
+        newErrors.name = nameValidation.error || "Name is required";
+      }
     }
 
     // Phone validation
-    if (showPhoneField && !phoneNumber) {
-      newErrors.phoneNumber = "Phone number is required";
-    }
+    if (showPhoneField) {
+      if (isOrg1Ins017) {
+        // Split phone validation for ADNIC Org1
+        const codeValidation = validateUAEMobileCode(phoneCode);
+        const suffixValidation = validateUAEMobileSuffix(phoneSuffix);
 
-    if (
-      isOrg1Ins017 &&
-      (!phoneCode || !phoneSuffix || phoneSuffix.length !== 7)
-    ) {
-      newErrors.phoneNumber =
-        "Please enter a valid mobile number (code + 7 digits)";
+        if (!codeValidation.isValid) {
+          newErrors.phoneNumber = codeValidation.error || "Invalid mobile code";
+        } else if (!suffixValidation.isValid) {
+          newErrors.phoneNumber = suffixValidation.error || "Invalid mobile number";
+        }
+      } else {
+        // Regular phone validation
+        const phoneValidation = validatePhoneNumber(phoneNumber);
+        if (!phoneValidation.isValid) {
+          newErrors.phoneNumber = phoneValidation.error || "Phone number is required";
+        }
+      }
     }
 
     // POD validation
-    if (shouldShowPodFields && isPod && !podId) {
-      newErrors.pod = "POD ID is required when POD is Yes";
+    if (shouldShowPodFields && isPod) {
+      const podValidation = validatePodId(podId);
+      if (!podValidation.isValid) {
+        newErrors.pod = podValidation.error || "POD ID is required";
+      }
     }
 
     // Payer name validation (NextCare Policy Number)
-    if (showPayerNameField && !payerName) {
-      newErrors.payerName = "Payer name is required";
+    if (showPayerNameField) {
+      const payerValidation = validatePayerName(payerName || "");
+      if (!payerValidation.isValid) {
+        newErrors.payerName = payerValidation.error || "Payer name is required";
+      }
     }
 
     // Visit category validation (ADNIC Org1)
-    if (showVisitCategoryField && !visitCategory) {
-      newErrors.visitCategory = "Visit category is required";
+    if (showVisitCategoryField) {
+      const categoryValidation = validateVisitCategory(visitCategory);
+      if (!categoryValidation.isValid) {
+        newErrors.visitCategory = categoryValidation.error || "Visit category is required";
+      }
     }
 
-    // Maternity extra args validation
-    if (showMaternityExtraArgs && !maternityType) {
-      newErrors.maternityType = "Maternity type is required";
+    // Maternity type validation
+    if (showMaternityExtraArgs) {
+      const maternityValidation = validateMaternityType(maternityType);
+      if (!maternityValidation.isValid) {
+        newErrors.maternityType = maternityValidation.error || "Maternity type is required";
+      }
+    }
+
+    // Referral code validation (optional field, but validate if present)
+    if (referralCode) {
+      const referralValidation = validateReferralCode(referralCode);
+      if (!referralValidation.isValid) {
+        newErrors.referralCode = referralValidation.error || "Invalid referral code";
+      }
     }
 
     setErrors(newErrors);
@@ -1478,7 +1596,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   value={visitTypeOptions.find(
                     (opt) => opt.value === visitType,
                   )}
-                  onChange={(selected) => setVisitType(selected?.value || "")}
+                  onChange={handleVisitTypeChange}
                   options={visitTypeOptions}
                   placeholder={
                     visitTypeOptions.length > 0
@@ -1489,7 +1607,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   isSearchable
                 />
                 {errors.visitType && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.visitType}
                   </span>
                 )}
@@ -1506,14 +1624,12 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   value={visitCategoryOptions.find(
                     (opt) => opt.value === visitCategory,
                   )}
-                  onChange={(selected) =>
-                    setVisitCategory(selected?.value || "")
-                  }
+                  onChange={handleVisitCategoryChange}
                   options={visitCategoryOptions}
                   placeholder="Select visit category"
                 />
                 {errors.visitCategory && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.visitCategory}
                   </span>
                 )}
@@ -1531,15 +1647,13 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   value={maternityExtraArgs.options.find(
                     (opt: any) => opt.value === maternityType,
                   )}
-                  onChange={(selected) =>
-                    setMaternityType(selected?.value || "")
-                  }
+                  onChange={handleMaternityTypeChange}
                   options={maternityExtraArgs.options}
                   placeholder="Select maternity type"
                   isSearchable
                 />
                 {errors.maternityType && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.maternityType}
                   </span>
                 )}
@@ -1555,15 +1669,19 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                 <input
                   type="text"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Enter patient's name"
+                  onChange={handleNameChange}
+                  placeholder="Enter patient's full name"
+                  maxLength={100}
                   className={`w-full border ${errors.name ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                 />
                 {errors.name && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.name}
                   </span>
                 )}
+                <small className="text-gray-500 mt-1 block">
+                  Full name as per Emirates ID or official documents
+                </small>
               </div>
             )}
 
@@ -1575,10 +1693,11 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                 </label>
                 <Select
                   value={DOCTORS_LIST.find((opt) => opt.value === doctorName)}
-                  onChange={(selected) => setDoctorName(selected?.value || "")}
+                  onChange={handleDoctorNameChange}
                   options={DOCTORS_LIST}
                   placeholder="Select doctor's name"
                   isSearchable
+                  isDisabled={DOCTORS_LIST.length === 0}
                 />
                 {doctorName && (() => {
                   const selectedDoctor = doctorsList.find(
@@ -1592,7 +1711,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   ) : null;
                 })()}
                 {errors.doctorName && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.doctorName}
                   </span>
                 )}
@@ -1663,9 +1782,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                     value={
                       phoneCode ? { value: phoneCode, label: phoneCode } : null
                     }
-                    onChange={(selected) =>
-                      setPhoneNumberParts(selected?.value || "", phoneSuffix)
-                    }
+                    onChange={handlePhoneCodeChange}
                     options={[
                       { value: "50", label: "50" },
                       { value: "52", label: "52" },
@@ -1683,19 +1800,20 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   <input
                     type="text"
                     value={phoneSuffix}
-                    onChange={(e) =>
-                      setPhoneNumberParts(phoneCode, e.target.value)
-                    }
+                    onChange={handlePhoneSuffixChange}
                     placeholder="7 digit number"
                     maxLength={7}
-                    className="flex-1 border border-gray-300 rounded-md p-3"
+                    className={`flex-1 border ${errors.phoneNumber ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                   />
                 </div>
                 {errors.phoneNumber && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.phoneNumber}
                   </span>
                 )}
+                <small className="text-gray-500 mt-1 block">
+                  UAE mobile number format: 971-XX-XXXXXXX
+                </small>
               </div>
             )}
 
@@ -1703,24 +1821,24 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
             {showPhoneField && !isOrg1Ins017 && (
               <div>
                 <label className="block font-semibold text-gray-700 mb-2">
-                  Phone Number
+                  Phone Number <span className="text-red-600">*</span>
                 </label>
                 <input
-                  type="text"
+                  type="tel"
                   value={phoneNumber}
-                  onChange={(e) => {
-                    const digits = e.target.value.replace(/\D/g, "");
-                    setPhoneNumber(digits);
-                  }}
-                  placeholder="Enter patient's phone number"
+                  onChange={handlePhoneNumberChange}
+                  placeholder="971XXXXXXXXX or 05XXXXXXXX"
                   maxLength={15}
                   className={`w-full border ${errors.phoneNumber ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                 />
                 {errors.phoneNumber && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.phoneNumber}
                   </span>
                 )}
+                <small className="text-gray-500 mt-1 block">
+                  UAE phone number (digits only)
+                </small>
               </div>
             )}
 
@@ -1780,10 +1898,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                 <input
                   type="text"
                   value={referralCode}
-                  onChange={(e) => setReferralCode(e.target.value)}
+                  onChange={handleReferralCodeChange}
                   placeholder="Enter referral code"
-                  className="w-full border border-gray-300 rounded-md p-3"
+                  maxLength={50}
+                  className={`w-full border ${errors.referralCode ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                 />
+                {errors.referralCode && (
+                  <span className="text-red-500 text-sm mt-1 block">
+                    {errors.referralCode}
+                  </span>
+                )}
               </div>
             )}
 
@@ -1864,12 +1988,13 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                       <input
                         type="text"
                         value={podId}
-                        onChange={(e) => setPodId(e.target.value)}
+                        onChange={handlePodIdChange}
                         placeholder="Enter POD ID"
+                        maxLength={50}
                         className={`w-full border ${errors.pod ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                       />
                       {errors.pod && (
-                        <span className="text-red-500 text-sm mt-1">
+                        <span className="text-red-500 text-sm mt-1 block">
                           {errors.pod}
                         </span>
                       )}
@@ -1889,7 +2014,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   value={
                     payerName ? { value: payerName, label: payerName } : null
                   }
-                  onChange={(selected) => setPayerName(selected?.value || null)}
+                  onChange={handlePayerNameChange}
                   options={Object.values(payerOptions).map((name) => ({
                     value: name,
                     label: name,
@@ -1898,7 +2023,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   isSearchable
                 />
                 {errors.payerName && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.payerName}
                   </span>
                 )}
