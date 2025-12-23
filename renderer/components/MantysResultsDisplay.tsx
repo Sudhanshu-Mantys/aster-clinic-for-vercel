@@ -18,7 +18,7 @@ import { LifetrenzEligibilityPreview } from "./LifetrenzEligibilityPreview";
 import { useAuth } from "../contexts/AuthContext";
 import { Modal } from "./ui/modal";
 import Select from "react-select";
-import { fetchWithTimeout } from "../lib/request-cache";
+import { ApiError, patientApi } from "../lib/api-client";
 
 interface MantysResultsDisplayProps {
   response: MantysEligibilityResponse;
@@ -113,39 +113,29 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             mpi: patientMPI,
           });
 
-          const contextResponse = await fetchWithTimeout(
-            "/api/patient/context",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                appointmentId: appointmentId,
-                patientId: patientId,
-                mpi: patientMPI,
-              }),
-            },
-            3000 // 3 second timeout
-          );
+          const context = await patientApi.getContext({
+            appointmentId: appointmentId ? String(appointmentId) : undefined,
+            patientId: patientId ? String(patientId) : undefined,
+            mpi: patientMPI,
+          });
+          console.log("✅ Enriched patient context from Redis:", context);
 
-          if (contextResponse.ok) {
-            const context = await contextResponse.json();
-            console.log("✅ Enriched patient context from Redis:", context);
-
-            // Only update if we got valid values
-            if (context.patientId) {
-              setEnrichedPatientId(context.patientId);
-            }
-            if (context.appointmentId) {
-              setEnrichedAppointmentId(context.appointmentId);
-            }
-            if (context.encounterId !== undefined) {
-              setEnrichedEncounterId(context.encounterId);
-            }
-          } else {
-            console.warn("⚠️ Redis context not found, status:", contextResponse.status);
+          // Only update if we got valid values
+          if (context.patientId) {
+            setEnrichedPatientId(parseInt(context.patientId, 10));
+          }
+          if (context.appointmentId) {
+            setEnrichedAppointmentId(parseInt(context.appointmentId, 10));
+          }
+          if (context.encounterId !== undefined) {
+            setEnrichedEncounterId(parseInt(context.encounterId, 10));
           }
         } catch (error) {
-          console.error("❌ Could not fetch patient context from Redis:", error);
+          if (error instanceof ApiError && error.status === 404) {
+            console.warn("⚠️ Patient context not found in Redis");
+          } else {
+            console.error("❌ Could not fetch patient context from Redis:", error);
+          }
         }
       }
     };
@@ -169,65 +159,55 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       if (finalAppointmentId) {
         try {
           console.log("🔍 Fetching appointment context from Redis for appointment:", finalAppointmentId);
-          const contextResponse = await fetchWithTimeout(
-            "/api/patient/context",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                appointmentId: finalAppointmentId,
-              }),
-            },
-            3000 // 3 second timeout
-          );
+          const context = await patientApi.getContext({
+            appointmentId: String(finalAppointmentId),
+          });
+          console.log("✅ Found appointment context in Redis:", {
+            physician_id: context.physician_id,
+            hasInsuranceDetails: !!context.insuranceDetails,
+          });
 
-          if (contextResponse.ok) {
-            const context = await contextResponse.json();
-            console.log("✅ Found appointment context in Redis:", {
-              physician_id: context.physician_id,
-              hasInsuranceDetails: !!context.insuranceDetails,
-            });
+          // Extract physician_id from Redis context
+          if (!propPhysicianId && context.physician_id) {
+            console.log("✅ Found physician_id from Redis:", context.physician_id);
+            setEnrichedPhysicianId(context.physician_id);
+          }
 
-            // Extract physician_id from Redis context
-            if (!propPhysicianId && context.physician_id) {
-              console.log("✅ Found physician_id from Redis:", context.physician_id);
-              setEnrichedPhysicianId(context.physician_id);
-            }
+          // Extract insTpaPatId from nested insuranceDetails in Redis context
+          if (!insTpaPatId && context.insuranceDetails?.body?.Data && Array.isArray(context.insuranceDetails.body.Data)) {
+            const insuranceRecords = context.insuranceDetails.body.Data;
+            console.log(`📋 Found ${insuranceRecords.length} insurance record(s) in Redis context`);
 
-            // Extract insTpaPatId from nested insuranceDetails in Redis context
-            if (!insTpaPatId && context.insuranceDetails?.body?.Data && Array.isArray(context.insuranceDetails.body.Data)) {
-              const insuranceRecords = context.insuranceDetails.body.Data;
-              console.log(`📋 Found ${insuranceRecords.length} insurance record(s) in Redis context`);
+            // Find entry with is_current: 1
+            const selectedInsurance = insuranceRecords.find((record: any) => record.is_current === 1);
 
-              // Find entry with is_current: 1
-              const selectedInsurance = insuranceRecords.find((record: any) => record.is_current === 1);
-
-              if (!selectedInsurance) {
-                console.warn("⚠️ No active insurance policy found (is_current: 1) in Redis context");
-                // Don't show alert here - will check on upload button click
+            if (!selectedInsurance) {
+              console.warn("⚠️ No active insurance policy found (is_current: 1) in Redis context");
+              // Don't show alert here - will check on upload button click
+            } else {
+              // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
+              const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+              if (insTpaPatIdValue) {
+                console.log("✅ Selected insurance from Redis (is_current: 1):", {
+                  insTpaPatId: insTpaPatIdValue,
+                  status: selectedInsurance.insurance_status,
+                  payer_name: selectedInsurance.payer_name,
+                  tpa_name: selectedInsurance.tpa_name,
+                  is_current: selectedInsurance.is_current,
+                  total_records: insuranceRecords.length,
+                });
+                setInsTpaPatId(insTpaPatIdValue);
               } else {
-                // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
-                const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
-                if (insTpaPatIdValue) {
-                  console.log("✅ Selected insurance from Redis (is_current: 1):", {
-                    insTpaPatId: insTpaPatIdValue,
-                    status: selectedInsurance.insurance_status,
-                    payer_name: selectedInsurance.payer_name,
-                    tpa_name: selectedInsurance.tpa_name,
-                    is_current: selectedInsurance.is_current,
-                    total_records: insuranceRecords.length,
-                  });
-                  setInsTpaPatId(insTpaPatIdValue);
-                } else {
-                  console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
-                }
+                console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
               }
             }
-          } else {
-            console.log("⚠️ Appointment context not found in Redis, will fetch from API");
           }
         } catch (error) {
-          console.error("❌ Error fetching appointment context from Redis:", error);
+          if (error instanceof ApiError && error.status === 404) {
+            console.log("⚠️ Appointment context not found in Redis, will fetch from API");
+          } else {
+            console.error("❌ Error fetching appointment context from Redis:", error);
+          }
         }
       }
 
@@ -257,8 +237,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       // Fallback: Fetch insurance details to get patient_insurance_tpa_policy_id (insTpaPatId) if not found in Redis
       if (finalPatientId && !insTpaPatId && finalAppointmentId) {
         try {
-          const { getInsuranceDetails } = await import("../lib/api");
-          const insuranceResponse = await getInsuranceDetails({
+          const insuranceResponse = await patientApi.getInsuranceDetails({
             patientId: finalPatientId,
             apntId: finalAppointmentId || null,
             encounterId: finalEncounterId || 0,
@@ -1266,8 +1245,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     // If insTpaPatId is not set, try to fetch insurance details and check for active policy
     if (!insTpaPatIdForUpload && finalPatientId && finalAppointmentId) {
       try {
-        const { getInsuranceDetails } = await import("../lib/api");
-        const insuranceResponse = await getInsuranceDetails({
+        const insuranceResponse = await patientApi.getInsuranceDetails({
           patientId: finalPatientId,
           apntId: finalAppointmentId || null,
           encounterId: finalEncounterId || 0,

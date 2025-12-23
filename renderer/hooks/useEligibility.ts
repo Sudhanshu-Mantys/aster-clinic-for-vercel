@@ -29,11 +29,18 @@ export function useEligibilityHistory(clinicId?: string) {
   });
 }
 
-export function useEligibilityHistoryItem(id: string, enabled = true) {
+export function useEligibilityHistoryItem(
+  id: string,
+  options?: {
+    enabled?: boolean;
+    refetchInterval?: number | false | ((query: any) => number | false);
+  }
+) {
   return useQuery({
     queryKey: eligibilityKeys.historyItem(id),
     queryFn: () => eligibilityHistoryApi.getById(id),
-    enabled: enabled && !!id,
+    enabled: options?.enabled !== false && !!id,
+    refetchInterval: options?.refetchInterval,
   });
 }
 
@@ -45,11 +52,15 @@ export function useEligibilityHistoryByTaskId(taskId: string, enabled = true) {
   });
 }
 
-export function useActiveEligibilityChecks(clinicId?: string) {
+export function useActiveEligibilityChecks(
+  clinicId?: string,
+  options?: { enabled?: boolean; refetchInterval?: number | false }
+) {
   return useQuery({
     queryKey: eligibilityKeys.active(clinicId),
     queryFn: () => eligibilityHistoryApi.getActive(clinicId),
-    refetchInterval: 5000,
+    enabled: options?.enabled !== false,
+    refetchInterval: options?.refetchInterval ?? 5000,
   });
 }
 

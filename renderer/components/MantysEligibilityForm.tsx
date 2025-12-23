@@ -1,26 +1,24 @@
 import React, { useState, useMemo, useEffect } from "react";
 import Select from "react-select";
-import { PatientData, InsuranceData } from "../lib/api";
 import { Button } from "./ui/button";
-import { fetchWithTimeout } from "../lib/request-cache";
 import {
   MantysEligibilityResponse,
   TPACode,
   IDType,
   VisitType,
 } from "../types/mantys";
-import {
-  buildMantysPayload,
-  checkMantysEligibility,
-} from "../lib/mantys-utils";
+import { ApiError, patientApi, type PatientData, type InsuranceData } from "../lib/api-client";
+import { buildMantysPayload } from "../lib/mantys-utils";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
-import pollingService from "../services/eligibilityPollingService";
 import { useAuth } from "../contexts/AuthContext";
 import { EligibilityCheckMetadata } from "../lib/redis-eligibility-mapping";
 import { useTPAConfigs, useDoctors } from "../hooks/useClinicConfig";
-import { useCreateEligibilityCheck } from "../hooks/useEligibility";
-import { eligibilityHistoryApi } from "../lib/api-client";
+import {
+  useCreateEligibilityCheck,
+  useCreateEligibilityHistoryItem,
+  useEligibilityHistoryItem,
+} from "../hooks/useEligibility";
 
 interface MantysEligibilityFormProps {
   patientData: PatientData | null;
@@ -97,7 +95,22 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
   // History tracking
   const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
-  const monitoringIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const createEligibilityCheck = useCreateEligibilityCheck();
+  const createHistoryItem = useCreateEligibilityHistoryItem();
+
+  const { data: currentHistoryItem } = useEligibilityHistoryItem(
+    currentHistoryId || "",
+    {
+      enabled: !!currentHistoryId,
+      refetchInterval: (query) => {
+        const status = query.state.data?.status;
+        if (status === "complete" || status === "error") {
+          return false;
+        }
+        return 2000;
+      },
+    },
+  );
 
   // Results State
   const [mantysResponse, setMantysResponse] =
@@ -275,28 +288,21 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           // Then try to get nationality_id from appointment Redis if we have appointment_id (this will override if found)
           if (patientData.appointment_id && (!emiratesIdValue || emiratesIdValue.length === 0)) {
             try {
-              const contextResponse = await fetchWithTimeout(
-                "/api/patient/context",
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    appointmentId: patientData.appointment_id,
-                    mpi: patientData.mpi,
-                  }),
-                },
-                3000 // 3 second timeout
-              );
+              const context = await patientApi.getContext({
+                appointmentId: patientData.appointment_id.toString(),
+                mpi: patientData.mpi,
+              });
 
-              if (contextResponse.ok) {
-                const context = await contextResponse.json();
-                if (context.nationality_id && context.nationality_id.trim()) {
-                  emiratesIdValue = context.nationality_id.trim();
-                  console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
-                }
+              if (context.nationality_id && context.nationality_id.trim()) {
+                emiratesIdValue = context.nationality_id.trim();
+                console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
               }
             } catch (error) {
-              console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+              if (error instanceof ApiError && error.status === 404) {
+                console.warn("⚠️ Appointment context not found in Redis");
+              } else {
+                console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+              }
             }
           }
 
@@ -415,28 +421,21 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           // Then try to get nationality_id from appointment Redis if we have appointment_id (this will override if found)
           if (patientData?.appointment_id) {
             try {
-              const contextResponse = await fetchWithTimeout(
-                "/api/patient/context",
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    appointmentId: patientData.appointment_id,
-                    mpi: patientData.mpi,
-                  }),
-                },
-                3000 // 3 second timeout
-              );
+              const context = await patientApi.getContext({
+                appointmentId: patientData.appointment_id.toString(),
+                mpi: patientData.mpi,
+              });
 
-              if (contextResponse.ok) {
-                const context = await contextResponse.json();
-                if (context.nationality_id) {
-                  emiratesIdValue = context.nationality_id;
-                  console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
-                }
+              if (context.nationality_id) {
+                emiratesIdValue = context.nationality_id;
+                console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
               }
             } catch (error) {
-              console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+              if (error instanceof ApiError && error.status === 404) {
+                console.warn("⚠️ Appointment context not found in Redis");
+              } else {
+                console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+              }
             }
           }
 
@@ -1100,81 +1099,55 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // FORM SUBMISSION
   // ============================================================================
 
-  // Cleanup monitoring interval on unmount
   useEffect(() => {
-    return () => {
-      if (monitoringIntervalRef.current) {
-        clearInterval(monitoringIntervalRef.current);
-      }
-    };
-  }, []);
-
-  const monitorTaskStatus = (taskId: string, historyId: string) => {
-    setStatusMessage("Task created, monitoring status...");
-    setCurrentStatus("pending");
-
-    if (monitoringIntervalRef.current) {
-      clearInterval(monitoringIntervalRef.current);
+    if (!currentHistoryItem) {
+      return;
     }
 
-    monitoringIntervalRef.current = setInterval(async () => {
-      try {
-        const historyItem = await eligibilityHistoryApi.getById(historyId);
+    setPollingAttempts(currentHistoryItem.pollingAttempts || 0);
 
-        if (!historyItem) {
-          if (monitoringIntervalRef.current) {
-            clearInterval(monitoringIntervalRef.current);
-            monitoringIntervalRef.current = null;
-          }
-          return;
+    if (currentHistoryItem.status === "pending") {
+      setStatusMessage("Navigating Insurance Portal...");
+      setCurrentStatus("pending");
+      return;
+    }
+
+    if (currentHistoryItem.status === "processing") {
+      setStatusMessage("Extracting eligibility data from TPA portal...");
+      setCurrentStatus("processing");
+
+      if (currentHistoryItem.interimResults) {
+        if (currentHistoryItem.interimResults.screenshot) {
+          setInterimScreenshot(currentHistoryItem.interimResults.screenshot);
         }
-
-        setPollingAttempts(historyItem.pollingAttempts || 0);
-
-        if (historyItem.status === "pending") {
-          setStatusMessage("Navigating Insurance Portal...");
-          setCurrentStatus("pending");
-        } else if (historyItem.status === "processing") {
-          setStatusMessage("Extracting eligibility data from TPA portal...");
-          setCurrentStatus("processing");
-
-          if (historyItem.interimResults) {
-            if (historyItem.interimResults.screenshot) {
-              setInterimScreenshot(historyItem.interimResults.screenshot);
-            }
-            if (historyItem.interimResults.documents) {
-              setInterimDocuments(
-                historyItem.interimResults.documents.map((doc: any) => ({
-                  id: doc.name,
-                  tag: doc.type,
-                  url: doc.url,
-                })),
-              );
-            }
-          }
-        } else if (historyItem.status === "complete") {
-          setStatusMessage("Eligibility check complete!");
-          setCurrentStatus("complete");
-          setMantysResponse(historyItem.result as MantysEligibilityResponse);
-          setShowResults(true);
-          setIsMinimized(false);
-          if (monitoringIntervalRef.current) {
-            clearInterval(monitoringIntervalRef.current);
-            monitoringIntervalRef.current = null;
-          }
-        } else if (historyItem.status === "error") {
-          setApiError(historyItem.error || "Eligibility check failed");
-          setIsMinimized(false);
-          if (monitoringIntervalRef.current) {
-            clearInterval(monitoringIntervalRef.current);
-            monitoringIntervalRef.current = null;
-          }
+        if (currentHistoryItem.interimResults.documents) {
+          setInterimDocuments(
+            currentHistoryItem.interimResults.documents.map((doc: any) => ({
+              id: doc.name,
+              tag: doc.type,
+              url: doc.url,
+            })),
+          );
         }
-      } catch (error) {
-        console.error("Error monitoring task status:", error);
       }
-    }, 2000);
-  };
+
+      return;
+    }
+
+    if (currentHistoryItem.status === "complete") {
+      setStatusMessage("Eligibility check complete!");
+      setCurrentStatus("complete");
+      setMantysResponse(currentHistoryItem.result as MantysEligibilityResponse);
+      setShowResults(true);
+      setIsMinimized(false);
+      return;
+    }
+
+    if (currentHistoryItem.status === "error") {
+      setApiError(currentHistoryItem.error || "Eligibility check failed");
+      setIsMinimized(false);
+    }
+  }, [currentHistoryItem]);
 
   const handleSubmit = async () => {
     if (!validateForm()) {
@@ -1195,32 +1168,26 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       if (patientData?.appointment_id && !patientData?.patient_id) {
         try {
           setStatusMessage("Fetching patient details...");
-          const contextResponse = await fetchWithTimeout(
-            "/api/patient/context",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                appointmentId: patientData.appointment_id,
-                mpi: patientData.mpi,
-              }),
-            },
-            3000 // 3 second timeout
-          );
+          const context = await patientApi.getContext({
+            appointmentId: patientData.appointment_id?.toString(),
+            mpi: patientData.mpi,
+            patientId: patientData.patient_id ? String(patientData.patient_id) : undefined,
+          });
 
-          if (contextResponse.ok) {
-            const context = await contextResponse.json();
-            enrichedPatientData = {
-              ...patientData,
-              patient_id: context.patientId,
-              appointment_id: context.appointmentId,
-              encounter_id: context.encounterId,
-            };
-            setEnrichedPatientContext(enrichedPatientData);
-            console.log("✅ Enriched patient data from Redis:", enrichedPatientData);
-          }
+          enrichedPatientData = {
+            ...patientData,
+            patient_id: context.patientId ? parseInt(context.patientId, 10) : patientData.patient_id,
+            appointment_id: context.appointmentId ? parseInt(context.appointmentId, 10) : patientData.appointment_id,
+            encounter_id: context.encounterId ? parseInt(context.encounterId, 10) : patientData.encounter_id,
+          };
+          setEnrichedPatientContext(enrichedPatientData);
+          console.log("✅ Enriched patient data from Redis:", enrichedPatientData);
         } catch (redisError) {
-          console.warn("⚠️ Could not fetch patient context from Redis:", redisError);
+          if (redisError instanceof ApiError && redisError.status === 404) {
+            console.warn("⚠️ Patient context not found in Redis");
+          } else {
+            console.warn("⚠️ Could not fetch patient context from Redis:", redisError);
+          }
           // Continue with existing data
         }
       }
@@ -1274,18 +1241,9 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       console.log("Submitting eligibility check to Mantys:", payloadWithMetadata);
 
       // Step 1: Create the task
-      const response = await fetch("/api/mantys/eligibility-check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadWithMetadata),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to create task");
-      }
-
-      const data = await response.json();
+      const data = await createEligibilityCheck.mutateAsync(
+        payloadWithMetadata,
+      );
       const createdTaskId = data.task_id;
 
       if (!createdTaskId) {
@@ -1298,7 +1256,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
       const actualPatientId = enrichedPatientData?.patient_id?.toString();
 
-      const historyItem = await eligibilityHistoryApi.create({
+      const historyItem = await createHistoryItem.mutateAsync({
         clinicId: selectedClinicId,
         patientId: actualPatientId || emiratesId,
         taskId: createdTaskId,
@@ -1317,13 +1275,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
       console.log("📝 Saved to history with patient ID:", actualPatientId || emiratesId);
       setCurrentHistoryId(historyItem.id);
-
-      // Step 2: Add to background polling service
-      // This will continue polling even if user closes the tab
-      await pollingService.addTask(createdTaskId, historyItem.id);
-
-      // Step 3: Monitor status for UI updates (optional - user can close modal)
-      monitorTaskStatus(createdTaskId, historyItem.id);
+      setStatusMessage("Task created, monitoring status...");
+      setCurrentStatus("pending");
 
       // Refresh previous searches after successful submission
       // Wait a bit for Redis to be updated
@@ -1356,11 +1309,6 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     setPollingAttempts(0);
     setTaskId(null);
 
-    // Clear monitoring interval if exists
-    if (monitoringIntervalRef.current) {
-      clearInterval(monitoringIntervalRef.current);
-      monitoringIntervalRef.current = null;
-    }
   };
 
   // ============================================================================

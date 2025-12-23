@@ -1,5 +1,5 @@
 import React from 'react'
-import { PatientData } from '../lib/api'
+import { type PatientData } from '../lib/api-client'
 
 interface PatientSelectionListProps {
     patients: PatientData[]
@@ -93,4 +93,3 @@ export const PatientSelectionList: React.FC<PatientSelectionListProps> = ({
         </div>
     )
 }
-

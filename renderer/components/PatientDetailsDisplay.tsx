@@ -1,6 +1,6 @@
 import React from 'react'
 import { Button } from './ui/button'
-import { PatientData, InsuranceData } from '../lib/api'
+import { type PatientData, type InsuranceData } from '../lib/api-client'
 import { InsuranceDetailsSection } from './InsuranceDetailsSection'
 
 interface PatientDetailsDisplayProps {
@@ -152,4 +152,3 @@ export const PatientDetailsDisplay: React.FC<PatientDetailsDisplayProps> = ({
         </div>
     )
 }
-

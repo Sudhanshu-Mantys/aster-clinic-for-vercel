@@ -186,11 +186,29 @@ export const eligibilityHistoryApi = {
         : '/api/eligibility-history?status=completed'
     ),
 
-  getByPatientId: (patientId: string) =>
-    fetchJson<EligibilityHistoryItem[]>(`/api/eligibility/get-by-patient-id?patientId=${patientId}`),
+  getByPatientId: async (patientId: string) => {
+    const response = await fetchJson<
+      EligibilityHistoryItem[] | { success: boolean; data?: EligibilityHistoryItem[] }
+    >(`/api/eligibility/get-by-patient-id?patientId=${patientId}`);
 
-  getByMPI: (mpi: string) =>
-    fetchJson<EligibilityHistoryItem[]>(`/api/eligibility/get-by-mpi?mpi=${mpi}`),
+    if (Array.isArray(response)) {
+      return response;
+    }
+
+    return response.data ?? [];
+  },
+
+  getByMPI: async (mpi: string) => {
+    const response = await fetchJson<
+      EligibilityHistoryItem[] | { success: boolean; data?: EligibilityHistoryItem[] }
+    >(`/api/eligibility/get-by-mpi?mpi=${mpi}`);
+
+    if (Array.isArray(response)) {
+      return response;
+    }
+
+    return response.data ?? [];
+  },
 
   create: (item: Omit<EligibilityHistoryItem, 'id' | 'createdAt'>) =>
     fetchJson<EligibilityHistoryItem>('/api/eligibility-history', {
@@ -374,7 +392,14 @@ export interface PatientContext {
   gender?: string;
   phone?: string;
   nationality_id?: string;
-  insuranceDetails?: InsuranceData[];
+  physician_id?: number;
+  insuranceDetails?: {
+    body?: {
+      Data?: InsuranceData[];
+    };
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 }
 
 export interface AppointmentSearchParams {
@@ -585,19 +610,21 @@ export interface EligibilityHistoryItem {
 }
 
 export interface MantysEligibilityRequest {
-  tpa_code: string;
+  id_value: string;
   id_type: string;
-  id_number: string;
+  tpa_name: string;
   visit_type: string;
-  patient_name?: string;
-  date_of_birth?: string;
-  phone_number?: string;
-  doctor_name?: string;
-  referral_code?: string;
-  service_type?: string;
-  visit_category?: string;
-  is_maternity?: boolean;
-  clinic_id?: string;
+  doctorName?: string;
+  payerName?: string;
+  extra_args?: {
+    title: string;
+    value: string;
+  };
+  mpi?: string;
+  patientId?: string | number;
+  patientName?: string;
+  appointmentId?: number;
+  encounterId?: number;
   [key: string]: unknown;
 }
 

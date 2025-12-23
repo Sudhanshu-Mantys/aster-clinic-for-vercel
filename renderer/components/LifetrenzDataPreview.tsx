@@ -1,5 +1,5 @@
 import React from 'react'
-import { InsuranceData, PatientData } from '../lib/api'
+import { type InsuranceData, type PatientData } from '../lib/api-client'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 

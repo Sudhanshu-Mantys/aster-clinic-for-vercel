@@ -24,12 +24,58 @@ export const clinicConfigKeys = {
     [...clinicConfigKeys.all, 'specialisations', clinicId] as const,
 };
 
+function extractConfigs<T>(data: unknown): T[] {
+  if (Array.isArray(data)) {
+    return data as T[];
+  }
+  if (data && typeof data === 'object' && 'configs' in data) {
+    return ((data as { configs?: T[] }).configs) ?? [];
+  }
+  return [];
+}
+
+function extractConfig<T>(data: unknown): T | null {
+  if (data && typeof data === 'object' && 'config' in data) {
+    return (data as { config?: T }).config ?? null;
+  }
+  return (data as T) ?? null;
+}
+
+function extractPlanList(data: unknown): Plan[] {
+  if (Array.isArray(data)) return data as Plan[];
+  if (data && typeof data === 'object') {
+    if ('plans' in data && Array.isArray((data as { plans?: Plan[] }).plans)) {
+      return (data as { plans?: Plan[] }).plans || [];
+    }
+    if ('plans_by_tpa' in data) {
+      const byTpa = (data as { plans_by_tpa?: Record<string, Plan[]> }).plans_by_tpa || {};
+      return Object.values(byTpa).flat();
+    }
+  }
+  return [];
+}
+
+function extractPayerList(data: unknown): Payer[] {
+  if (Array.isArray(data)) return data as Payer[];
+  if (data && typeof data === 'object') {
+    if ('payers' in data && Array.isArray((data as { payers?: Payer[] }).payers)) {
+      return (data as { payers?: Payer[] }).payers || [];
+    }
+    if ('payers_by_tpa' in data) {
+      const byTpa = (data as { payers_by_tpa?: Record<string, Payer[]> }).payers_by_tpa || {};
+      return Object.values(byTpa).flat();
+    }
+  }
+  return [];
+}
+
 export function useClinicSettings(clinicId: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: clinicConfigKeys.settings(clinicId),
     queryFn: () => clinicConfigApi.getSettings(clinicId),
     enabled: options?.enabled !== false && !!clinicId,
     staleTime: 5 * 60 * 1000,
+    select: extractConfig<ClinicConfigSettings>,
   });
 }
 
@@ -58,6 +104,7 @@ export function useTPAConfigs(clinicId: string, options?: { enabled?: boolean })
     queryFn: () => clinicConfigApi.getTPA(clinicId),
     enabled: options?.enabled !== false && !!clinicId,
     staleTime: 5 * 60 * 1000,
+    select: extractConfigs<TPAConfig>,
   });
 }
 
@@ -71,6 +118,19 @@ export function useTPAConfigByName(
     queryFn: () => clinicConfigApi.getTPAByName(clinicId, tpaName),
     enabled: options?.enabled !== false && !!clinicId && !!tpaName,
     staleTime: 5 * 60 * 1000,
+    select: (data) => {
+      if (data && typeof data === 'object' && 'config' in data) {
+        return (data as { config?: TPAConfig }).config ?? null;
+      }
+      if (Array.isArray(data)) {
+        return data.find((item) => item.tpa_name === tpaName) || null;
+      }
+      if (data && typeof data === 'object' && 'configs' in data) {
+        const configs = (data as { configs?: TPAConfig[] }).configs || [];
+        return configs.find((item) => item.tpa_name === tpaName) || null;
+      }
+      return null;
+    },
   });
 }
 
@@ -104,6 +164,7 @@ export function useDoctors(clinicId: string, options?: { enabled?: boolean }) {
     queryFn: () => clinicConfigApi.getDoctors(clinicId),
     enabled: options?.enabled !== false && !!clinicId,
     staleTime: 5 * 60 * 1000,
+    select: extractConfigs<Doctor>,
   });
 }
 
@@ -113,6 +174,7 @@ export function usePlans(clinicId: string, options?: { enabled?: boolean }) {
     queryFn: () => clinicConfigApi.getPlans(clinicId),
     enabled: options?.enabled !== false && !!clinicId,
     staleTime: 5 * 60 * 1000,
+    select: extractPlanList,
   });
 }
 
@@ -122,6 +184,7 @@ export function useNetworks(clinicId: string, options?: { enabled?: boolean }) {
     queryFn: () => clinicConfigApi.getNetworks(clinicId),
     enabled: options?.enabled !== false && !!clinicId,
     staleTime: 5 * 60 * 1000,
+    select: extractConfigs<Network>,
   });
 }
 
@@ -131,6 +194,7 @@ export function usePayers(clinicId: string, options?: { enabled?: boolean }) {
     queryFn: () => clinicConfigApi.getPayers(clinicId),
     enabled: options?.enabled !== false && !!clinicId,
     staleTime: 5 * 60 * 1000,
+    select: extractPayerList,
   });
 }
 
@@ -140,6 +204,7 @@ export function useSpecialisations(clinicId: string, options?: { enabled?: boole
     queryFn: () => clinicConfigApi.getSpecialisations(clinicId),
     enabled: options?.enabled !== false && !!clinicId,
     staleTime: 5 * 60 * 1000,
+    select: extractConfigs<Specialisation>,
   });
 }
 

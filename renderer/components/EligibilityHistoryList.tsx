@@ -36,7 +36,9 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
   const deleteItem = useDeleteEligibilityHistoryItem();
   const clearAll = useClearEligibilityHistory();
 
-  const { data: selectedItem } = useEligibilityHistoryItem(selectedItemId || "", !!selectedItemId);
+  const { data: selectedItem } = useEligibilityHistoryItem(selectedItemId || "", {
+    enabled: !!selectedItemId,
+  });
 
   const { data: patientContext } = usePatientContext(
     {
