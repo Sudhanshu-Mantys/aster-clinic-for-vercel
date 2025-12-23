@@ -137,12 +137,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                                     console.warn('⚠️ Token refresh failed due to network issue; keeping session for retry.')
                                     return
                                 }
+                                if (refreshError instanceof ApiError && refreshError.status === 405) {
+                                    console.warn('⚠️ Token refresh returned 405; clearing session (API method not allowed)')
+                                    clearSession()
+                                    return
+                                }
                                 // Refresh failed, clear tokens
                                 console.error('❌ Token refresh failed:', refreshError)
                                 clearSession()
                             }
                         } else if (error instanceof ApiError && (error.status === 0 || error.status === 408)) {
                             console.warn('⚠️ Auth check failed due to network issue; keeping session for retry.')
+                        } else if (error instanceof ApiError && error.status === 405) {
+                            // 405 means the endpoint doesn't support the method - token is likely invalid
+                            console.warn('⚠️ Auth check returned 405; clearing session')
+                            clearSession()
                         } else {
                             clearSession()
                         }
@@ -152,6 +161,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 console.error('Auth check failed:', error)
                 if (error instanceof ApiError && (error.status === 0 || error.status === 408)) {
                     console.warn('⚠️ Auth check failed due to network issue; keeping session for retry.')
+                } else if (error instanceof ApiError && error.status === 405) {
+                    console.warn('⚠️ Auth check returned 405; clearing session')
+                    clearSession()
                 } else {
                     clearSession()
                 }
@@ -200,14 +212,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     throw new Error('No account found with this email. Please sign up first.')
                 } else if (errorCode === 'TOO_MANY_REQUESTS' || error.status === 429) {
                     throw new Error('Too many login attempts. Please try again in a few minutes.')
-                } else if (errorCode === 'INVALID_EMAIL') {
-                    throw new Error('Invalid email format. Please check your email address.')
+                } else if (error.status === 405) {
+                    // 405 means the endpoint doesn't support the method
+                    throw new Error('Authentication service error. Please try again later.')
+                } else if (error.status === 400) {
+                    // Generic 400 error - use Stack Auth's message
+                    throw new Error(errorMessage)
                 } else {
-                    // Use Stack Auth's error message if available
+                    // Use Stack Auth's error message
                     throw new Error(errorMessage)
                 }
             }
-            console.error('Login error:', error)
+            console.error('Signup error:', error)
             throw error
         }
     }
@@ -290,6 +306,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (error instanceof ApiError) {
                 const errorData = error.data as { error?: string; message?: string } | undefined
                 console.error('❌ Failed to switch team - Status:', error.status, 'Error:', errorData)
+                if (error.status === 405) {
+                    console.warn('⚠️ Switch team returned 405; session may be invalid')
+                    clearSession()
+                    throw new Error('Session expired. Please log in again.')
+                }
                 throw new Error(errorData?.error || errorData?.message || 'Failed to switch team')
             }
             console.error('Switch team error:', error)
@@ -301,7 +322,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
             // Sign out from Stack Auth
             if (accessToken) {
-                await stackAuthApi.signOut(accessToken)
+                try {
+                    await stackAuthApi.signOut(accessToken)
+                } catch (signOutError) {
+                    // Ignore 405 errors during sign out - session will be cleared anyway
+                    if (signOutError instanceof ApiError && signOutError.status === 405) {
+                        console.warn('⚠️ Sign out returned 405; proceeding with local logout')
+                    } else {
+                        console.error('Sign out error:', signOutError)
+                    }
+                }
             }
         } catch (error) {
             console.error('Logout error:', error)

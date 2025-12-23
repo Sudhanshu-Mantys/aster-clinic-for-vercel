@@ -43,7 +43,7 @@ export async function fetchJson<T>(
       ...fetchOptions,
       signal: controller.signal,
       headers: {
-        'Content-Type': 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
         ...fetchOptions.headers,
       },
       body: body ? JSON.stringify(body) : undefined,
@@ -108,10 +108,14 @@ function stackAuthFetch<T>(
   options: FetchOptions = {},
   accessToken?: string
 ): Promise<T> {
+  const headers = stackAuthHeaders(accessToken);
+  if (!options.body) {
+    delete headers['Content-Type'];
+  }
   return fetchJson<T>(`${STACK_API_URL}${endpoint}`, {
     ...options,
     headers: {
-      ...stackAuthHeaders(accessToken),
+      ...headers,
       ...(options.headers || {}),
     },
   });
