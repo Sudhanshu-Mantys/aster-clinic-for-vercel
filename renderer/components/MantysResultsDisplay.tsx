@@ -190,19 +190,19 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             if (!selectedInsurance) {
               console.warn("⚠️ No active insurance policy found (is_current: 1) in Redis context");
               // Don't show alert here - will check on upload button click
-            } else {
-              // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
-              const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
-              if (insTpaPatIdValue) {
-                console.log("✅ Selected insurance from Redis (is_current: 1):", {
-                  insTpaPatId: insTpaPatIdValue,
-                  status: selectedInsurance.insurance_status,
-                  payer_name: selectedInsurance.payer_name,
-                  tpa_name: selectedInsurance.tpa_name,
-                  is_current: selectedInsurance.is_current,
-                  total_records: insuranceRecords.length,
-                });
-                setInsTpaPatId(insTpaPatIdValue);
+              } else {
+                // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
+                const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+                if (insTpaPatIdValue) {
+                  console.log("✅ Selected insurance from Redis (is_current: 1):", {
+                    insTpaPatId: insTpaPatIdValue,
+                    status: selectedInsurance.insurance_status,
+                    payer_name: selectedInsurance.payer_name,
+                    tpa_name: selectedInsurance.tpa_name,
+                    is_current: selectedInsurance.is_current,
+                    total_records: insuranceRecords.length,
+                  });
+                  setInsTpaPatId(Number(insTpaPatIdValue));
               } else {
                 console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
               }
@@ -288,7 +288,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                   is_current: selectedInsurance.is_current,
                   total_records: insuranceRecords.length,
                 });
-                setInsTpaPatId(insTpaPatIdValue);
+                setInsTpaPatId(Number(insTpaPatIdValue));
               } else {
                 console.warn("⚠️ Selected insurance record but no insTpaPatId value found:", selectedInsurance);
               }
@@ -1167,7 +1167,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         patientId: finalPatientId,
         appointmentId: finalAppointmentId,
         encounterId: finalEncounterId,
-        payerId: data.patient_info?.payer_id,
+        payerId: data.patient_info?.payer_id ? Number(data.patient_info.payer_id) : undefined,
       });
 
       setPolicySaved(true);
@@ -1240,7 +1240,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           }
 
           // Use patient_insurance_tpa_policy_id_sites (equivalent to insTpaPatId) or fallback to patient_insurance_tpa_policy_id
-          insTpaPatIdForUpload = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id || null;
+          insTpaPatIdForUpload = Number(selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id) || null;
 
           if (insTpaPatIdForUpload) {
             console.log("✅ Found active insurance policy for upload:", {

@@ -96,7 +96,7 @@ export const useMantysActions = ({
         if (selectedInsurance) {
           const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
           if (insTpaPatIdValue) {
-            setInsTpaPatId(insTpaPatIdValue);
+            setInsTpaPatId(Number(insTpaPatIdValue));
           }
         }
       }
@@ -109,7 +109,7 @@ export const useMantysActions = ({
     if (!response.tpa) return;
 
     try {
-      const configs = await clinicConfigApi.getTPA(31);
+      const configs = await clinicConfigApi.getTPA("31");
       const config = configs.find(
         (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
       );
@@ -165,7 +165,7 @@ export const useMantysActions = ({
             alert("There is no active Insurance policy for this user");
             return;
           }
-          insTpaPatIdForUpload = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+          insTpaPatIdForUpload = Number(selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id) || null;
           if (!insTpaPatIdForUpload) {
             alert("There is no active Insurance policy for this user");
             return;

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import {
   eligibilityHistoryApi,
   mantysApi,
@@ -196,7 +196,7 @@ export function useEligibilityPolling(
   const hasCompletedRef = useRef(false);
   const hasErroredRef = useRef(false);
 
-  return useQuery({
+  const { data } = useQuery({
     queryKey: eligibilityKeys.taskStatus(taskId),
     queryFn: () => mantysApi.checkStatus(taskId),
     enabled: options?.enabled !== false && !!taskId,
@@ -207,62 +207,65 @@ export function useEligibilityPolling(
       }
       return 3000;
     },
-    onSuccess: (data) => {
-      if (data.status === 'processing' || data.status === 'pending') {
-        const interimKey = JSON.stringify({
-          screenshot: data.screenshot ?? null,
-          documents: data.documents ?? null,
-        });
-        const shouldUpdate =
-          lastUpdateRef.current?.status !== data.status ||
-          lastUpdateRef.current?.interimKey !== interimKey;
-
-        if (shouldUpdate) {
-          updateHistory.mutate({
-            taskId,
-            updates: {
-              status: data.status,
-              interimResults: {
-                screenshot: data.screenshot,
-                documents: data.documents,
-              },
-            },
-          });
-          lastUpdateRef.current = { status: data.status, interimKey };
-        }
-        return;
-      }
-
-      if (data.status === 'complete' && !hasCompletedRef.current) {
-        const resultKey = JSON.stringify(data.result ?? null);
-        updateHistory.mutate({
-          taskId,
-          updates: {
-            status: 'complete',
-            result: data.result,
-            completedAt: new Date().toISOString(),
-          },
-        });
-        lastUpdateRef.current = { status: 'complete', resultKey };
-        hasCompletedRef.current = true;
-        queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
-        options?.onComplete?.(data);
-      }
-
-      if (data.status === 'error' && !hasErroredRef.current) {
-        updateHistory.mutate({
-          taskId,
-          updates: {
-            status: 'error',
-            error: data.error,
-            completedAt: new Date().toISOString(),
-          },
-        });
-        lastUpdateRef.current = { status: 'error', error: data.error };
-        hasErroredRef.current = true;
-        queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
-        options?.onError?.(data);
-      }
-    },
   });
+
+  useEffect(() => {
+    if (!data) return;
+
+    if (data.status === 'processing' || data.status === 'pending') {
+      const interimKey = JSON.stringify({
+        screenshot: data.screenshot ?? null,
+        documents: data.documents ?? null,
+      });
+      const shouldUpdate =
+        lastUpdateRef.current?.status !== data.status ||
+        lastUpdateRef.current?.interimKey !== interimKey;
+
+      if (shouldUpdate) {
+        updateHistory.mutate({
+          taskId,
+          updates: {
+            status: data.status,
+            interimResults: {
+              screenshot: data.screenshot,
+              documents: data.documents,
+            },
+          },
+        });
+        lastUpdateRef.current = { status: data.status, interimKey };
+      }
+      return;
+    }
+
+    if (data.status === 'complete' && !hasCompletedRef.current) {
+      const resultKey = JSON.stringify(data.result ?? null);
+      updateHistory.mutate({
+        taskId,
+        updates: {
+          status: 'complete',
+          result: data.result,
+          completedAt: new Date().toISOString(),
+        },
+      });
+      lastUpdateRef.current = { status: 'complete', resultKey };
+      hasCompletedRef.current = true;
+      queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
+      options?.onComplete?.(data);
+    }
+
+    if (data.status === 'error' && !hasErroredRef.current) {
+      updateHistory.mutate({
+        taskId,
+        updates: {
+          status: 'error',
+          error: data.error,
+          completedAt: new Date().toISOString(),
+        },
+      });
+      lastUpdateRef.current = { status: 'error', error: data.error };
+      hasErroredRef.current = true;
+      queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
+      options?.onError?.(data);
+    }
+  }, [data, taskId, clinicId, updateHistory, queryClient, options]);
 }

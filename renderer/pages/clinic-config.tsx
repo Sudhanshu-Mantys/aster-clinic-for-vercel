@@ -193,10 +193,10 @@ function ClinicConfigTab({ clinicId }: { clinicId: string }) {
             if (data) {
                 setConfig(data)
                 setFormData({
-                    location: data.location || '',
-                    lt_site_id: data.lt_site_id || '',
-                    customer_id: data.customer_id || '',
-                    hospital_or_clinic: data.hospital_or_clinic || 'clinic'
+                    location: (data as any).location || '',
+                    lt_site_id: (data as any).lt_site_id || '',
+                    customer_id: (data as any).customer_id || '',
+                    hospital_or_clinic: (data as any).hospital_or_clinic || 'clinic'
                 })
             }
         } catch (error) {
@@ -977,7 +977,7 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
         setIsLoading(true)
         try {
             const plansByTpa = await clinicConfigApi.getPlansByTPA(clinicId)
-            setPlansByTPA(plansByTpa || {})
+            setPlansByTPA((plansByTpa || {}) as unknown as Record<string, LTPlan[]>)
         } catch (error) {
             if (error instanceof ApiError && error.status === 404) {
                 setPlansByTPA({})
@@ -1028,7 +1028,7 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
             const data = await clinicConfigApi.fetchPlansFromApi(clinicId, tpaInsCode)
             setPlansByTPA(prev => ({
                 ...prev,
-                [tpaInsCode]: data.plans || []
+                [tpaInsCode]: (data.plans || []) as unknown as LTPlan[]
             }))
             alert(`Successfully fetched ${data.record_count || 0} plans for ${tpaInsCode}`)
         } catch (error) {
@@ -1874,7 +1874,7 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
         setIsLoading(true)
         try {
             const payersByTpa = await clinicConfigApi.getPayersByTPA(clinicId)
-            setPayersByTPA(payersByTpa || {})
+            setPayersByTPA((payersByTpa || {}) as unknown as Record<string, LTPayer[]>)
         } catch (error) {
             if (error instanceof ApiError && error.status === 404) {
                 setPayersByTPA({})
@@ -1891,10 +1891,9 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
         setFetchingTPA(tpaInsCode)
         try {
             const data = await clinicConfigApi.fetchPayersFromApi(clinicId, tpaInsCode)
-            // Update the payers for this TPA
             setPayersByTPA(prev => ({
                 ...prev,
-                [tpaInsCode]: data.payers || []
+                [tpaInsCode]: (data.payers || []) as unknown as LTPayer[]
             }))
             alert(`Successfully fetched ${data.record_count || 0} payers for ${tpaInsCode}`)
         } catch (error) {
@@ -2097,7 +2096,7 @@ function DoctorsConfigTab({ clinicId }: { clinicId: string }) {
         setIsLoading(true)
         try {
             const configs = await clinicConfigApi.getDoctors(clinicId)
-            setDoctors(configs || [])
+            setDoctors(((configs || []) as unknown) as DoctorConfig[])
         } catch (error) {
             console.error('Failed to load doctors:', error)
         } finally {
@@ -2574,7 +2573,7 @@ function SpecialisationsConfigTab() {
         setIsLoading(true)
         try {
             const data = await clinicConfigApi.getSpecialisations()
-            setSpecialisations(data || [])
+            setSpecialisations(((data || []) as unknown) as Array<{ specialisation_id: string; specialisation_name: string }>)
         } catch (error) {
             console.error('Failed to load specialisations:', error)
         } finally {
