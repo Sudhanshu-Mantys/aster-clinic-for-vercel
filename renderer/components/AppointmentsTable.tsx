@@ -1,7 +1,13 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useEligibilityHistory } from "../hooks/useEligibility";
 import { useAuth } from "../contexts/AuthContext";
 import type { AppointmentData } from "../lib/api-client";
+import { Button } from "./ui/button";
+import { Drawer } from "./ui/drawer";
+import { MantysResultsDisplay } from "./MantysResultsDisplay";
+import type { MantysEligibilityResponse } from "../types/mantys";
+import { asterApi, patientApi } from "../lib/api-client";
+import { extractMantysKeyFields } from "../lib/mantys-utils";
 
 interface AppointmentsTableProps {
   appointments: AppointmentData[];
@@ -19,10 +25,20 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
   const { user } = useAuth();
   const clinicId = user?.selected_team_id;
 
+  const [actionAppointment, setActionAppointment] = useState<AppointmentData | null>(null);
+  const [actionTaskId, setActionTaskId] = useState<string | null>(null);
+  const [showActionDrawer, setShowActionDrawer] = useState(false);
+
   const { data: historyItems = [] } = useEligibilityHistory(clinicId);
 
-  const eligibilityStatus = useMemo(() => {
-    const statusMap: Record<string, EligibilityStatus> = {};
+  const eligibilityResult = useMemo(() => {
+    if (!actionTaskId) return undefined;
+    const item = historyItems.find((i) => i.taskId === actionTaskId);
+    return item?.result as MantysEligibilityResponse | undefined;
+  }, [actionTaskId, historyItems]);
+
+  const eligibilityStatusMap = useMemo(() => {
+    const statusMap: Record<string, { status: EligibilityStatus; taskId: string }> = {};
 
     const validEligibilityChecks = historyItems.filter((item) =>
       ["complete", "error", "pending", "processing"].includes(item.status)
@@ -46,18 +62,21 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       checks.sort((a, b) => b.timestamp - a.timestamp);
       const mostRecent = checks[0].item;
 
+      let status: EligibilityStatus = null;
       if (mostRecent.status === "error") {
-        statusMap[mpi] = "error";
+        status = "error";
       } else if (mostRecent.status === "pending" || mostRecent.status === "processing") {
-        statusMap[mpi] = "processing";
+        status = "processing";
       } else if (mostRecent.status === "complete") {
         const resultData = (mostRecent.result as any)?.data;
         if (resultData?.is_eligible === true) {
-          statusMap[mpi] = "success";
+          status = "success";
         } else {
-          statusMap[mpi] = "error";
+          status = "error";
         }
       }
+
+      statusMap[mpi] = { status, taskId: mostRecent.taskId };
     });
 
     return statusMap;
@@ -86,6 +105,122 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       }
     }
     return null;
+  };
+
+  const handleSavePolicy = (appointment: AppointmentData) => {
+    const mpi = appointment.mpi;
+    if (mpi && eligibilityStatusMap[mpi]?.taskId) {
+      setActionAppointment(appointment);
+      setActionTaskId(eligibilityStatusMap[mpi].taskId);
+      setShowActionDrawer(true);
+    }
+  };
+
+  const handleUploadScreenshot = async (appointment: AppointmentData) => {
+    const mpi = appointment.mpi;
+    const taskInfo = eligibilityStatusMap[mpi || ""];
+
+    if (!taskInfo?.taskId) {
+      alert("No eligibility check found for this patient");
+      return;
+    }
+
+    const eligibilityItem = historyItems.find((item) => item.taskId === taskInfo.taskId);
+    const response = eligibilityItem?.result as MantysEligibilityResponse | undefined;
+
+    if (!response) {
+      alert("Eligibility result not found");
+      return;
+    }
+
+    const keyFields = extractMantysKeyFields(response);
+
+    if (!keyFields.referralDocuments || keyFields.referralDocuments.length === 0) {
+      alert("No referral documents to upload");
+      return;
+    }
+
+    const patientId = appointment.patient_id;
+    const appointmentId = appointment.appointment_id;
+
+    if (!patientId || !appointmentId) {
+      alert("Missing patient or appointment ID");
+      return;
+    }
+
+    try {
+      const insuranceResponse = await patientApi.getInsuranceDetails({
+        patientId,
+        apntId: appointmentId,
+        encounterId: 0,
+        customerId: 1,
+        primaryInsPolicyId: null,
+        siteId: 1,
+        isDiscard: 0,
+        hasTopUpCard: 0,
+      });
+
+      let insTpaPatId: number | null = null;
+
+      if (insuranceResponse?.body?.Data && Array.isArray(insuranceResponse.body.Data)) {
+        const selectedInsurance = insuranceResponse.body.Data.find((record: any) => record.is_current === 1);
+        if (!selectedInsurance) {
+          alert("There is no active Insurance policy for this user");
+          return;
+        }
+        const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+        if (insTpaPatIdValue) {
+          insTpaPatId = Number(insTpaPatIdValue);
+        }
+        if (!insTpaPatId) {
+          alert("There is no active Insurance policy for this user");
+          return;
+        }
+      } else {
+        alert("There is no active Insurance policy for this user");
+        return;
+      }
+
+      const confirmed = confirm(`Upload ${keyFields.referralDocuments.length} document(s) to Aster?`);
+      if (!confirmed) return;
+
+      let uploadedCount = 0;
+      let failedCount = 0;
+
+      for (const doc of keyFields.referralDocuments) {
+        try {
+          await asterApi.uploadAttachment({
+            patientId,
+            encounterId: 0,
+            appointmentId,
+            insTpaPatId,
+            fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,
+            fileUrl: doc.s3_url,
+          });
+          uploadedCount++;
+        } catch (error) {
+          console.error(`Failed to upload ${doc.tag}:`, error);
+          failedCount++;
+        }
+      }
+
+      if (failedCount === 0) {
+        alert(`SUCCESS!\n\nAll ${uploadedCount} documents uploaded successfully!`);
+      } else {
+        alert(`Partially completed\n\nUploaded: ${uploadedCount}\nFailed: ${failedCount}`);
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      alert("Failed to upload documents");
+    }
+  };
+
+  const handleCloseActionDrawer = () => {
+    setShowActionDrawer(false);
+    setTimeout(() => {
+      setActionAppointment(null);
+      setActionTaskId(null);
+    }, 300);
   };
 
   if (isLoading) {
@@ -275,9 +410,9 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                         );
                       })()}
                     </div>
-                    {eligibilityStatus[appointment.mpi] && (
+                    {eligibilityStatusMap[appointment.mpi] && (
                       <div className="flex-shrink-0 mt-1">
-                        {renderEligibilityIcon(eligibilityStatus[appointment.mpi], "sm")}
+                        {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status, "sm")}
                       </div>
                     )}
                   </div>
@@ -308,21 +443,44 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                   {(appointment as any).visit_type || "N/A"}
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-center">
-                  {renderEligibilityIcon(eligibilityStatus[appointment.mpi])}
+                  {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status)}
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                   {appointment.mobile_phone || "N/A"}
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAppointmentClick(appointment);
-                    }}
-                    className="text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    View Details
-                  </button>
+                  {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSavePolicy(appointment);
+                        }}
+                        className="bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium"
+                      >
+                        Save Policy
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUploadScreenshot(appointment);
+                        }}
+                        className="bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium"
+                      >
+                        Upload SS
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAppointmentClick(appointment);
+                      }}
+                      className="text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      View Details
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -344,9 +502,9 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                   <h3 className="font-semibold text-gray-900">{appointment.full_name || "N/A"}</h3>
                   <p className="text-sm text-gray-500">MPI: {appointment.mpi}</p>
                 </div>
-                {eligibilityStatus[appointment.mpi] && (
+                {eligibilityStatusMap[appointment.mpi] && (
                   <div className="flex-shrink-0">
-                    {renderEligibilityIcon(eligibilityStatus[appointment.mpi], "sm")}
+                    {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status, "sm")}
                   </div>
                 )}
               </div>
@@ -401,6 +559,39 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
               {appointment.specialisation_name && (
                 <p className="mt-2 text-xs text-gray-500">{appointment.specialisation_name}</p>
               )}
+
+              {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSavePolicy(appointment);
+                    }}
+                    className="flex-1 bg-black hover:bg-gray-800 text-white py-2 rounded text-sm font-medium"
+                  >
+                    Save Policy
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleUploadScreenshot(appointment);
+                    }}
+                    className="flex-1 bg-black hover:bg-gray-800 text-white py-2 rounded text-sm font-medium"
+                  >
+                    Upload SS
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAppointmentClick(appointment);
+                  }}
+                  className="mt-4 w-full text-center text-blue-600 hover:text-blue-800 font-medium text-sm"
+                >
+                  View Details
+                </button>
+              )}
             </div>
           );
         })}
@@ -414,6 +605,25 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
           <div className="text-xs text-gray-500 hidden sm:block">Click on any row to view full details</div>
         </div>
       </div>
+
+      {showActionDrawer && actionAppointment && eligibilityResult && (
+        <Drawer
+          isOpen={showActionDrawer}
+          onClose={handleCloseActionDrawer}
+          title={`Eligibility Actions - ${actionAppointment.full_name}`}
+          size="xl"
+        >
+          <MantysResultsDisplay
+            response={eligibilityResult}
+            onClose={handleCloseActionDrawer}
+            onCheckAnother={handleCloseActionDrawer}
+            patientMPI={actionAppointment.mpi}
+            patientId={actionAppointment.patient_id}
+            appointmentId={actionAppointment.appointment_id}
+            encounterId={(actionAppointment as any).encounter_id}
+          />
+        </Drawer>
+      )}
     </div>
   );
 };
