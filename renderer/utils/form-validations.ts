@@ -160,11 +160,11 @@ export const validateMemberId = (memberId: string): {
     };
   }
 
-  // Check if contains valid characters (alphanumeric, dashes, underscores)
-  if (!/^[A-Za-z0-9\-_]+$/.test(sanitized)) {
+  // Check if contains valid characters (alphanumeric, dashes, underscores, backslashes, forward slashes)
+  if (!/^[A-Za-z0-9\-_\\/]+$/.test(sanitized)) {
     return {
       isValid: false,
-      error: "Member ID must contain only letters, numbers, dashes, and underscores",
+      error: "Member ID must contain only letters, numbers, dashes, underscores, and slashes",
     };
   }
 
