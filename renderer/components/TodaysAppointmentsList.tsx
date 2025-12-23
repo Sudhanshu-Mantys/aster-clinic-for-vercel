@@ -365,98 +365,18 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       <Drawer
         isOpen={showDrawer}
         onClose={handleCloseDrawer}
-        title={
-          selectedAppointment
-            ? `${selectedAppointment.full_name} - Appointment Details`
-            : "Appointment Details"
+        title="Appointment Details"
+        headerRight={
+          selectedAppointment && (
+            <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
+              #{selectedAppointment.appointment_id}
+            </span>
+          )
         }
         size="xl"
       >
         {selectedAppointment && (
           <div className="p-6 space-y-6">
-            <div className="border border-gray-200 rounded-lg p-3">
-              <h3 className="font-semibold text-gray-900 mb-2 text-sm">Patient Details</h3>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-gray-700">Name:</span>
-                  <span className="text-gray-900">{selectedAppointment.full_name}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-gray-700">MPI:</span>
-                  <span className="text-gray-900">{selectedAppointment.mpi}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-gray-700">Patient ID:</span>
-                  <span className="text-gray-900">{selectedAppointment.patient_id}</span>
-                </div>
-                {selectedAppointment.mobile_phone && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">Phone:</span>
-                    <span className="text-gray-900">{selectedAppointment.mobile_phone}</span>
-                  </div>
-                )}
-                {selectedAppointment.email && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">Email:</span>
-                    <span className="text-gray-900">{selectedAppointment.email}</span>
-                  </div>
-                )}
-                {selectedAppointment.dob && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">Date of Birth:</span>
-                    <span className="text-gray-900">{selectedAppointment.dob}</span>
-                  </div>
-                )}
-                {selectedAppointment.age && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">Age:</span>
-                    <span className="text-gray-900">{selectedAppointment.age}</span>
-                  </div>
-                )}
-                {selectedAppointment.gender && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">Gender:</span>
-                    <span className="text-gray-900">{selectedAppointment.gender}</span>
-                  </div>
-                )}
-                {(emiratesIdFromContext || (selectedAppointment as any).nationality_id) && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">Emirates ID:</span>
-                    <span className="text-gray-900">
-                      {emiratesIdFromContext || (selectedAppointment as any).nationality_id}
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-gray-700">Appointment ID:</span>
-                  <span className="text-gray-900">{selectedAppointment.appointment_id}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-gray-700">Date:</span>
-                  <span className="text-gray-900">{selectedAppointment.appointment_date}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-gray-700">Time:</span>
-                  <span className="text-gray-900">{selectedAppointment.appointment_time}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-gray-700">Status:</span>
-                  <span className="text-gray-900">{selectedAppointment.appointment_status}</span>
-                </div>
-                {selectedAppointment.physician_name && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">Physician:</span>
-                    <span className="text-gray-900">{selectedAppointment.physician_name}</span>
-                  </div>
-                )}
-                {selectedAppointment.specialisation_name && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">Specialization:</span>
-                    <span className="text-gray-900">{selectedAppointment.specialisation_name}</span>
-                  </div>
-                )}
-              </div>
-            </div>
 
             {previousSearches.length > 0 && (
               <div className="mb-4 space-y-4">
