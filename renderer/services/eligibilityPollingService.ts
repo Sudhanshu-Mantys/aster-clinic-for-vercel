@@ -1,7 +1,5 @@
-// Background polling service for eligibility checks
-// Runs independently of UI - continues even when tabs are closed
-
-import { EligibilityHistoryService, EligibilityHistoryItem } from '../utils/eligibilityHistory';
+import { eligibilityHistoryApi, mantysApi, ApiError } from '../lib/api-client';
+import type { EligibilityHistoryItem } from '../hooks/useEligibility';
 
 interface PollingTask {
   taskId: string;
@@ -154,158 +152,108 @@ class EligibilityPollingService {
     }
   }
 
-  /**
-   * Poll a single task
-   */
   private async pollTask(task: PollingTask) {
     task.attempts++;
 
     try {
-      const response = await fetch('/api/mantys/check-status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: task.taskId }),
-      });
+      const data = await mantysApi.checkStatus(task.taskId);
 
-      // Handle HTTP errors - try to parse error response
-      if (!response.ok) {
-        let errorMessage = `Status check failed: ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.error) {
-            errorMessage = errorData.error;
-          }
-        } catch {
-          // If JSON parsing fails, use the default error message
-        }
-
-        // For 500 errors, be more aggressive about stopping
-        if (response.status === 500 && task.attempts >= 5) {
-          console.error(`[PollingService] Task ${task.taskId} failed after ${task.attempts} attempts with server error`);
-          try {
-            await EligibilityHistoryService.updateByTaskId(task.taskId, {
-              status: 'error',
-              error: errorMessage || 'Server error while checking status',
-              completedAt: new Date().toISOString(),
-              pollingAttempts: task.attempts,
-            });
-          } catch (updateError: any) {
-            console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, updateError.message);
-          }
-          await this.removeTask(task.taskId);
-          return;
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-
-      // Update history based on status
       if (data.status === 'pending') {
         try {
-          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+          await eligibilityHistoryApi.updateByTaskId(task.taskId, {
             status: 'pending',
             pollingAttempts: task.attempts,
           });
-        } catch (error: any) {
-          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : 'Unknown error';
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, msg);
         }
-        // Update task attempts for active tasks
         this.activeTasks.set(task.taskId, task);
         await this.saveActiveTasks();
       } else if (data.status === 'processing') {
         try {
-          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+          await eligibilityHistoryApi.updateByTaskId(task.taskId, {
             status: 'processing',
             pollingAttempts: task.attempts,
             interimResults: data.interimResults || undefined,
           });
-        } catch (error: any) {
-          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : 'Unknown error';
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, msg);
         }
-        // Update task attempts for active tasks
         this.activeTasks.set(task.taskId, task);
         await this.saveActiveTasks();
       } else if (data.status === 'complete') {
         console.log(`[PollingService] Task ${task.taskId} completed successfully`);
-
         try {
-          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+          await eligibilityHistoryApi.updateByTaskId(task.taskId, {
             status: 'complete',
             completedAt: new Date().toISOString(),
             result: data.result,
             pollingAttempts: task.attempts,
           });
-        } catch (error: any) {
-          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : 'Unknown error';
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, msg);
         }
-
-        // Remove from active tasks - STOP POLLING
         await this.removeTask(task.taskId);
-        return; // Exit early to prevent further processing
+        return;
       } else if (data.status === 'error') {
         console.error(`[PollingService] Task ${task.taskId} failed:`, data.message);
-
         try {
-          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+          await eligibilityHistoryApi.updateByTaskId(task.taskId, {
             status: 'error',
             error: data.message || 'Eligibility check failed',
             completedAt: new Date().toISOString(),
             pollingAttempts: task.attempts,
           });
-        } catch (error: any) {
-          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : 'Unknown error';
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, msg);
         }
-
-        // Remove from active tasks - STOP POLLING
         await this.removeTask(task.taskId);
-        return; // Exit early to prevent further processing
+        return;
       }
 
-      // Check if max attempts reached
       if (task.attempts >= MAX_ATTEMPTS) {
         console.error(`[PollingService] Task ${task.taskId} timed out after ${MAX_ATTEMPTS} attempts`);
-
         try {
-          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+          await eligibilityHistoryApi.updateByTaskId(task.taskId, {
             status: 'error',
             error: 'Eligibility check timed out after 10 minutes. Please try again.',
             completedAt: new Date().toISOString(),
             pollingAttempts: task.attempts,
           });
-        } catch (error: any) {
-          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, error.message);
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : 'Unknown error';
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, msg);
         }
-
-        // Remove from active tasks - STOP POLLING
         await this.removeTask(task.taskId);
-        return; // Exit early to prevent further processing
+        return;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`[PollingService] Error polling task ${task.taskId}:`, error);
 
-      // For network errors or repeated failures, stop after fewer attempts
-      const maxErrorAttempts = error.message?.includes('Status check failed') ? 5 : 3;
+      const errorMessage = error instanceof ApiError ? error.message :
+        error instanceof Error ? error.message : 'Unknown error';
+      const isServerError = error instanceof ApiError && error.status === 500;
+      const maxErrorAttempts = isServerError ? 5 : 3;
 
-      // Only mark as error if we've tried multiple times
       if (task.attempts >= maxErrorAttempts) {
         try {
-          await EligibilityHistoryService.updateByTaskId(task.taskId, {
+          await eligibilityHistoryApi.updateByTaskId(task.taskId, {
             status: 'error',
-            error: error.message || 'Failed to check status',
+            error: errorMessage || 'Failed to check status',
             completedAt: new Date().toISOString(),
             pollingAttempts: task.attempts,
           });
-        } catch (updateError: any) {
-          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, updateError.message);
+        } catch (updateError: unknown) {
+          const msg = updateError instanceof Error ? updateError.message : 'Unknown error';
+          console.warn(`[PollingService] Failed to update history for task ${task.taskId}:`, msg);
         }
-
-        // Remove from active tasks - STOP POLLING
         await this.removeTask(task.taskId);
-        return; // Exit early to prevent further processing
+        return;
       }
-      // If we haven't hit the error threshold yet, update task attempts
       this.activeTasks.set(task.taskId, task);
       await this.saveActiveTasks();
     }
@@ -359,25 +307,24 @@ class EligibilityPollingService {
     }
   }
 
-  /**
-   * Resume polling for any active history items
-   * Called on app startup to resume any in-progress checks
-   */
   private async resumeActivePolls() {
-    const activeItems = await EligibilityHistoryService.getActive();
+    try {
+      const activeItems = await eligibilityHistoryApi.getActive();
 
-    if (activeItems.length === 0) {
-      return;
-    }
-
-    console.log(`[PollingService] Resuming polling for ${activeItems.length} active check(s)`);
-
-    for (const item of activeItems) {
-      // Only resume if not already being polled and status is actually active
-      if (!this.activeTasks.has(item.taskId) &&
-        (item.status === 'pending' || item.status === 'processing')) {
-        await this.addTask(item.taskId, item.id);
+      if (activeItems.length === 0) {
+        return;
       }
+
+      console.log(`[PollingService] Resuming polling for ${activeItems.length} active check(s)`);
+
+      for (const item of activeItems) {
+        if (!this.activeTasks.has(item.taskId) &&
+          (item.status === 'pending' || item.status === 'processing')) {
+          await this.addTask(item.taskId, item.id);
+        }
+      }
+    } catch (error) {
+      console.error('[PollingService] Error resuming active polls:', error);
     }
   }
 

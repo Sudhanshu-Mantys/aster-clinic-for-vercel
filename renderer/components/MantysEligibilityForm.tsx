@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import Select from "react-select";
 import { PatientData, InsuranceData } from "../lib/api";
 import { Button } from "./ui/button";
-import { cachedFetch, fetchWithTimeout } from "../lib/request-cache";
+import { fetchWithTimeout } from "../lib/request-cache";
 import {
   MantysEligibilityResponse,
   TPACode,
@@ -15,10 +15,12 @@ import {
 } from "../lib/mantys-utils";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
-import { EligibilityHistoryService } from "../utils/eligibilityHistory";
 import pollingService from "../services/eligibilityPollingService";
 import { useAuth } from "../contexts/AuthContext";
 import { EligibilityCheckMetadata } from "../lib/redis-eligibility-mapping";
+import { useTPAConfigs, useDoctors } from "../hooks/useClinicConfig";
+import { useCreateEligibilityCheck } from "../hooks/useEligibility";
+import { eligibilityHistoryApi } from "../lib/api-client";
 
 interface MantysEligibilityFormProps {
   patientData: PatientData | null;
@@ -104,123 +106,32 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
   // Organization/Clinic Context
   const { user } = useAuth();
-  const selectedOrganizationId: string = "aster-clinics"; // Example: "medcare", "al-noor", "healthhub", "kims", "org1"
-  const selectedClinicId: string = user?.selected_team_id || "92d5da39-36af-4fa2-bde3-3828600d7871"; // Get from auth context
+  const selectedOrganizationId: string = "aster-clinics";
+  const selectedClinicId: string = user?.selected_team_id || "92d5da39-36af-4fa2-bde3-3828600d7871";
 
-  // TPA Config and Doctors State
-  const [tpaConfig, setTpaConfig] = useState<any>(null);
-  const [doctorsList, setDoctorsList] = useState<any[]>([]);
-  const [isDoctorCompulsory, setIsDoctorCompulsory] = useState(false);
-  const [isLoadingTPAConfig, setIsLoadingTPAConfig] = useState(false);
-  const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
+  // TPA Config and Doctors - use TanStack Query hooks
+  const tpaIdentifier = insuranceData?.payer_code || (options && options !== "BOTH" ? options : null);
+  const { data: tpaConfigs, isLoading: isLoadingTPAConfig } = useTPAConfigs(selectedClinicId, { enabled: !!selectedClinicId });
+  const { data: doctorsList = [], isLoading: isLoadingDoctors } = useDoctors(selectedClinicId, { enabled: !!selectedClinicId });
+
+  const tpaConfig = useMemo(() => {
+    if (!tpaConfigs || !tpaIdentifier) return null;
+    let config = tpaConfigs.find((c: any) => c.ins_code === tpaIdentifier);
+    if (!config) config = tpaConfigs.find((c: any) => c.payer_code === tpaIdentifier);
+    if (!config) config = tpaConfigs.find((c: any) => c.tpa_id === tpaIdentifier);
+    return config || null;
+  }, [tpaConfigs, tpaIdentifier]);
+
+  const isDoctorCompulsory = useMemo(() => {
+    if (!tpaConfig) return false;
+    const extraFormFields = (tpaConfig.extra_form_fields || []) as unknown as Array<{ field: string; required?: boolean }>;
+    const doctorField = extraFormFields.find((field) => field.field === "doctor");
+    return doctorField?.required === true;
+  }, [tpaConfig]);
 
   // Previous Searches State
   const [previousSearches, setPreviousSearches] = useState<EligibilityCheckMetadata[]>([]);
   const [loadingPreviousSearches, setLoadingPreviousSearches] = useState(false);
-
-  // ============================================================================
-  // PRE-FILL FORM WITH PATIENT DATA
-  // ============================================================================
-
-  // Load TPA config and doctors when insurance data, options, or clinic ID changes
-  useEffect(() => {
-    if (selectedClinicId) {
-      loadDoctors();
-      // Try to load TPA config - prioritize payer_code, then options
-      const identifier = insuranceData?.payer_code || (options && options !== "BOTH" ? options : null);
-      if (identifier) {
-        loadTPAConfig(identifier);
-      }
-    }
-  }, [selectedClinicId, insuranceData?.payer_code, options]);
-
-  const loadTPAConfig = async (identifier: string) => {
-    if (!selectedClinicId || !identifier) return;
-    // Skip if already loading
-    if (isLoadingTPAConfig) return;
-
-    setIsLoadingTPAConfig(true);
-    try {
-      console.log("🔍 Loading TPA config for identifier:", identifier, "clinic:", selectedClinicId);
-      const response = await cachedFetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
-      if (response.ok) {
-        const data = await response.json();
-        console.log("📦 Received TPA configs:", data.configs?.length || 0, "configs");
-        if (data.configs && Array.isArray(data.configs)) {
-          // Log all config identifiers for debugging
-          console.log("🔑 Available TPA config identifiers:", data.configs.map((c: any) => ({
-            ins_code: c.ins_code,
-            payer_code: c.payer_code,
-            tpa_id: c.tpa_id,
-            tpa_name: c.tpa_name
-          })));
-
-          // Try multiple ways to find the config:
-          // 1. By ins_code (primary identifier)
-          // 2. By payer_code
-          // 3. By tpa_id
-          let config = data.configs.find(
-            (c: any) => c.ins_code === identifier
-          );
-          if (!config) {
-            config = data.configs.find(
-              (c: any) => c.payer_code === identifier
-            );
-          }
-          if (!config) {
-            config = data.configs.find(
-              (c: any) => c.tpa_id === identifier
-            );
-          }
-
-          if (config) {
-            console.log("✅ Found TPA config:", {
-              ins_code: config.ins_code,
-              tpa_name: config.tpa_name,
-              extra_form_fields: config.extra_form_fields
-            });
-            setTpaConfig(config);
-            // Check if doctor is compulsory
-            const extraFormFields = config.extra_form_fields || [];
-            const doctorField = extraFormFields.find((field: any) => field.field === "doctor");
-            const isCompulsory = doctorField?.required === true;
-            console.log("👨‍⚕️ Doctor compulsory:", isCompulsory, "doctorField:", doctorField);
-            setIsDoctorCompulsory(isCompulsory);
-          } else {
-            console.log("⚠️ No TPA config found for identifier:", identifier, "- Available configs:", data.configs.map((c: any) => c.ins_code || c.tpa_id));
-            // Reset if not found
-            setTpaConfig(null);
-            setIsDoctorCompulsory(false);
-          }
-        }
-      } else {
-        console.error("❌ Failed to fetch TPA configs, status:", response.status);
-      }
-    } catch (error) {
-      console.error("❌ Failed to load TPA config:", error);
-    } finally {
-      setIsLoadingTPAConfig(false);
-    }
-  };
-
-  const loadDoctors = async () => {
-    if (!selectedClinicId) return;
-    // Skip if already loading or already loaded
-    if (isLoadingDoctors || doctorsList.length > 0) return;
-
-    setIsLoadingDoctors(true);
-    try {
-      const response = await cachedFetch(`/api/clinic-config/doctors?clinic_id=${selectedClinicId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setDoctorsList(data.configs || []);
-      }
-    } catch (error) {
-      console.error("Failed to load doctors:", error);
-    } finally {
-      setIsLoadingDoctors(false);
-    }
-  };
 
   // Fetch appointment data to get physician information and pre-fill doctor
   useEffect(() => {
@@ -1198,75 +1109,71 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     };
   }, []);
 
-  // Monitor status updates from background polling service
-  // The actual polling happens in the background service
   const monitorTaskStatus = (taskId: string, historyId: string) => {
     setStatusMessage("Task created, monitoring status...");
     setCurrentStatus("pending");
 
-    // Clear any existing interval
     if (monitoringIntervalRef.current) {
       clearInterval(monitoringIntervalRef.current);
     }
 
-    // Check status periodically to update UI
     monitoringIntervalRef.current = setInterval(async () => {
-      const historyItem = await EligibilityHistoryService.getById(historyId);
+      try {
+        const historyItem = await eligibilityHistoryApi.getById(historyId);
 
-      if (!historyItem) {
-        if (monitoringIntervalRef.current) {
-          clearInterval(monitoringIntervalRef.current);
-          monitoringIntervalRef.current = null;
-        }
-        return;
-      }
-
-      // Update UI based on history item status
-      setPollingAttempts(historyItem.pollingAttempts || 0);
-
-      if (historyItem.status === "pending") {
-        setStatusMessage("Navigating Insurance Portal...");
-        setCurrentStatus("pending");
-      } else if (historyItem.status === "processing") {
-        setStatusMessage("Extracting eligibility data from TPA portal...");
-        setCurrentStatus("processing");
-
-        // Update interim results in UI
-        if (historyItem.interimResults) {
-          if (historyItem.interimResults.screenshot) {
-            setInterimScreenshot(historyItem.interimResults.screenshot);
+        if (!historyItem) {
+          if (monitoringIntervalRef.current) {
+            clearInterval(monitoringIntervalRef.current);
+            monitoringIntervalRef.current = null;
           }
-          if (historyItem.interimResults.documents) {
-            setInterimDocuments(
-              historyItem.interimResults.documents.map((doc) => ({
-                id: doc.name,
-                tag: doc.type,
-                url: doc.url,
-              })),
-            );
+          return;
+        }
+
+        setPollingAttempts(historyItem.pollingAttempts || 0);
+
+        if (historyItem.status === "pending") {
+          setStatusMessage("Navigating Insurance Portal...");
+          setCurrentStatus("pending");
+        } else if (historyItem.status === "processing") {
+          setStatusMessage("Extracting eligibility data from TPA portal...");
+          setCurrentStatus("processing");
+
+          if (historyItem.interimResults) {
+            if (historyItem.interimResults.screenshot) {
+              setInterimScreenshot(historyItem.interimResults.screenshot);
+            }
+            if (historyItem.interimResults.documents) {
+              setInterimDocuments(
+                historyItem.interimResults.documents.map((doc: any) => ({
+                  id: doc.name,
+                  tag: doc.type,
+                  url: doc.url,
+                })),
+              );
+            }
+          }
+        } else if (historyItem.status === "complete") {
+          setStatusMessage("Eligibility check complete!");
+          setCurrentStatus("complete");
+          setMantysResponse(historyItem.result as MantysEligibilityResponse);
+          setShowResults(true);
+          setIsMinimized(false);
+          if (monitoringIntervalRef.current) {
+            clearInterval(monitoringIntervalRef.current);
+            monitoringIntervalRef.current = null;
+          }
+        } else if (historyItem.status === "error") {
+          setApiError(historyItem.error || "Eligibility check failed");
+          setIsMinimized(false);
+          if (monitoringIntervalRef.current) {
+            clearInterval(monitoringIntervalRef.current);
+            monitoringIntervalRef.current = null;
           }
         }
-      } else if (historyItem.status === "complete") {
-        setStatusMessage("Eligibility check complete!");
-        setCurrentStatus("complete");
-        setMantysResponse(historyItem.result);
-        setShowResults(true);
-        setIsMinimized(false); // Reopen modal when complete to show results
-        // Keep isSubmitting true so modal stays open to show completion status
-        if (monitoringIntervalRef.current) {
-          clearInterval(monitoringIntervalRef.current);
-          monitoringIntervalRef.current = null;
-        }
-      } else if (historyItem.status === "error") {
-        setApiError(historyItem.error || "Eligibility check failed");
-        setIsMinimized(false); // Reopen modal when error occurs
-        // Keep isSubmitting true so modal stays open to show error
-        if (monitoringIntervalRef.current) {
-          clearInterval(monitoringIntervalRef.current);
-          monitoringIntervalRef.current = null;
-        }
+      } catch (error) {
+        console.error("Error monitoring task status:", error);
       }
-    }, 2000); // Check every 2 seconds for UI updates (reduced from 500ms to reduce API load)
+    }, 2000);
   };
 
   const handleSubmit = async () => {
@@ -1389,13 +1296,11 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       setTaskId(createdTaskId);
       setStatusMessage("Task created, checking status...");
 
-      // Add to history (use enriched data if available)
-      // Store the actual numeric patient ID if available
       const actualPatientId = enrichedPatientData?.patient_id?.toString();
 
-      const historyItem = await EligibilityHistoryService.add({
+      const historyItem = await eligibilityHistoryApi.create({
         clinicId: selectedClinicId,
-        patientId: actualPatientId || emiratesId, // Use patient ID if available, fall back to Emirates ID
+        patientId: actualPatientId || emiratesId,
         taskId: createdTaskId,
         patientName:
           name ||

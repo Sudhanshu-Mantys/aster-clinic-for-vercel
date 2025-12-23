@@ -1,30 +1,27 @@
-import React, { useState, useEffect } from "react";
-import {
-  AppointmentData,
-  PatientData,
-  InsuranceData,
-  getInsuranceDetails,
-} from "../lib/api";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "./ui/card";
+import React, { useState, useMemo, useCallback } from "react";
 import { Drawer } from "./ui/drawer";
 import { InsuranceDetailsSection } from "./InsuranceDetailsSection";
-import {
-  AppointmentsFilterForm,
-  AppointmentFilters,
-} from "./AppointmentsFilterForm";
+import { AppointmentsFilterForm, AppointmentFilters } from "./AppointmentsFilterForm";
 import { AppointmentsTable } from "./AppointmentsTable";
-import { EligibilityCheckMetadata } from "../lib/redis-eligibility-mapping";
-import { EligibilityHistoryService, EligibilityHistoryItem } from "../utils/eligibilityHistory";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
-import { fetchWithTimeout } from "../lib/request-cache";
 import { useAuth } from "../contexts/AuthContext";
+import {
+  useTodaysAppointments,
+  useAppointmentSearch,
+  formatDateForApi,
+  type AppointmentData,
+} from "../hooks/useAppointments";
+import { useInsuranceDetails, usePatientContext } from "../hooks/usePatient";
+import {
+  useEligibilityByPatient,
+  useEligibilityByMPI,
+  useEligibilityHistoryByTaskId,
+  useEligibilityTaskStatus,
+  type EligibilityHistoryItem,
+} from "../hooks/useEligibility";
+import type { PatientData, InsuranceData } from "../lib/api-client";
+import type { MantysEligibilityResponse } from "../types/mantys";
 
 interface TodaysAppointmentsListProps {
   onRefresh?: () => void;
@@ -36,386 +33,159 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const { user } = useAuth();
   const selectedClinicId = user?.selected_team_id || "";
 
-  const [appointments, setAppointments] = useState<AppointmentData[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedAppointment, setSelectedAppointment] =
-    useState<AppointmentData | null>(null);
-  const [insuranceDetails, setInsuranceDetails] = useState<InsuranceData[]>([]);
-  const [isLoadingInsurance, setIsLoadingInsurance] = useState(false);
-  const [insuranceError, setInsuranceError] = useState<string | null>(null);
-  const [expandedInsurance, setExpandedInsurance] = useState<Set<number>>(
-    new Set(),
-  );
-  const [showDrawer, setShowDrawer] = useState(false);
   const [currentFilters, setCurrentFilters] = useState<AppointmentFilters | null>(null);
-  const [previousSearches, setPreviousSearches] = useState<EligibilityCheckMetadata[]>([]);
-  const [loadingPreviousSearches, setLoadingPreviousSearches] = useState(false);
-  const [selectedEligibilityItem, setSelectedEligibilityItem] = useState<EligibilityHistoryItem | null>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentData | null>(null);
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [expandedInsurance, setExpandedInsurance] = useState<Set<number>>(new Set());
+  const [isPreviousSearchesExpanded, setIsPreviousSearchesExpanded] = useState(false);
+
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showEligibilityDrawer, setShowEligibilityDrawer] = useState(false);
   const [showEligibilityModal, setShowEligibilityModal] = useState(false);
-  const [loadingEligibilityItem, setLoadingEligibilityItem] = useState(false);
-  const [freshEligibilityResult, setFreshEligibilityResult] = useState<any>(null);
-  const [isPreviousSearchesExpanded, setIsPreviousSearchesExpanded] = useState(false);
-  const [todaySearchesResults, setTodaySearchesResults] = useState<Record<string, { copay?: string; deductible?: string; isEligible?: boolean }>>({});
-  const [emiratesIdFromRedis, setEmiratesIdFromRedis] = useState<string | null>(null);
 
-  const fetchAppointments = async (filters?: AppointmentFilters) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      let url = "/api/appointments/today";
+  const today = new Date();
+  const todayStr = formatDateForApi(today);
 
-      // If filters are provided, add them as query parameters
-      if (filters) {
-        const params = new URLSearchParams();
-        Object.entries(filters).forEach(([key, value]) => {
-          if (value !== null && value !== undefined && value !== "") {
-            params.append(key, String(value));
-          }
-        });
-        url += `?${params.toString()}`;
-      }
+  const {
+    data: appointments = [],
+    isLoading,
+    error,
+    refetch,
+  } = useTodaysAppointments(
+    currentFilters?.fromDate || todayStr,
+    currentFilters?.toDate || todayStr,
+    currentFilters?.customerSiteId,
+    { refetchInterval: 60000 }
+  );
 
-      const response = await fetch(url);
-      const data = await response.json();
+  const { data: patientContext } = usePatientContext(
+    {
+      appointmentId: selectedAppointment?.appointment_id?.toString(),
+      mpi: selectedAppointment?.mpi,
+    },
+    { enabled: !!selectedAppointment }
+  );
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to fetch appointments");
-      }
+  const {
+    data: insuranceDetails = [],
+    isLoading: isLoadingInsurance,
+    error: insuranceError,
+  } = useInsuranceDetails(
+    {
+      patientId: selectedAppointment?.patient_id || 0,
+      apntId: selectedAppointment?.appointment_id,
+      encounterId: 0,
+      customerId: 1,
+      primaryInsPolicyId: null,
+      siteId: 1,
+      isDiscard: 0,
+      hasTopUpCard: 0,
+    },
+    { enabled: !!selectedAppointment?.patient_id }
+  );
 
-      setAppointments(data.body?.Data || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
-      setAppointments([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const { data: eligibilityByPatient = [] } = useEligibilityByPatient(
+    selectedAppointment?.patient_id?.toString() || "",
+    !!selectedAppointment?.patient_id
+  );
 
-  useEffect(() => {
-    fetchAppointments();
-  }, []);
+  const { data: eligibilityByMPI = [] } = useEligibilityByMPI(
+    selectedAppointment?.mpi || "",
+    !!selectedAppointment?.mpi && eligibilityByPatient.length === 0
+  );
 
-  const handleSearch = (filters: AppointmentFilters) => {
-    setCurrentFilters(filters);
-    fetchAppointments(filters);
-  };
+  const previousSearches = useMemo(() => {
+    if (eligibilityByPatient.length > 0) return eligibilityByPatient;
+    return eligibilityByMPI;
+  }, [eligibilityByPatient, eligibilityByMPI]);
 
-  const handleClear = () => {
-    setCurrentFilters(null);
-    fetchAppointments();
-  };
+  const { data: selectedEligibilityItem } = useEligibilityHistoryByTaskId(
+    selectedTaskId || "",
+    !!selectedTaskId
+  );
 
-  const handleRefresh = () => {
-    fetchAppointments(currentFilters || undefined);
-    onRefresh?.();
-  };
+  const { data: freshTaskResult } = useEligibilityTaskStatus(selectedTaskId || "", {
+    enabled: !!selectedTaskId && showEligibilityDrawer,
+    refetchInterval: false,
+  });
 
-  const handleAppointmentClick = async (appointment: AppointmentData) => {
-    setSelectedAppointment(appointment);
-    setShowDrawer(true);
-    setInsuranceDetails([]);
-    setInsuranceError(null);
-    setExpandedInsurance(new Set());
-    setPreviousSearches([]);
-    setEmiratesIdFromRedis(null);
+  const emiratesIdFromContext = patientContext?.nationality_id || null;
 
-    // Fetch Emirates ID from appointment Redis (nationality_id)
-    if (appointment.appointment_id) {
-      try {
-        const contextResponse = await fetchWithTimeout(
-          "/api/patient/context",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              appointmentId: appointment.appointment_id,
-              mpi: appointment.mpi,
-            }),
-          },
-          3000 // 3 second timeout
-        );
+  const { todaySearches, olderSearches } = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
 
-        if (contextResponse.ok) {
-          const context = await contextResponse.json();
-          if (context.nationality_id) {
-            setEmiratesIdFromRedis(context.nationality_id);
-            console.log("✅ Fetched Emirates ID from appointment Redis (nationality_id):", context.nationality_id);
-          }
-        }
-      } catch (error) {
-        console.warn("⚠️ Could not fetch appointment context from Redis:", error);
-      }
-    }
+    const todayItems: typeof previousSearches = [];
+    const olderItems: typeof previousSearches = [];
 
-    // Fetch insurance details for the patient
-    if (appointment.patient_id) {
-      setIsLoadingInsurance(true);
-      try {
-        const response = await getInsuranceDetails({
-          patientId: appointment.patient_id,
-          apntId: appointment.appointment_id,
-          encounterId: 0,
-          customerId: 1,
-          primaryInsPolicyId: null,
-          siteId: 1,
-          isDiscard: 0,
-          hasTopUpCard: 0,
-        });
-
-        if (response && response.body && response.body.Data) {
-          const insurances = response.body.Data;
-          setInsuranceDetails(insurances);
-
-          // Auto-expand active and valid insurance policies, keep expired collapsed
-          const activeValidIds = new Set<number>();
-          insurances.forEach((ins, idx) => {
-            const key = ins.patient_insurance_tpa_policy_id || idx;
-            const isActive = ins.insurance_status?.toLowerCase() === "active";
-            const isValid = ins.is_valid === 1;
-            // Only expand if active AND valid
-            if (isActive && isValid) {
-              activeValidIds.add(key);
-            }
-          });
-          setExpandedInsurance(activeValidIds);
-        } else {
-          setInsuranceDetails([]);
-        }
-      } catch (err) {
-        console.error("Insurance fetch error:", err);
-        const errorMessage = err instanceof Error
-          ? err.message
-          : "Failed to fetch insurance details";
-        setInsuranceError(errorMessage);
-        // Don't throw - just log and set error state
-        // This prevents the error from crashing the UI
-      } finally {
-        setIsLoadingInsurance(false);
-      }
-    }
-
-    // Fetch previous eligibility searches
-    const fetchPreviousSearches = async () => {
-      const patientId = appointment.patient_id;
-      const mpi = appointment.mpi;
-
-      if (!patientId && !mpi) {
-        setPreviousSearches([]);
+    previousSearches.forEach((search) => {
+      if (!search.createdAt) {
+        olderItems.push(search);
         return;
       }
-
-      setLoadingPreviousSearches(true);
-      try {
-        let searches: EligibilityCheckMetadata[] = [];
-
-        // Try by patientId first
-        if (patientId) {
-          const response = await fetch(`/api/eligibility/get-by-patient-id?patientId=${patientId}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.data) {
-              searches = data.data;
-            }
-          }
-        }
-
-        // If no results and we have mpi, try by mpi
-        if (searches.length === 0 && mpi) {
-          const response = await fetch(`/api/eligibility/get-by-mpi?mpi=${mpi}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.data) {
-              searches = data.data;
-            }
-          }
-        }
-
-        setPreviousSearches(searches);
-
-        // Fetch eligibility results for today's searches to get copay/deductible and eligibility status
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todaySearches = searches.filter((search) => {
-          if (!search.createdAt) return false;
-          const searchDate = new Date(search.createdAt);
-          searchDate.setHours(0, 0, 0, 0);
-          return searchDate.getTime() === today.getTime();
-        });
-
-        // Fetch results for today's searches (including complete and error statuses that might have results)
-        const resultsMap: Record<string, { copay?: string; deductible?: string; isEligible?: boolean }> = {};
-        for (const search of todaySearches) {
-          // Only fetch results for complete or error statuses (they might have result data)
-          if (search.status === "complete" || search.status === "error") {
-            try {
-              const historyItem = await EligibilityHistoryService.getByTaskId(search.taskId);
-              if (historyItem?.result?.data) {
-                const data = historyItem.result.data;
-                // Extract eligibility status
-                const isEligible = data.is_eligible ?? false;
-
-                // Extract copay and deductible from the first copay detail
-                const copayDetail = data.copay_details_to_fill?.[0];
-                if (copayDetail?.values_to_fill) {
-                  const values = copayDetail.values_to_fill;
-                  // Try to find copay percentage (usually in MEDICINES or CONSULTATION)
-                  const medicineCopay = values.MEDICINES?.copay;
-                  const consultationCopay = values.CONSULTATION?.copay;
-                  const copayValue = medicineCopay || consultationCopay || "0";
-
-                  // Try to find deductible
-                  const medicineDeductible = values.MEDICINES?._maxDeductible || values.MEDICINES?.deductible;
-                  const consultationDeductible = values.CONSULTATION?._maxDeductible || values.CONSULTATION?.deductible;
-                  const deductibleValue = medicineDeductible || consultationDeductible || "0";
-
-                  resultsMap[search.taskId] = {
-                    copay: copayValue,
-                    deductible: deductibleValue,
-                    isEligible: isEligible,
-                  };
-                } else {
-                  // Store eligibility even if copay details are missing
-                  resultsMap[search.taskId] = {
-                    isEligible: isEligible,
-                  };
-                }
-              }
-            } catch (error) {
-              console.error(`Error fetching result for task ${search.taskId}:`, error);
-            }
-          }
-        }
-        setTodaySearchesResults(resultsMap);
-      } catch (error) {
-        console.error("Error fetching previous searches:", error);
-        setPreviousSearches([]);
-      } finally {
-        setLoadingPreviousSearches(false);
+      const searchDate = new Date(search.createdAt);
+      searchDate.setHours(0, 0, 0, 0);
+      if (searchDate.getTime() === todayStart.getTime()) {
+        todayItems.push(search);
+      } else {
+        olderItems.push(search);
       }
-    };
+    });
 
-    fetchPreviousSearches();
-  };
+    return { todaySearches: todayItems, olderSearches: olderItems };
+  }, [previousSearches]);
 
-  const handleCloseDrawer = () => {
+  const handleSearch = useCallback((filters: AppointmentFilters) => {
+    setCurrentFilters(filters);
+  }, []);
+
+  const handleClear = useCallback(() => {
+    setCurrentFilters(null);
+  }, []);
+
+  const handleRefresh = useCallback(() => {
+    refetch();
+    onRefresh?.();
+  }, [refetch, onRefresh]);
+
+  const handleAppointmentClick = useCallback((appointment: AppointmentData) => {
+    setSelectedAppointment(appointment);
+    setShowDrawer(true);
+    setExpandedInsurance(new Set());
+  }, []);
+
+  const handleCloseDrawer = useCallback(() => {
     setShowDrawer(false);
     setTimeout(() => {
       setSelectedAppointment(null);
-      setInsuranceDetails([]);
-      setInsuranceError(null);
       setExpandedInsurance(new Set());
-      setEmiratesIdFromRedis(null);
     }, 300);
-  };
+  }, []);
 
-  const handlePreviousSearchClick = async (search: EligibilityCheckMetadata) => {
-    setLoadingEligibilityItem(true);
-    setFreshEligibilityResult(null);
-
-    try {
-      // Fetch the eligibility history item by taskId
-      const historyItem = await EligibilityHistoryService.getByTaskId(search.taskId);
-
-      if (historyItem) {
-        setSelectedEligibilityItem(historyItem);
-
-        // Use drawer for completed checks, modal for active checks
-        if (historyItem.status === "complete" && historyItem.result) {
-          // Only fetch fresh result from API if we don't have complete data in localStorage
-          // This reduces unnecessary API calls
-          if (historyItem.result?.data) {
-            // We already have the result data, use cached result directly
-            setFreshEligibilityResult(null); // Will use cached result from historyItem
-          } else {
-            // Only fetch from API if result data is missing
-            try {
-              const response = await fetch('/api/mantys/check-status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ task_id: search.taskId }),
-              });
-
-              if (response.ok) {
-                const apiResponse = await response.json();
-                if (apiResponse.status === 'complete' && apiResponse.result) {
-                  if (apiResponse.result.data) {
-                    setFreshEligibilityResult(apiResponse.result);
-                  }
-                }
-              }
-            } catch (error) {
-              console.error('Error fetching fresh result:', error);
-            }
-          }
-          setShowEligibilityDrawer(true);
-        } else {
-          setShowEligibilityModal(true);
-        }
-      } else {
-        // If not found in history, try to fetch from API directly
-        if (search.status === "complete") {
-          try {
-            const response = await fetch('/api/mantys/check-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ task_id: search.taskId }),
-            });
-
-            if (response.ok) {
-              const apiResponse = await response.json();
-              if (apiResponse.status === 'complete' && apiResponse.result) {
-                // Create a synthetic history item
-                const syntheticItem: EligibilityHistoryItem = {
-                  id: search.taskId,
-                  clinicId: selectedClinicId,
-                  taskId: search.taskId,
-                  patientId: search.patientId.toString(),
-                  patientName: search.patientName,
-                  patientMPI: search.mpi,
-                  status: "complete",
-                  createdAt: search.createdAt,
-                  completedAt: search.completedAt,
-                  result: apiResponse.result,
-                };
-                setSelectedEligibilityItem(syntheticItem);
-                setFreshEligibilityResult(apiResponse.result);
-                setShowEligibilityDrawer(true);
-              }
-            }
-          } catch (error) {
-            console.error('Error fetching eligibility result:', error);
-            alert('Could not load eligibility check details. It may have expired or been deleted.');
-          }
-        } else {
-          alert('This eligibility check is still in progress or not available.');
-        }
-      }
-    } catch (error) {
-      console.error('Error loading eligibility item:', error);
-      alert('Error loading eligibility check details.');
-    } finally {
-      setLoadingEligibilityItem(false);
+  const handlePreviousSearchClick = useCallback((search: any) => {
+    setSelectedTaskId(search.taskId);
+    if (search.status === "complete") {
+      setShowEligibilityDrawer(true);
+    } else {
+      setShowEligibilityModal(true);
     }
-  };
+  }, []);
 
-  const handleCloseEligibilityDrawer = () => {
+  const handleCloseEligibilityDrawer = useCallback(() => {
     setShowEligibilityDrawer(false);
     setTimeout(() => {
-      setSelectedEligibilityItem(null);
-      setFreshEligibilityResult(null);
+      setSelectedTaskId(null);
     }, 300);
-  };
+  }, []);
 
-  const handleCloseEligibilityModal = () => {
+  const handleCloseEligibilityModal = useCallback(() => {
     setShowEligibilityModal(false);
     setTimeout(() => {
-      setSelectedEligibilityItem(null);
+      setSelectedTaskId(null);
     }, 300);
-  };
+  }, []);
 
-  const toggleInsuranceExpanded = (insuranceId: number) => {
+  const toggleInsuranceExpanded = useCallback((insuranceId: number) => {
     setExpandedInsurance((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(insuranceId)) {
@@ -425,41 +195,106 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       }
       return newSet;
     });
+  }, []);
+
+  const expandedInsuranceWithDefaults = useMemo(() => {
+    if (expandedInsurance.size > 0) return expandedInsurance;
+    const activeValidIds = new Set<number>();
+    insuranceDetails.forEach((ins, idx) => {
+      const key = ins.patient_insurance_tpa_policy_id || idx;
+      const isActive = ins.insurance_status?.toLowerCase() === "active";
+      const isValid = ins.is_valid === 1;
+      if (isActive && isValid) {
+        activeValidIds.add(key);
+      }
+    });
+    return activeValidIds;
+  }, [insuranceDetails, expandedInsurance]);
+
+  const getPatientDataFromAppointment = useCallback(
+    (apt: AppointmentData | null): PatientData | null => {
+      if (!apt) return null;
+      const nameParts = apt.full_name?.split(" ") || [];
+      const emiratesId = emiratesIdFromContext || (apt as any).nationality_id;
+      return {
+        patient_id: apt.patient_id,
+        mpi: apt.mpi,
+        firstname: nameParts[0] || "",
+        middlename: nameParts.slice(1, -1).join(" ") || "",
+        lastname: nameParts[nameParts.length - 1] || "",
+        dob: apt.dob || "",
+        age: apt.age || "",
+        gender: apt.gender || "",
+        phone: apt.mobile_phone || "",
+        email: apt.email || "",
+        appointment_id: apt.appointment_id,
+        encounter_id: (apt as any).encounter_id,
+        uid_value: emiratesId || undefined,
+      } as PatientData;
+    },
+    [emiratesIdFromContext]
+  );
+
+  const getTPAName = (code: string) => {
+    const tpaMap: Record<string, string> = {
+      INS010: "AXA INSURANCE - GULF",
+      TPA001: "Neuron",
+      TPA002: "NextCare",
+      TPA003: "Al Madallah",
+      TPA004: "NAS",
+      TPA010: "FMC (First Med)",
+      TPA023: "Daman Thiqa",
+      TPA036: "Mednet",
+      TPA037: "Lifeline",
+      INS026: "Daman",
+      INS017: "ADNIC",
+    };
+    return tpaMap[code] || code;
   };
 
-  // Convert AppointmentData to PatientData format for InsuranceDetailsSection
-  const getPatientDataFromAppointment = (
-    apt: AppointmentData | null,
-  ): PatientData | null => {
-    if (!apt) return null;
+  const getSearchStatusColors = (search: any) => {
+    const isComplete = search.status === "complete";
+    const isError = search.status === "error";
 
-    // Create a minimal PatientData object from appointment data
-    const nameParts = apt.full_name?.split(" ") || [];
-    // Use nationality_id from appointment as uid_value for Emirates ID
-    // This ensures the form can use it immediately, while still preferring Redis value if available
-    // Prefer Redis value if available (fetched asynchronously), otherwise use appointment's nationality_id
-    const emiratesId = emiratesIdFromRedis || apt.nationality_id;
+    if (isError) {
+      return {
+        bgColor: "bg-yellow-50",
+        borderColor: "border-yellow-300",
+        hoverBgColor: "hover:bg-yellow-100",
+        iconBgColor: "bg-yellow-500",
+        iconPath: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
+      };
+    }
+
+    if (isComplete) {
+      return {
+        bgColor: "bg-green-50",
+        borderColor: "border-green-300",
+        hoverBgColor: "hover:bg-green-100",
+        iconBgColor: "bg-green-500",
+        iconPath: "M5 13l4 4L19 7",
+      };
+    }
+
     return {
-      patient_id: apt.patient_id,
-      mpi: apt.mpi,
-      firstname: nameParts[0] || "",
-      middlename: nameParts.slice(1, -1).join(" ") || "",
-      lastname: nameParts[nameParts.length - 1] || "",
-      dob: apt.dob || "",
-      age: apt.age || "",
-      gender: apt.gender || "",
-      phone: apt.mobile_phone || "",
-      email: apt.email || "",
-      appointment_id: apt.appointment_id,
-      encounter_id: (apt as any).encounter_id, // May be in the data
-      uid_value: emiratesId || undefined, // Set nationality_id as uid_value so form can use it
-    } as PatientData;
+      bgColor: "bg-yellow-50",
+      borderColor: "border-yellow-300",
+      hoverBgColor: "hover:bg-yellow-100",
+      iconBgColor: "bg-yellow-500",
+      iconPath: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
+    };
   };
+
+  const resultData = useMemo(() => {
+    if (freshTaskResult?.result) return freshTaskResult.result as MantysEligibilityResponse;
+    if (selectedEligibilityItem?.result)
+      return selectedEligibilityItem.result as MantysEligibilityResponse;
+    return null;
+  }, [freshTaskResult, selectedEligibilityItem]);
 
   return (
     <>
       <div className="space-y-6">
-        {/* Filter Form */}
         <AppointmentsFilterForm
           onSearch={handleSearch}
           onClear={handleClear}
@@ -467,7 +302,6 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           isLoading={isLoading}
         />
 
-        {/* Error Display */}
         {error && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-start">
@@ -485,10 +319,10 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                 />
               </svg>
               <div className="flex-1">
-                <h4 className="text-sm font-medium text-red-900">
-                  Error Loading Appointments
-                </h4>
-                <p className="text-sm text-red-700 mt-1">{error}</p>
+                <h4 className="text-sm font-medium text-red-900">Error Loading Appointments</h4>
+                <p className="text-sm text-red-700 mt-1">
+                  {error instanceof Error ? error.message : "An error occurred"}
+                </p>
                 <button
                   onClick={handleRefresh}
                   className="mt-2 text-sm text-red-600 hover:text-red-700 font-medium underline"
@@ -500,7 +334,6 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           </div>
         )}
 
-        {/* Summary Stats - Compact */}
         {!error && (
           <div className="flex items-center gap-6 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
             <div className="flex items-center gap-2">
@@ -510,22 +343,18 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
             <div className="h-6 w-px bg-gray-300"></div>
             <div className="flex items-center gap-2">
               <span className="text-gray-600">Last Updated</span>
-              <span className="font-medium text-gray-900">
-                {new Date().toLocaleTimeString()}
-              </span>
+              <span className="font-medium text-gray-900">{new Date().toLocaleTimeString()}</span>
             </div>
             <div className="h-6 w-px bg-gray-300"></div>
             <div className="flex items-center gap-2">
               <span className="text-gray-600">Date Range</span>
               <span className="font-medium text-gray-900">
-                {currentFilters?.fromDate || "Today"} -{" "}
-                {currentFilters?.toDate || "Today"}
+                {currentFilters?.fromDate || "Today"} - {currentFilters?.toDate || "Today"}
               </span>
             </div>
           </div>
         )}
 
-        {/* Appointments Table */}
         <AppointmentsTable
           appointments={appointments}
           isLoading={isLoading}
@@ -533,7 +362,6 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         />
       </div>
 
-      {/* Drawer for appointment details and insurance */}
       <Drawer
         isOpen={showDrawer}
         onClose={handleCloseDrawer}
@@ -546,17 +374,12 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       >
         {selectedAppointment && (
           <div className="p-6 space-y-6">
-            {/* Patient & Appointment Information */}
             <div className="border border-gray-200 rounded-lg p-3">
-              <h3 className="font-semibold text-gray-900 mb-2 text-sm">
-                Patient Details
-              </h3>
+              <h3 className="font-semibold text-gray-900 mb-2 text-sm">Patient Details</h3>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-gray-700">Name:</span>
-                  <span className="text-gray-900">
-                    {selectedAppointment.full_name}
-                  </span>
+                  <span className="text-gray-900">{selectedAppointment.full_name}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-gray-700">MPI:</span>
@@ -564,16 +387,12 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-gray-700">Patient ID:</span>
-                  <span className="text-gray-900">
-                    {selectedAppointment.patient_id}
-                  </span>
+                  <span className="text-gray-900">{selectedAppointment.patient_id}</span>
                 </div>
                 {selectedAppointment.mobile_phone && (
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium text-gray-700">Phone:</span>
-                    <span className="text-gray-900">
-                      {selectedAppointment.mobile_phone}
-                    </span>
+                    <span className="text-gray-900">{selectedAppointment.mobile_phone}</span>
                   </div>
                 )}
                 {selectedAppointment.email && (
@@ -584,9 +403,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                 )}
                 {selectedAppointment.dob && (
                   <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">
-                      Date of Birth:
-                    </span>
+                    <span className="font-medium text-gray-700">Date of Birth:</span>
                     <span className="text-gray-900">{selectedAppointment.dob}</span>
                   </div>
                 )}
@@ -599,178 +416,161 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                 {selectedAppointment.gender && (
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium text-gray-700">Gender:</span>
-                    <span className="text-gray-900">
-                      {selectedAppointment.gender}
-                    </span>
+                    <span className="text-gray-900">{selectedAppointment.gender}</span>
                   </div>
                 )}
-                {(emiratesIdFromRedis || selectedAppointment.nationality_id) && (
+                {(emiratesIdFromContext || (selectedAppointment as any).nationality_id) && (
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium text-gray-700">Emirates ID:</span>
                     <span className="text-gray-900">
-                      {emiratesIdFromRedis || selectedAppointment.nationality_id}
+                      {emiratesIdFromContext || (selectedAppointment as any).nationality_id}
                     </span>
                   </div>
                 )}
                 <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-gray-700">
-                    Appointment ID:
-                  </span>
-                  <span className="text-gray-900">
-                    {selectedAppointment.appointment_id}
-                  </span>
+                  <span className="font-medium text-gray-700">Appointment ID:</span>
+                  <span className="text-gray-900">{selectedAppointment.appointment_id}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-gray-700">Date:</span>
-                  <span className="text-gray-900">
-                    {selectedAppointment.appointment_date}
-                  </span>
+                  <span className="text-gray-900">{selectedAppointment.appointment_date}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-gray-700">Time:</span>
-                  <span className="text-gray-900">
-                    {selectedAppointment.appointment_time}
-                  </span>
+                  <span className="text-gray-900">{selectedAppointment.appointment_time}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-gray-700">Status:</span>
-                  <span className="text-gray-900">
-                    {selectedAppointment.appointment_status}
-                  </span>
+                  <span className="text-gray-900">{selectedAppointment.appointment_status}</span>
                 </div>
                 {selectedAppointment.physician_name && (
                   <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">
-                      Physician:
-                    </span>
-                    <span className="text-gray-900">
-                      {selectedAppointment.physician_name}
-                    </span>
+                    <span className="font-medium text-gray-700">Physician:</span>
+                    <span className="text-gray-900">{selectedAppointment.physician_name}</span>
                   </div>
                 )}
                 {selectedAppointment.specialisation_name && (
                   <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">
-                      Specialization:
-                    </span>
-                    <span className="text-gray-900">
-                      {selectedAppointment.specialisation_name}
-                    </span>
+                    <span className="font-medium text-gray-700">Specialization:</span>
+                    <span className="text-gray-900">{selectedAppointment.specialisation_name}</span>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Previous Eligibility Searches */}
-            {loadingPreviousSearches ? (
-              <div className="bg-blue-50 border-2 border-blue-300 rounded-lg px-4 py-3 shadow-sm">
-                <p className="text-sm text-blue-700 font-medium">Loading previous searches...</p>
-              </div>
-            ) : previousSearches.length > 0 ? (() => {
-              // Separate today's searches from older ones
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
+            {previousSearches.length > 0 && (
+              <div className="mb-4 space-y-4">
+                {todaySearches.length > 0 && (
+                  <div>
+                    <div className="bg-gray-100 px-4 py-2 rounded-t">
+                      <h3 className="text-sm font-bold text-gray-900">
+                        Eligibility Checks Today ({todaySearches.length})
+                      </h3>
+                    </div>
+                    <div className="bg-gray-50 border-2 border-gray-200 rounded-b p-3 space-y-3">
+                      {todaySearches.map((search: any) => {
+                        const date = search.createdAt ? new Date(search.createdAt) : null;
+                        const timeString =
+                          date && !isNaN(date.getTime())
+                            ? date.toLocaleTimeString("en-US", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                hour12: true,
+                              })
+                            : "";
 
-              const todaySearches = previousSearches.filter((search) => {
-                if (!search.createdAt) return false;
-                const searchDate = new Date(search.createdAt);
-                searchDate.setHours(0, 0, 0, 0);
-                return searchDate.getTime() === today.getTime();
-              });
+                        const colors = getSearchStatusColors(search);
+                        const tpaCode = search.tpaCode || search.insurancePayer || "";
 
-              const olderSearches = previousSearches.filter((search) => {
-                if (!search.createdAt) return true;
-                const searchDate = new Date(search.createdAt);
-                searchDate.setHours(0, 0, 0, 0);
-                return searchDate.getTime() < today.getTime();
-              });
+                        return (
+                          <div
+                            key={search.taskId}
+                            onClick={() => handlePreviousSearchClick(search)}
+                            className={`${colors.bgColor} border-2 ${colors.borderColor} rounded-lg p-4 cursor-pointer ${colors.hoverBgColor} transition-colors`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div
+                                className={`flex-shrink-0 w-8 h-8 rounded-full ${colors.iconBgColor} flex items-center justify-center`}
+                              >
+                                <svg
+                                  className="w-5 h-5 text-white"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={3}
+                                    d={colors.iconPath}
+                                  />
+                                </svg>
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-semibold text-gray-900 mb-1">
+                                  Eligibility Verification History
+                                </div>
+                                {timeString && (
+                                  <div className="text-sm text-gray-700 mb-2">
+                                    Verified Today at {timeString}
+                                  </div>
+                                )}
+                                <div className="font-bold text-gray-900 text-base mb-2">
+                                  {getTPAName(tpaCode)} ({tpaCode})
+                                </div>
+                                <div className="text-sm text-gray-700">
+                                  Status:{" "}
+                                  {search.status === "complete"
+                                    ? "Active"
+                                    : search.status === "error"
+                                      ? "failed"
+                                      : search.status}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
-              return (
-                <div className="mb-4 space-y-4">
-                  {/* Eligibility Checks Today Section */}
-                  {todaySearches.length > 0 && (
-                    <div>
-                      <div className="bg-gray-100 px-4 py-2 rounded-t">
-                        <h3 className="text-sm font-bold text-gray-900">
-                          Eligibility Checks Today ({todaySearches.length})
-                        </h3>
-                      </div>
-                      <div className="bg-gray-50 border-2 border-gray-200 rounded-b p-3 space-y-3">
-                        {todaySearches.map((search) => {
-                          const date = search.createdAt ? new Date(search.createdAt) : null;
-                          const timeString = date && !isNaN(date.getTime())
-                            ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-                            : '';
-
-                          // Get TPA name from code (you may want to create a mapping)
-                          const getTPAName = (code: string) => {
-                            const tpaMap: Record<string, string> = {
-                              'INS010': 'AXA INSURANCE - GULF',
-                              'TPA001': 'Neuron',
-                              'TPA002': 'NextCare',
-                              'TPA003': 'Al Madallah',
-                              'TPA004': 'NAS',
-                              'TPA010': 'FMC (First Med)',
-                              'TPA023': 'Daman Thiqa',
-                              'TPA036': 'Mednet',
-                              'TPA037': 'Lifeline',
-                              'INS026': 'Daman',
-                              'INS017': 'ADNIC',
-                            };
-                            return tpaMap[code] || code;
-                          };
-
-                          // Determine colors based on status and eligibility
-                          const result = todaySearchesResults[search.taskId];
-                          const isComplete = search.status === "complete";
-                          const isError = search.status === "error";
-                          const isEligible = result?.isEligible ?? false;
-                          // If status is complete and we have copay/deductible data, it means the policy is active
-                          // Even if isEligible is false, if we have copay/deductible, the policy is active
-                          const hasActivePolicyData = isComplete && (result?.copay || result?.deductible);
-                          const isPendingOrProcessing = search.status === "pending" || search.status === "processing";
-
-                          // Color logic: error → yellow, pending/processing → yellow, complete → green (default), complete+explicitly not eligible → red
-                          let bgColor = "bg-yellow-50";
-                          let borderColor = "border-yellow-300";
-                          let hoverBgColor = "hover:bg-yellow-100";
-                          let iconBgColor = "bg-yellow-500";
-                          let iconPath = "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"; // Clock icon for pending/default
-
-                          if (isError) {
-                            // Error status always shows yellow
-                            bgColor = "bg-yellow-50";
-                            borderColor = "border-yellow-300";
-                            hoverBgColor = "hover:bg-yellow-100";
-                            iconBgColor = "bg-yellow-500";
-                            iconPath = "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"; // Clock icon
-                          } else if (isComplete) {
-                            // Complete status means the check succeeded and shows "Active" with copay/deductible
-                            // Default to green unless we explicitly know it's not eligible AND has no policy data
-                            // If result is not loaded yet, default to green (since complete status means active policy)
-                            if (result !== undefined) {
-                              // We have result data - check if explicitly not eligible and no policy data
-                              if (!isEligible && !hasActivePolicyData) {
-                                bgColor = "bg-red-50";
-                                borderColor = "border-red-300";
-                                hoverBgColor = "hover:bg-red-100";
-                                iconBgColor = "bg-red-500";
-                                iconPath = "M6 18L18 6M6 6l12 12"; // X icon
-                              } else {
-                                // Has policy data or is eligible - show green
-                                bgColor = "bg-green-50";
-                                borderColor = "border-green-300";
-                                hoverBgColor = "hover:bg-green-100";
-                                iconBgColor = "bg-green-500";
-                                iconPath = "M5 13l4 4L19 7"; // Checkmark icon
-                              }
-                            } else {
-                              // Result not loaded yet, but status is complete - default to green (active policy)
-                              bgColor = "bg-green-50";
-                              borderColor = "border-green-300";
-                              hoverBgColor = "hover:bg-green-100";
-                              iconBgColor = "bg-green-500";
-                              iconPath = "M5 13l4 4L19 7"; // Checkmark icon
+                {olderSearches.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setIsPreviousSearchesExpanded(!isPreviousSearchesExpanded)}
+                      className="w-full bg-gray-100 hover:bg-gray-200 px-3 py-2 flex items-center gap-2 transition-colors rounded-t"
+                    >
+                      <svg
+                        className={`w-4 h-4 text-gray-700 transition-transform ${isPreviousSearchesExpanded ? "rotate-180" : ""}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
+                      <span className="text-sm font-medium text-gray-900">
+                        Previous Checks ({olderSearches.length})
+                      </span>
+                    </button>
+                    {isPreviousSearchesExpanded && (
+                      <div className="bg-gray-50 border border-gray-200 border-t-0 rounded-b px-3 py-2 space-y-1">
+                        {olderSearches.map((search: any) => {
+                          const tpaCode = search.tpaCode || search.insurancePayer || "";
+                          let formattedDate = "";
+                          if (search.createdAt) {
+                            const date = new Date(search.createdAt);
+                            if (!isNaN(date.getTime())) {
+                              const day = String(date.getDate()).padStart(2, "0");
+                              const month = String(date.getMonth() + 1).padStart(2, "0");
+                              const year = date.getFullYear();
+                              formattedDate = `${day}/${month}/${year}`;
                             }
                           }
 
@@ -778,160 +578,33 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                             <div
                               key={search.taskId}
                               onClick={() => handlePreviousSearchClick(search)}
-                              className={`${bgColor} border-2 ${borderColor} rounded-lg p-4 cursor-pointer ${hoverBgColor} transition-colors`}
+                              className="bg-white hover:bg-gray-100 rounded px-3 py-2 text-sm cursor-pointer transition-colors"
                             >
-                              <div className="flex items-start gap-3">
-                                <div className={`flex-shrink-0 w-8 h-8 rounded-full ${iconBgColor} flex items-center justify-center`}>
-                                  <svg
-                                    className="w-5 h-5 text-white"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={3}
-                                      d={iconPath}
-                                    />
-                                  </svg>
-                                </div>
-                                <div className="flex-1">
-                                  <div className="font-semibold text-gray-900 mb-1">
-                                    Eligibility Verification History
-                                  </div>
-                                  {timeString && (
-                                    <div className="text-sm text-gray-700 mb-2">
-                                      Verified Today at {timeString}
-                                    </div>
-                                  )}
-                                  <div className="font-bold text-gray-900 text-base mb-2">
-                                    {getTPAName(search.tpaCode)} ({search.tpaCode})
-                                  </div>
-                                  <div className="text-sm text-gray-700">
-                                    Status: {search.status === "complete" ? "Active" : search.status === "error" ? "failed" : search.status}
-                                    {search.status === "complete" && (() => {
-                                      const copay = result?.copay ? `${result.copay}%` : "30%";
-                                      const deductible = result?.deductible || "20.00";
-                                      return ` • Copay: ${copay} • Deductible: ${deductible}`;
-                                    })()}
-                                  </div>
-                                </div>
-                              </div>
+                              <span className="text-gray-900">
+                                {formattedDate ? `${formattedDate} - ` : ""}
+                                {getTPAName(tpaCode)} ({tpaCode}) - Status:{" "}
+                                {search.status === "complete"
+                                  ? "Active"
+                                  : search.status === "error"
+                                    ? "failed"
+                                    : search.status}
+                              </span>
                             </div>
                           );
                         })}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
-                  {/* Previous Checks Section (Older Searches) */}
-                  {olderSearches.length > 0 && (
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() => setIsPreviousSearchesExpanded(!isPreviousSearchesExpanded)}
-                        className="w-full bg-gray-100 hover:bg-gray-200 px-3 py-2 flex items-center gap-2 transition-colors rounded-t"
-                      >
-                        <svg
-                          className={`w-4 h-4 text-gray-700 transition-transform ${isPreviousSearchesExpanded ? "rotate-180" : ""}`}
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 9l-7 7-7-7"
-                          />
-                        </svg>
-                        <span className="text-sm font-medium text-gray-900">
-                          Previous Checks ({olderSearches.length})
-                        </span>
-                      </button>
-                      {isPreviousSearchesExpanded && (
-                        <div className="bg-gray-50 border border-gray-200 border-t-0 rounded-b px-3 py-2 space-y-1">
-                          {olderSearches.map((search) => {
-                            if (!search.createdAt) {
-                              return (
-                                <div
-                                  key={search.taskId}
-                                  onClick={() => handlePreviousSearchClick(search)}
-                                  className="bg-white hover:bg-gray-100 rounded px-3 py-2 text-sm cursor-pointer transition-colors"
-                                >
-                                  <span className="text-gray-900">
-                                    {search.tpaCode}
-                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status === "error" ? "failed" : search.status}`}
-                                  </span>
-                                </div>
-                              );
-                            }
-                            const date = new Date(search.createdAt);
-                            if (isNaN(date.getTime())) {
-                              return (
-                                <div
-                                  key={search.taskId}
-                                  onClick={() => handlePreviousSearchClick(search)}
-                                  className="bg-white hover:bg-gray-100 rounded px-3 py-2 text-sm cursor-pointer transition-colors"
-                                >
-                                  <span className="text-gray-900">
-                                    {search.tpaCode}
-                                    {search.status === "complete" ? " - Status: Active" : ` - Status: ${search.status === "error" ? "failed" : search.status}`}
-                                  </span>
-                                </div>
-                              );
-                            }
-                            const day = String(date.getDate()).padStart(2, '0');
-                            const month = String(date.getMonth() + 1).padStart(2, '0');
-                            const year = date.getFullYear();
-                            const formattedDate = `${day}/${month}/${year}`;
-
-                            // Get TPA name
-                            const getTPAName = (code: string) => {
-                              const tpaMap: Record<string, string> = {
-                                'INS010': 'AXA INSURANCE - GULF',
-                                'TPA001': 'Neuron',
-                                'TPA002': 'NextCare',
-                                'TPA003': 'Al Madallah',
-                                'TPA004': 'NAS',
-                                'TPA010': 'FMC (First Med)',
-                                'TPA023': 'Daman Thiqa',
-                                'TPA036': 'Mednet',
-                                'TPA037': 'Lifeline',
-                                'INS026': 'Daman',
-                                'INS017': 'ADNIC',
-                              };
-                              return tpaMap[code] || code;
-                            };
-
-                            return (
-                              <div
-                                key={search.taskId}
-                                onClick={() => handlePreviousSearchClick(search)}
-                                className="bg-white hover:bg-gray-100 rounded px-3 py-2 text-sm cursor-pointer transition-colors"
-                              >
-                                <span className="text-gray-900">
-                                  {formattedDate} - {getTPAName(search.tpaCode)} ({search.tpaCode}) - Status: {search.status === "complete" ? "Active" : search.status === "error" ? "failed" : search.status}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })() : null}
-
-            {/* Insurance Details */}
             <div className="border border-gray-200 rounded-lg p-3">
               <InsuranceDetailsSection
                 isLoadingInsurance={isLoadingInsurance}
-                insuranceError={insuranceError}
+                insuranceError={insuranceError instanceof Error ? insuranceError.message : null}
                 insuranceDetails={insuranceDetails}
-                expandedInsurance={expandedInsurance}
+                expandedInsurance={expandedInsuranceWithDefaults}
                 onToggleExpanded={toggleInsuranceExpanded}
                 patientData={getPatientDataFromAppointment(selectedAppointment)}
               />
@@ -940,7 +613,6 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         )}
       </Drawer>
 
-      {/* Drawer for completed eligibility check results */}
       {showEligibilityDrawer && selectedEligibilityItem?.status === "complete" && (
         <Drawer
           isOpen={showEligibilityDrawer}
@@ -949,32 +621,18 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           size="xl"
         >
           <div className="p-6">
-            {loadingEligibilityItem ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                  <p className="mt-4 text-gray-600">Loading results...</p>
-                </div>
-              </div>
-            ) : freshEligibilityResult ? (
+            {resultData ? (
               <MantysResultsDisplay
-                response={freshEligibilityResult}
+                response={resultData}
                 onClose={handleCloseEligibilityDrawer}
                 onCheckAnother={handleCloseEligibilityDrawer}
                 screenshot={selectedEligibilityItem.interimResults?.screenshot || null}
                 patientMPI={selectedEligibilityItem.patientMPI}
-                patientId={selectedEligibilityItem.patientId ? parseInt(selectedEligibilityItem.patientId) : undefined}
-                appointmentId={selectedEligibilityItem.appointmentId}
-                encounterId={selectedEligibilityItem.encounterId}
-              />
-            ) : selectedEligibilityItem?.result ? (
-              <MantysResultsDisplay
-                response={selectedEligibilityItem.result}
-                onClose={handleCloseEligibilityDrawer}
-                onCheckAnother={handleCloseEligibilityDrawer}
-                screenshot={selectedEligibilityItem.interimResults?.screenshot || null}
-                patientMPI={selectedEligibilityItem.patientMPI}
-                patientId={selectedEligibilityItem.patientId ? parseInt(selectedEligibilityItem.patientId) : undefined}
+                patientId={
+                  selectedEligibilityItem.patientId
+                    ? parseInt(selectedEligibilityItem.patientId)
+                    : undefined
+                }
                 appointmentId={selectedEligibilityItem.appointmentId}
                 encounterId={selectedEligibilityItem.encounterId}
               />
@@ -987,12 +645,11 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         </Drawer>
       )}
 
-      {/* Modal for pending/processing/error eligibility checks */}
-      {showEligibilityModal && selectedEligibilityItem && selectedEligibilityItem.taskId && (
+      {showEligibilityModal && selectedTaskId && (
         <ExtractionProgressModal
           isOpen={showEligibilityModal}
           onClose={handleCloseEligibilityModal}
-          taskId={selectedEligibilityItem.taskId}
+          taskId={selectedTaskId}
           viewMode="history"
         />
       )}
