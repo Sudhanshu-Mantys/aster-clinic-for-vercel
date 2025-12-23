@@ -164,7 +164,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
   const handlePreviousSearchClick = useCallback((search: any) => {
     setSelectedTaskId(search.taskId);
-    if (search.status === "complete") {
+    if ((search.status === "complete" || search.status === "error") && search.result) {
       setShowEligibilityDrawer(true);
     } else {
       setShowEligibilityModal(true);

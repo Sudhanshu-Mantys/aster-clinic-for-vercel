@@ -3,6 +3,7 @@ import { Modal } from "./ui/modal";
 import {
   useEligibilityTaskStatus,
   useEligibilityHistory,
+  useEligibilityHistoryByTaskId,
 } from "../hooks/useEligibility";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -67,6 +68,10 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
     refetchInterval: 5000,
   });
 
+  const status = taskStatus?.status || "pending";
+
+  const { data: historyItem } = useEligibilityHistoryByTaskId(actualTaskId || "", isOpen && !!actualTaskId && status === "error");
+
   useEffect(() => {
     if (taskStatus) {
       setPollingAttempts((prev) => prev + 1);
@@ -85,7 +90,11 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
     }
   }, [taskStatus, onComplete, hasCalledComplete]);
 
-  const status = taskStatus?.status || "pending";
+  const displayError = useMemo(() => {
+    if (status !== "error") return null;
+    return historyItem?.error || taskStatus?.error || "An error occurred";
+  }, [status, historyItem, taskStatus]);
+
   const statusMessage = useMemo(() => {
     if (!taskStatus) return "Loading...";
 
@@ -101,14 +110,14 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
     }
 
     if (status === "complete") return "Eligibility check complete!";
-    if (status === "error") return taskStatus.error || "An error occurred";
+    if (status === "error") return displayError || "An error occurred";
     if (status === "processing") return "Processing eligibility check...";
     return "Starting eligibility check...";
-  }, [taskStatus, status]);
+  }, [taskStatus, status, displayError]);
 
   const interimScreenshot = taskStatus?.screenshot || null;
   const interimDocuments = taskStatus?.documents || [];
-  const errorMessage = status === "error" ? (taskStatus?.error || null) : null;
+  const errorMessage = displayError;
   const isSearchAll = (taskStatus as any)?.isSearchAll === true;
   const aggregatedResults = (taskStatus as any)?.aggregatedResults || [];
 
@@ -129,6 +138,7 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
 
   const getProgressPercentage = () => {
     if (status === "complete") return 100;
+    if (status === "error") return 100;
     if (status === "processing" && pollingAttempts > 0) {
       return Math.min(pollingAttempts * 2, 95);
     }
@@ -189,7 +199,7 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
 
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-3">
-            {status !== "complete" && (
+            {status === "processing" && (
               <svg
                 className="animate-spin h-6 w-6 text-blue-600"
                 xmlns="http://www.w3.org/2000/svg"
@@ -226,17 +236,49 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
                 />
               </svg>
             )}
+            {status === "error" && (
+              <svg
+                className="h-6 w-6 text-red-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            )}
+            {status === "pending" && (
+              <svg
+                className="h-6 w-6 text-yellow-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            )}
             <h3 className={`text-lg font-semibold ${getStatusColor()}`}>{statusMessage}</h3>
           </div>
 
           <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
             <div
-              className="bg-blue-600 h-2.5 rounded-full transition-all duration-500 ease-out"
+              className={`h-2.5 rounded-full transition-all duration-500 ease-out ${
+                status === "error" ? "bg-red-600" : "bg-blue-600"
+              }`}
               style={{ width: `${getProgressPercentage()}%` }}
             ></div>
           </div>
 
-          {pollingAttempts > 0 && status !== "complete" && (
+          {pollingAttempts > 0 && status !== "complete" && status !== "error" && (
             <div className="flex justify-between text-sm text-gray-600">
               <span>Checking status... (Attempt {pollingAttempts})</span>
             </div>
