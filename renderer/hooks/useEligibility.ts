@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRef } from 'react';
 import {
   eligibilityHistoryApi,
   mantysApi,
@@ -151,14 +152,9 @@ export function useUpdateEligibilityHistoryItem() {
 }
 
 export function useUpdateEligibilityHistoryByTaskId() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: ({ taskId, updates }: { taskId: string; updates: Partial<EligibilityHistoryItem> }) =>
       eligibilityHistoryApi.updateByTaskId(taskId, updates),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: eligibilityKeys.all });
-    },
   });
 }
 
@@ -196,6 +192,9 @@ export function useEligibilityPolling(
 ) {
   const queryClient = useQueryClient();
   const updateHistory = useUpdateEligibilityHistoryByTaskId();
+  const lastUpdateRef = useRef<{ status?: string; interimKey?: string; resultKey?: string; error?: string } | null>(null);
+  const hasCompletedRef = useRef(false);
+  const hasErroredRef = useRef(false);
 
   return useQuery({
     queryKey: eligibilityKeys.taskStatus(taskId),
@@ -208,21 +207,34 @@ export function useEligibilityPolling(
       }
       return 3000;
     },
-    select: (data) => {
+    onSuccess: (data) => {
       if (data.status === 'processing' || data.status === 'pending') {
-        updateHistory.mutate({
-          taskId,
-          updates: {
-            status: data.status,
-            interimResults: {
-              screenshot: data.screenshot,
-              documents: data.documents,
-            },
-          },
+        const interimKey = JSON.stringify({
+          screenshot: data.screenshot ?? null,
+          documents: data.documents ?? null,
         });
+        const shouldUpdate =
+          lastUpdateRef.current?.status !== data.status ||
+          lastUpdateRef.current?.interimKey !== interimKey;
+
+        if (shouldUpdate) {
+          updateHistory.mutate({
+            taskId,
+            updates: {
+              status: data.status,
+              interimResults: {
+                screenshot: data.screenshot,
+                documents: data.documents,
+              },
+            },
+          });
+          lastUpdateRef.current = { status: data.status, interimKey };
+        }
+        return;
       }
 
-      if (data.status === 'complete') {
+      if (data.status === 'complete' && !hasCompletedRef.current) {
+        const resultKey = JSON.stringify(data.result ?? null);
         updateHistory.mutate({
           taskId,
           updates: {
@@ -231,11 +243,13 @@ export function useEligibilityPolling(
             completedAt: new Date().toISOString(),
           },
         });
+        lastUpdateRef.current = { status: 'complete', resultKey };
+        hasCompletedRef.current = true;
         queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
         options?.onComplete?.(data);
       }
 
-      if (data.status === 'error') {
+      if (data.status === 'error' && !hasErroredRef.current) {
         updateHistory.mutate({
           taskId,
           updates: {
@@ -244,11 +258,11 @@ export function useEligibilityPolling(
             completedAt: new Date().toISOString(),
           },
         });
+        lastUpdateRef.current = { status: 'error', error: data.error };
+        hasErroredRef.current = true;
         queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
         options?.onError?.(data);
       }
-
-      return data;
     },
   });
 }

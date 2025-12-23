@@ -20,8 +20,7 @@ export const clinicConfigKeys = {
   plans: (clinicId: string) => [...clinicConfigKeys.all, 'plans', clinicId] as const,
   networks: (clinicId: string) => [...clinicConfigKeys.all, 'networks', clinicId] as const,
   payers: (clinicId: string) => [...clinicConfigKeys.all, 'payers', clinicId] as const,
-  specialisations: (clinicId: string) =>
-    [...clinicConfigKeys.all, 'specialisations', clinicId] as const,
+  specialisations: () => [...clinicConfigKeys.all, 'specialisations'] as const,
 };
 
 function extractConfigs<T>(data: unknown): T[] {
@@ -198,11 +197,11 @@ export function usePayers(clinicId: string, options?: { enabled?: boolean }) {
   });
 }
 
-export function useSpecialisations(clinicId: string, options?: { enabled?: boolean }) {
+export function useSpecialisations(options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: clinicConfigKeys.specialisations(clinicId),
-    queryFn: () => clinicConfigApi.getSpecialisations(clinicId),
-    enabled: options?.enabled !== false && !!clinicId,
+    queryKey: clinicConfigKeys.specialisations(),
+    queryFn: () => clinicConfigApi.getSpecialisations(),
+    enabled: options?.enabled !== false,
     staleTime: 5 * 60 * 1000,
     select: extractConfigs<Specialisation>,
   });

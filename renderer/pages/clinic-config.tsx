@@ -8,6 +8,7 @@ import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { DashboardHeader } from '../components/DashboardHeader'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
+import { ApiError, clinicConfigApi } from '../lib/api-client'
 
 // Type definitions
 interface ClinicConfig {
@@ -188,18 +189,15 @@ function ClinicConfigTab({ clinicId }: { clinicId: string }) {
     const loadConfig = async () => {
         setIsLoading(true)
         try {
-            const response = await fetch(`/api/clinic-config/clinic?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                if (data.config) {
-                    setConfig(data.config)
-                    setFormData({
-                        location: data.config.location || '',
-                        lt_site_id: data.config.lt_site_id || '',
-                        customer_id: data.config.customer_id || '',
-                        hospital_or_clinic: data.config.hospital_or_clinic || 'clinic'
-                    })
-                }
+            const data = await clinicConfigApi.getSettings(clinicId)
+            if (data) {
+                setConfig(data)
+                setFormData({
+                    location: data.location || '',
+                    lt_site_id: data.lt_site_id || '',
+                    customer_id: data.customer_id || '',
+                    hospital_or_clinic: data.hospital_or_clinic || 'clinic'
+                })
             }
         } catch (error) {
             console.error('Failed to load config:', error)
@@ -211,18 +209,9 @@ function ClinicConfigTab({ clinicId }: { clinicId: string }) {
     const handleSave = async () => {
         setIsSaving(true)
         try {
-            const response = await fetch('/api/clinic-config/clinic', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    clinic_id: clinicId,
-                    ...formData
-                })
-            })
-
-            if (response.ok) {
-                const data = await response.json()
-                setConfig(data.config)
+            const data = await clinicConfigApi.updateSettings(clinicId, formData)
+            if (data) {
+                setConfig(data)
                 alert('Configuration saved successfully!')
             } else {
                 alert('Failed to save configuration')
@@ -334,12 +323,9 @@ function TPAConfigTab({ clinicId }: { clinicId: string }) {
 
     const loadClinicConfig = async () => {
         try {
-            const response = await fetch(`/api/clinic-config/clinic?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                if (data.config) {
-                    setClinicConfig(data.config)
-                }
+            const data = await clinicConfigApi.getSettings(clinicId)
+            if (data) {
+                setClinicConfig(data)
             }
         } catch (error) {
             console.error('Failed to load clinic config:', error)
@@ -349,11 +335,8 @@ function TPAConfigTab({ clinicId }: { clinicId: string }) {
     const loadTPAConfigs = async () => {
         setIsLoading(true)
         try {
-            const response = await fetch(`/api/clinic-config/tpa?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                setTpaConfigs(data.configs || [])
-            }
+            const configs = await clinicConfigApi.getTPA(clinicId)
+            setTpaConfigs(configs || [])
         } catch (error) {
             console.error('Failed to load TPA configs:', error)
         } finally {
@@ -386,26 +369,11 @@ function TPAConfigTab({ clinicId }: { clinicId: string }) {
                 return
             }
 
-            const response = await fetch('/api/clinic-config/tpa', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    clinic_id: clinicId,
-                    bulk_import: true,
-                    mappings: mappingsData
-                })
-            })
-
-            if (response.ok) {
-                const result = await response.json()
-                alert(`Successfully imported ${result.imported} TPA mappings${result.errors > 0 ? ` (${result.errors} errors)` : ''}`)
-                setBulkImportJson('')
-                setShowBulkImportModal(false)
-                await loadTPAConfigs()
-            } else {
-                const error = await response.json()
-                alert(`Failed to import: ${error.error || 'Unknown error'}`)
-            }
+            const result = await clinicConfigApi.bulkImportTPAMappings(clinicId, mappingsData)
+            alert(`Successfully imported ${result.imported} TPA mappings${result.errors ? ` (${result.errors} errors)` : ''}`)
+            setBulkImportJson('')
+            setShowBulkImportModal(false)
+            await loadTPAConfigs()
         } catch (error) {
             console.error('Failed to import TPA mappings:', error)
             alert('Failed to import TPA mappings')
@@ -417,11 +385,7 @@ function TPAConfigTab({ clinicId }: { clinicId: string }) {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         try {
-            const method = editingTPA ? 'PUT' : 'POST'
             const identifier = editingTPA?.tpa_id || editingTPA?.ins_code
-            const url = editingTPA && identifier
-                ? `/api/clinic-config/tpa/${identifier}`
-                : '/api/clinic-config/tpa'
 
             // Prepare extra_form_fields array - only include fields that are explicitly set (not undefined/null)
             const extraFormFields = Object.entries(formData.extra_form_fields)
@@ -445,32 +409,28 @@ function TPAConfigTab({ clinicId }: { clinicId: string }) {
             if (!requestBody.lt_hospital_id) delete requestBody.lt_hospital_id
             if (Object.keys(requestBody.lt_other_config || {}).length === 0) delete requestBody.lt_other_config
 
-            const response = await fetch(url, {
-                method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody)
-            })
-
-            if (response.ok) {
-                await loadTPAConfigs()
-                setShowAddModal(false)
-                setEditingTPA(null)
-                setFormData({
-                    ins_code: '',
-                    tpa_id: '',
-                    tpa_name: '',
-                    api_url: '',
-                    credentials: '',
-                    config_data: '',
-                    lt_site_id: '',
-                    lt_customer_id: '',
-                    lt_hospital_id: '',
-                    lt_other_config: '',
-                    extra_form_fields: { doctor: undefined, phoneNumber: undefined, name: undefined }
-                })
+            if (editingTPA && identifier) {
+                await clinicConfigApi.updateTPA(clinicId, identifier, requestBody)
             } else {
-                alert('Failed to save TPA configuration')
+                await clinicConfigApi.createTPA(clinicId, requestBody)
             }
+
+            await loadTPAConfigs()
+            setShowAddModal(false)
+            setEditingTPA(null)
+            setFormData({
+                ins_code: '',
+                tpa_id: '',
+                tpa_name: '',
+                api_url: '',
+                credentials: '',
+                config_data: '',
+                lt_site_id: '',
+                lt_customer_id: '',
+                lt_hospital_id: '',
+                lt_other_config: '',
+                extra_form_fields: { doctor: undefined, phoneNumber: undefined, name: undefined }
+            })
         } catch (error) {
             console.error('Failed to save TPA config:', error)
             alert('Failed to save TPA configuration')
@@ -519,15 +479,8 @@ function TPAConfigTab({ clinicId }: { clinicId: string }) {
         if (!confirm('Are you sure you want to delete this TPA configuration?')) return
 
         try {
-            const response = await fetch(`/api/clinic-config/tpa/${identifier}?clinic_id=${clinicId}`, {
-                method: 'DELETE'
-            })
-
-            if (response.ok) {
-                await loadTPAConfigs()
-            } else {
-                alert('Failed to delete TPA configuration')
-            }
+            await clinicConfigApi.deleteTPA(clinicId, identifier)
+            await loadTPAConfigs()
         } catch (error) {
             console.error('Failed to delete TPA config:', error)
             alert('Failed to delete TPA configuration')
@@ -1005,20 +958,16 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
 
     const loadTPAs = async () => {
         try {
-            const response = await fetch(`/api/clinic-config/tpa?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                const configs = data.configs || []
-                setTpaConfigs(configs)
-                // Initialize all TPAs as collapsed (closed) by default
-                const initialCollapsed: Record<string, boolean> = {}
-                configs.forEach((tpa: any) => {
-                    if (tpa.ins_code) {
-                        initialCollapsed[tpa.ins_code] = true
-                    }
-                })
-                setCollapsedTPAs(initialCollapsed)
-            }
+            const configs = await clinicConfigApi.getTPA(clinicId)
+            setTpaConfigs(configs)
+            // Initialize all TPAs as collapsed (closed) by default
+            const initialCollapsed: Record<string, boolean> = {}
+            configs.forEach((tpa: any) => {
+                if (tpa.ins_code) {
+                    initialCollapsed[tpa.ins_code] = true
+                }
+            })
+            setCollapsedTPAs(initialCollapsed)
         } catch (error) {
             console.error('Failed to load TPAs:', error)
         }
@@ -1027,16 +976,15 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
     const loadPlans = async () => {
         setIsLoading(true)
         try {
-            const response = await fetch(`/api/clinic-config/plans?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                setPlansByTPA(data.plans_by_tpa || {})
-            } else if (response.status === 404) {
+            const plansByTpa = await clinicConfigApi.getPlansByTPA(clinicId)
+            setPlansByTPA(plansByTpa || {})
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 404) {
+                setPlansByTPA({})
+            } else {
+                console.error('Failed to load plans:', error)
                 setPlansByTPA({})
             }
-        } catch (error) {
-            console.error('Failed to load plans:', error)
-            setPlansByTPA({})
         } finally {
             setIsLoading(false)
         }
@@ -1044,35 +992,30 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
 
     const loadNetworks = async () => {
         try {
-            const response = await fetch(`/api/clinic-config/mantys-networks?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                setNetworksByTPA(data.networks_by_tpa || {})
-            } else if (response.status === 404) {
+            const networksByTpa = await clinicConfigApi.getMantysNetworksByTPA(clinicId)
+            setNetworksByTPA(networksByTpa || {})
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 404) {
+                setNetworksByTPA({})
+            } else {
+                console.error('Failed to load networks:', error)
                 setNetworksByTPA({})
             }
-        } catch (error) {
-            console.error('Failed to load networks:', error)
-            setNetworksByTPA({})
         }
     }
 
     const loadMappings = async () => {
         try {
-            const response = await fetch(`/api/clinic-config/plan-mappings?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                const mappings = data.mappings || []
-                // Group mappings by TPA
-                const grouped: Record<string, PlanNetworkMapping[]> = {}
-                mappings.forEach((m: PlanNetworkMapping) => {
-                    if (!grouped[m.tpa_ins_code]) {
-                        grouped[m.tpa_ins_code] = []
-                    }
-                    grouped[m.tpa_ins_code].push(m)
-                })
-                setMappingsByTPA(grouped)
-            }
+            const mappings = await clinicConfigApi.getPlanMappings(clinicId)
+            // Group mappings by TPA
+            const grouped: Record<string, PlanNetworkMapping[]> = {}
+            mappings.forEach((m: PlanNetworkMapping) => {
+                if (!grouped[m.tpa_ins_code]) {
+                    grouped[m.tpa_ins_code] = []
+                }
+                grouped[m.tpa_ins_code].push(m)
+            })
+            setMappingsByTPA(grouped)
         } catch (error) {
             console.error('Failed to load mappings:', error)
             setMappingsByTPA({})
@@ -1082,21 +1025,12 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
     const handleFetchPlansFromAPI = async (tpaInsCode: string) => {
         setFetchingTPA(tpaInsCode)
         try {
-            const response = await fetch(
-                `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&fetch_from_api=true`
-            )
-
-            if (response.ok) {
-                const data = await response.json()
-                setPlansByTPA(prev => ({
-                    ...prev,
-                    [tpaInsCode]: data.plans || []
-                }))
-                alert(`Successfully fetched ${data.record_count || 0} plans for ${tpaInsCode}`)
-            } else {
-                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
-                alert(`Failed to fetch plans: ${error.error || 'Unknown error'}`)
-            }
+            const data = await clinicConfigApi.fetchPlansFromApi(clinicId, tpaInsCode)
+            setPlansByTPA(prev => ({
+                ...prev,
+                [tpaInsCode]: data.plans || []
+            }))
+            alert(`Successfully fetched ${data.record_count || 0} plans for ${tpaInsCode}`)
         } catch (error) {
             console.error('Failed to fetch plans from API:', error)
             alert('Failed to fetch plans from API')
@@ -1108,21 +1042,12 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
     const handleImportNetworks = async (tpaInsCode: string) => {
         setImportingTPA(tpaInsCode)
         try {
-            const response = await fetch(
-                `/api/clinic-config/mantys-networks?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&import_from_mapping=true`
-            )
-
-            if (response.ok) {
-                const data = await response.json()
-                setNetworksByTPA(prev => ({
-                    ...prev,
-                    [tpaInsCode]: data.networks || []
-                }))
-                alert(`Successfully imported ${data.record_count || 0} networks for ${tpaInsCode}`)
-            } else {
-                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
-                alert(`Failed to import networks: ${error.error || 'Unknown error'}`)
-            }
+            const data = await clinicConfigApi.importMantysNetworks(clinicId, tpaInsCode)
+            setNetworksByTPA(prev => ({
+                ...prev,
+                [tpaInsCode]: data.networks || []
+            }))
+            alert(`Successfully imported ${data.record_count || 0} networks for ${tpaInsCode}`)
         } catch (error) {
             console.error('Failed to import networks:', error)
             alert('Failed to import networks')
@@ -1148,12 +1073,10 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
 
         try {
             // Create multiple mappings (many-to-many)
-            const promises = mappingForm.mantys_network_names.map((networkName, index) => {
-                const isDefault = mappingForm.is_default && index === 0
-                return fetch(`/api/clinic-config/plan-mappings?clinic_id=${clinicId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
+            await Promise.all(
+                mappingForm.mantys_network_names.map((networkName, index) => {
+                    const isDefault = mappingForm.is_default && index === 0
+                    return clinicConfigApi.createPlanMapping(clinicId, {
                         tpa_ins_code: selectedTPA,
                         lt_plan_id: plan.plan_id,
                         lt_plan_name: plan.insurance_plan_name,
@@ -1162,21 +1085,13 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                         is_default: isDefault
                     })
                 })
-            })
+            )
 
-            const results = await Promise.all(promises)
-            const errors = results.filter(r => !r.ok)
-
-            if (errors.length > 0) {
-                const error = await errors[0].json().catch(() => ({ error: 'Unknown error' }))
-                alert(`Failed to create some mappings: ${error.error || 'Unknown error'}`)
-            } else {
-                await loadMappings()
-                setShowMappingModal(false)
-                setMappingForm({ lt_plan_id: '', mantys_network_names: [], is_default: false })
-                setSelectedTPA(null)
-                alert(`Successfully created ${mappingForm.mantys_network_names.length} mapping(s)`)
-            }
+            await loadMappings()
+            setShowMappingModal(false)
+            setMappingForm({ lt_plan_id: '', mantys_network_names: [], is_default: false })
+            setSelectedTPA(null)
+            alert(`Successfully created ${mappingForm.mantys_network_names.length} mapping(s)`)
         } catch (error) {
             console.error('Failed to create mapping:', error)
             alert('Failed to create mapping')
@@ -1203,18 +1118,9 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
         }
 
         try {
-            const response = await fetch(
-                `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}&set_default=true`,
-                { method: 'PUT' }
-            )
-
-            if (response.ok) {
-                await loadMappings()
-                alert(`Default mapping set successfully for "${mapping.mantys_network_name}"`)
-            } else {
-                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
-                alert(`Failed to set default mapping: ${error.error || 'Unknown error'}`)
-            }
+            await clinicConfigApi.setDefaultPlanMapping(clinicId, tpaInsCode, mappingId)
+            await loadMappings()
+            alert(`Default mapping set successfully for "${mapping.mantys_network_name}"`)
         } catch (error) {
             console.error('Failed to set default mapping:', error)
             alert('Failed to set default mapping')
@@ -1234,18 +1140,9 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
         }
 
         try {
-            const response = await fetch(
-                `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}&unset_default=true`,
-                { method: 'PUT' }
-            )
-
-            if (response.ok) {
-                await loadMappings()
-                alert(`Default mapping unset successfully for "${mapping.mantys_network_name}"`)
-            } else {
-                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
-                alert(`Failed to unset default mapping: ${error.error || 'Unknown error'}`)
-            }
+            await clinicConfigApi.unsetDefaultPlanMapping(clinicId, tpaInsCode, mappingId)
+            await loadMappings()
+            alert(`Default mapping unset successfully for "${mapping.mantys_network_name}"`)
         } catch (error) {
             console.error('Failed to unset default mapping:', error)
             alert('Failed to unset default mapping')
@@ -1254,16 +1151,7 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
 
     const handleExportPlansTemplate = async (tpaInsCode: string) => {
         try {
-            const plansResponse = await fetch(
-                `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=mapping_template`
-            )
-
-            if (!plansResponse.ok) {
-                alert('Failed to export plans template')
-                return
-            }
-
-            const plansData = await plansResponse.json()
+            const plansData = await clinicConfigApi.exportPlansTemplate(clinicId, tpaInsCode) as any
             const tpaName = getTPAName(tpaInsCode)
             const mappings = mappingsByTPA[tpaInsCode] || []
 
@@ -1271,12 +1159,8 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
             let mappingsData = null
             if (mappings.length > 0) {
                 try {
-                    const mappingsResponse = await fetch(
-                        `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=json`
-                    )
-                    if (mappingsResponse.ok) {
-                        mappingsData = await mappingsResponse.json()
-                    }
+                    const mappingList = await clinicConfigApi.getPlanMappings(clinicId, tpaInsCode)
+                    mappingsData = { mappings: mappingList }
                 } catch (error) {
                     console.error('Failed to fetch mappings for export:', error)
                 }
@@ -1324,31 +1208,32 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
 
     const handleExportMappings = async (tpaInsCode: string, format: 'json' | 'csv') => {
         try {
-            const response = await fetch(
-                `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=${format}`
-            )
-
-            if (response.ok) {
-                if (format === 'json') {
-                    const data = await response.json()
-                    const blob = new Blob([JSON.stringify(data.mappings, null, 2)], { type: 'application/json' })
-                    const url = URL.createObjectURL(blob)
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = `plan-mappings-${tpaInsCode}-${Date.now()}.json`
-                    a.click()
-                    URL.revokeObjectURL(url)
-                } else {
-                    const blob = await response.blob()
-                    const url = URL.createObjectURL(blob)
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = `plan-mappings-${tpaInsCode}-${Date.now()}.csv`
-                    a.click()
-                    URL.revokeObjectURL(url)
-                }
+            if (format === 'json') {
+                const mappings = await clinicConfigApi.getPlanMappings(clinicId, tpaInsCode)
+                const blob = new Blob([JSON.stringify(mappings, null, 2)], { type: 'application/json' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `plan-mappings-${tpaInsCode}-${Date.now()}.json`
+                a.click()
+                URL.revokeObjectURL(url)
             } else {
-                alert('Failed to export mappings')
+                const response = await fetch(
+                    `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=${format}`
+                )
+
+                if (!response.ok) {
+                    alert('Failed to export mappings')
+                    return
+                }
+
+                const blob = await response.blob()
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `plan-mappings-${tpaInsCode}-${Date.now()}.csv`
+                a.click()
+                URL.revokeObjectURL(url)
             }
         } catch (error) {
             console.error('Failed to export mappings:', error)
@@ -1426,34 +1311,20 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
                 return
             }
 
-            const response = await fetch(`/api/clinic-config/plan-mappings?clinic_id=${clinicId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    bulk_import: true,
-                    mappings
-                })
-            })
+            const data = await clinicConfigApi.bulkImportPlanMappings(clinicId, mappings)
+            await loadMappings()
+            setShowImportModal(false)
+            setImportJson('')
+            setSelectedTPA(null)
 
-            if (response.ok) {
-                const data = await response.json()
-                await loadMappings()
-                setShowImportModal(false)
-                setImportJson('')
-                setSelectedTPA(null)
-
-                let message = `Successfully imported ${data.imported} mapping(s).`
-                if (data.errors > 0) {
-                    message += ` ${data.errors} error(s).`
-                }
-                if (data.defaults_fixed > 0) {
-                    message += `\n\nNote: ${data.defaults_fixed} duplicate default(s) were automatically fixed (only 1 default allowed per Mantys network).`
-                }
-                alert(message)
-            } else {
-                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
-                alert(`Failed to import mappings: ${error.error || 'Unknown error'}`)
+            let message = `Successfully imported ${data.imported} mapping(s).`
+            if (data.errors && data.errors > 0) {
+                message += ` ${data.errors} error(s).`
             }
+            if (data.defaults_fixed && data.defaults_fixed > 0) {
+                message += `\n\nNote: ${data.defaults_fixed} duplicate default(s) were automatically fixed (only 1 default allowed per Mantys network).`
+            }
+            alert(message)
         } catch (error) {
             console.error('Failed to import mappings:', error)
             alert('Failed to import mappings. Please check the format.')
@@ -1464,17 +1335,9 @@ function PlansConfigTab({ clinicId }: { clinicId: string }) {
         if (!confirm('Are you sure you want to delete this mapping?')) return
 
         try {
-            const response = await fetch(
-                `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}`,
-                { method: 'DELETE' }
-            )
-
-            if (response.ok) {
-                await loadMappings()
-                alert('Mapping deleted successfully')
-            } else {
-                alert('Failed to delete mapping')
-            }
+            await clinicConfigApi.deletePlanMapping(clinicId, tpaInsCode, mappingId)
+            await loadMappings()
+            alert('Mapping deleted successfully')
         } catch (error) {
             console.error('Failed to delete mapping:', error)
             alert('Failed to delete mapping')
@@ -1992,20 +1855,16 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
 
     const loadTPAs = async () => {
         try {
-            const response = await fetch(`/api/clinic-config/tpa?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                const configs = data.configs || []
-                setTpaConfigs(configs)
-                // Initialize all TPAs as collapsed (closed) by default
-                const initialCollapsed: Record<string, boolean> = {}
-                configs.forEach((tpa: any) => {
-                    if (tpa.ins_code) {
-                        initialCollapsed[tpa.ins_code] = true
-                    }
-                })
-                setCollapsedTPAs(initialCollapsed)
-            }
+            const configs = await clinicConfigApi.getTPA(clinicId)
+            setTpaConfigs(configs)
+            // Initialize all TPAs as collapsed (closed) by default
+            const initialCollapsed: Record<string, boolean> = {}
+            configs.forEach((tpa: any) => {
+                if (tpa.ins_code) {
+                    initialCollapsed[tpa.ins_code] = true
+                }
+            })
+            setCollapsedTPAs(initialCollapsed)
         } catch (error) {
             console.error('Failed to load TPAs:', error)
         }
@@ -2014,16 +1873,15 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
     const loadPayers = async () => {
         setIsLoading(true)
         try {
-            const response = await fetch(`/api/clinic-config/payers?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                setPayersByTPA(data.payers_by_tpa || {})
-            } else if (response.status === 404) {
+            const payersByTpa = await clinicConfigApi.getPayersByTPA(clinicId)
+            setPayersByTPA(payersByTpa || {})
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 404) {
+                setPayersByTPA({})
+            } else {
+                console.error('Failed to load payers:', error)
                 setPayersByTPA({})
             }
-        } catch (error) {
-            console.error('Failed to load payers:', error)
-            setPayersByTPA({})
         } finally {
             setIsLoading(false)
         }
@@ -2032,22 +1890,13 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
     const handleFetchFromAPI = async (tpaInsCode: string) => {
         setFetchingTPA(tpaInsCode)
         try {
-            const response = await fetch(
-                `/api/clinic-config/payers?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&fetch_from_api=true`
-            )
-
-            if (response.ok) {
-                const data = await response.json()
-                // Update the payers for this TPA
-                setPayersByTPA(prev => ({
-                    ...prev,
-                    [tpaInsCode]: data.payers || []
-                }))
-                alert(`Successfully fetched ${data.record_count || 0} payers for ${tpaInsCode}`)
-            } else {
-                const error = await response.json().catch(() => ({ error: 'Unknown error' }))
-                alert(`Failed to fetch payers: ${error.error || 'Unknown error'}`)
-            }
+            const data = await clinicConfigApi.fetchPayersFromApi(clinicId, tpaInsCode)
+            // Update the payers for this TPA
+            setPayersByTPA(prev => ({
+                ...prev,
+                [tpaInsCode]: data.payers || []
+            }))
+            alert(`Successfully fetched ${data.record_count || 0} payers for ${tpaInsCode}`)
         } catch (error) {
             console.error('Failed to fetch payers from API:', error)
             alert('Failed to fetch payers from API')
@@ -2060,22 +1909,14 @@ function PayerConfigTab({ clinicId }: { clinicId: string }) {
         if (!confirm(`Are you sure you want to delete all payers for ${tpaInsCode}?`)) return
 
         try {
-            const response = await fetch(
-                `/api/clinic-config/payers/${tpaInsCode}?clinic_id=${clinicId}`,
-                { method: 'DELETE' }
-            )
-
-            if (response.ok) {
-                // Remove from state
-                setPayersByTPA(prev => {
-                    const updated = { ...prev }
-                    delete updated[tpaInsCode]
-                    return updated
-                })
-                alert('Payers deleted successfully')
-            } else {
-                alert('Failed to delete payers')
-            }
+            await clinicConfigApi.deletePayersByTPA(clinicId, tpaInsCode)
+            // Remove from state
+            setPayersByTPA(prev => {
+                const updated = { ...prev }
+                delete updated[tpaInsCode]
+                return updated
+            })
+            alert('Payers deleted successfully')
         } catch (error) {
             console.error('Failed to delete payers:', error)
             alert('Failed to delete payers')
@@ -2245,11 +2086,8 @@ function DoctorsConfigTab({ clinicId }: { clinicId: string }) {
 
     const loadSpecialisations = async () => {
         try {
-            const response = await fetch('/api/clinic-config/specialisations')
-            if (response.ok) {
-                const data = await response.json()
-                setSpecialisationsMapping(data.mapping || {})
-            }
+            const mapping = await clinicConfigApi.getSpecialisationsMapping()
+            setSpecialisationsMapping(mapping || {})
         } catch (error) {
             console.error('Failed to load specialisations:', error)
         }
@@ -2258,11 +2096,8 @@ function DoctorsConfigTab({ clinicId }: { clinicId: string }) {
     const loadDoctors = async () => {
         setIsLoading(true)
         try {
-            const response = await fetch(`/api/clinic-config/doctors?clinic_id=${clinicId}`)
-            if (response.ok) {
-                const data = await response.json()
-                setDoctors(data.configs || [])
-            }
+            const configs = await clinicConfigApi.getDoctors(clinicId)
+            setDoctors(configs || [])
         } catch (error) {
             console.error('Failed to load doctors:', error)
         } finally {
@@ -2273,38 +2108,26 @@ function DoctorsConfigTab({ clinicId }: { clinicId: string }) {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         try {
-            const method = editingDoctor ? 'PUT' : 'POST'
-            const url = editingDoctor
-                ? `/api/clinic-config/doctors/${editingDoctor.doctor_id}`
-                : '/api/clinic-config/doctors'
-
-            const response = await fetch(url, {
-                method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ...formData,
-                    clinic_id: clinicId
-                })
-            })
-
-            if (response.ok) {
-                await loadDoctors()
-                setShowAddModal(false)
-                setEditingDoctor(null)
-                setFormData({
-                    doctor_id: '',
-                    doctor_name: '',
-                    doctor_code: '',
-                    specialization: '',
-                    lt_user_id: '',
-                    dha_id: '',
-                    moh_id: '',
-                    lt_role_id: '',
-                    lt_specialisation_id: ''
-                })
+            if (editingDoctor) {
+                await clinicConfigApi.updateDoctor(clinicId, editingDoctor.doctor_id, formData)
             } else {
-                alert('Failed to save doctor')
+                await clinicConfigApi.createDoctor(clinicId, formData)
             }
+
+            await loadDoctors()
+            setShowAddModal(false)
+            setEditingDoctor(null)
+            setFormData({
+                doctor_id: '',
+                doctor_name: '',
+                doctor_code: '',
+                specialization: '',
+                lt_user_id: '',
+                dha_id: '',
+                moh_id: '',
+                lt_role_id: '',
+                lt_specialisation_id: ''
+            })
         } catch (error) {
             console.error('Failed to save doctor:', error)
             alert('Failed to save doctor')
@@ -2331,15 +2154,8 @@ function DoctorsConfigTab({ clinicId }: { clinicId: string }) {
         if (!confirm('Are you sure you want to delete this doctor?')) return
 
         try {
-            const response = await fetch(`/api/clinic-config/doctors/${doctorId}?clinic_id=${clinicId}`, {
-                method: 'DELETE'
-            })
-
-            if (response.ok) {
-                await loadDoctors()
-            } else {
-                alert('Failed to delete doctor')
-            }
+            await clinicConfigApi.deleteDoctor(clinicId, doctorId)
+            await loadDoctors()
         } catch (error) {
             console.error('Failed to delete doctor:', error)
             alert('Failed to delete doctor')
@@ -2391,15 +2207,8 @@ function DoctorsConfigTab({ clinicId }: { clinicId: string }) {
                     const existingDoctor = doctors.find(d =>
                         d.doctor_id === doctorId || d.lt_user_id === ltUserId
                     )
-                    const method = existingDoctor ? 'PUT' : 'POST'
-                    const url = existingDoctor
-                        ? `/api/clinic-config/doctors/${existingDoctor.doctor_id}`
-                        : '/api/clinic-config/doctors'
-
-                    const response = await fetch(url, {
-                        method,
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
+                    if (existingDoctor) {
+                        await clinicConfigApi.updateDoctor(clinicId, existingDoctor.doctor_id, {
                             doctor_id: doctorId,
                             doctor_name: doctorName,
                             doctor_code: '',
@@ -2408,16 +2217,23 @@ function DoctorsConfigTab({ clinicId }: { clinicId: string }) {
                             dha_id: '',
                             moh_id: '',
                             lt_role_id: ltRoleId,
-                            lt_specialisation_id: ltSpecialisationId,
-                            clinic_id: clinicId
+                            lt_specialisation_id: ltSpecialisationId
                         })
-                    })
-
-                    if (response.ok) {
-                        successCount++
                     } else {
-                        failedCount++
+                        await clinicConfigApi.createDoctor(clinicId, {
+                            doctor_id: doctorId,
+                            doctor_name: doctorName,
+                            doctor_code: '',
+                            specialization: '',
+                            lt_user_id: ltUserId,
+                            dha_id: '',
+                            moh_id: '',
+                            lt_role_id: ltRoleId,
+                            lt_specialisation_id: ltSpecialisationId
+                        })
                     }
+
+                    successCount++
 
                     setImportProgress({ success: successCount, failed: failedCount, total: doctorsData.length })
                 } catch (error) {
@@ -2757,11 +2573,8 @@ function SpecialisationsConfigTab() {
     const loadSpecialisations = async () => {
         setIsLoading(true)
         try {
-            const response = await fetch('/api/clinic-config/specialisations')
-            if (response.ok) {
-                const data = await response.json()
-                setSpecialisations(data.specialisations || [])
-            }
+            const data = await clinicConfigApi.getSpecialisations()
+            setSpecialisations(data || [])
         } catch (error) {
             console.error('Failed to load specialisations:', error)
         } finally {
@@ -2779,21 +2592,11 @@ function SpecialisationsConfigTab() {
         try {
             const parsed = JSON.parse(importJson)
 
-            const response = await fetch('/api/clinic-config/specialisations', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(parsed)
-            })
-
-            if (response.ok) {
-                await loadSpecialisations()
-                setShowImportModal(false)
-                setImportJson('')
-                alert('Specialisations imported successfully')
-            } else {
-                const error = await response.json()
-                alert(`Failed to import: ${error.error || 'Unknown error'}`)
-            }
+            await clinicConfigApi.updateSpecialisations(parsed)
+            await loadSpecialisations()
+            setShowImportModal(false)
+            setImportJson('')
+            alert('Specialisations imported successfully')
         } catch (error) {
             console.error('Failed to parse JSON:', error)
             alert('Invalid JSON format. Please check the data and try again.')
@@ -2895,4 +2698,3 @@ function SpecialisationsConfigTab() {
         </div>
     )
 }
-

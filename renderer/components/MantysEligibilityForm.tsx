@@ -7,12 +7,19 @@ import {
   IDType,
   VisitType,
 } from "../types/mantys";
-import { ApiError, patientApi, type PatientData, type InsuranceData } from "../lib/api-client";
+import {
+  ApiError,
+  appointmentApi,
+  eligibilityHistoryApi,
+  patientApi,
+  type EligibilityHistoryItem,
+  type InsuranceData,
+  type PatientData,
+} from "../lib/api-client";
 import { buildMantysPayload } from "../lib/mantys-utils";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
 import { useAuth } from "../contexts/AuthContext";
-import { EligibilityCheckMetadata } from "../lib/redis-eligibility-mapping";
 import { useTPAConfigs, useDoctors } from "../hooks/useClinicConfig";
 import {
   useCreateEligibilityCheck,
@@ -143,7 +150,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   }, [tpaConfig]);
 
   // Previous Searches State
-  const [previousSearches, setPreviousSearches] = useState<EligibilityCheckMetadata[]>([]);
+  const [previousSearches, setPreviousSearches] = useState<EligibilityHistoryItem[]>([]);
   const [loadingPreviousSearches, setLoadingPreviousSearches] = useState(false);
 
   // Fetch appointment data to get physician information and pre-fill doctor
@@ -155,10 +162,15 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           const today = new Date();
           const fromDate = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
 
-          const response = await fetch(`/api/appointments/today?fromDate=${fromDate}&toDate=${fromDate}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.body?.Data && Array.isArray(data.body.Data)) {
+          const appointmentResponse = await appointmentApi.getToday({
+            fromDate,
+            toDate: fromDate,
+          });
+          const data = appointmentResponse as {
+            body?: { Data?: any[] };
+            appointments?: any[];
+          };
+          if (data.body?.Data && Array.isArray(data.body.Data)) {
               // Find the appointment matching our appointment_id
               const appointment = data.body.Data.find(
                 (apt: any) => apt.appointment_id === patientData.appointment_id
@@ -222,22 +234,21 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   console.log("⚠️ No matching doctor found for:", { providerName, physicianName, physicianId });
                 }
               }
-            } else if (data.appointments && Array.isArray(data.appointments)) {
-              // Fallback to old format
-              const appointment = data.appointments.find(
-                (apt: any) => apt.appointment_id === patientData.appointment_id
+          } else if (data.appointments && Array.isArray(data.appointments)) {
+            // Fallback to old format
+            const appointment = data.appointments.find(
+              (apt: any) => apt.appointment_id === patientData.appointment_id
+            );
+
+            if (appointment && appointment.physician_name) {
+              const physicianName = appointment.physician_name.trim();
+              const matchedDoctor = doctorsList.find(
+                (doc) => doc.doctor_name?.trim().toLowerCase() === physicianName.toLowerCase()
               );
 
-              if (appointment && appointment.physician_name) {
-                const physicianName = appointment.physician_name.trim();
-                const matchedDoctor = doctorsList.find(
-                  (doc) => doc.doctor_name?.trim().toLowerCase() === physicianName.toLowerCase()
-                );
-
-                if (matchedDoctor && matchedDoctor.dha_id && matchedDoctor.dha_id.trim() !== "") {
-                  console.log("✅ Pre-filling doctor from appointment (fallback):", matchedDoctor.doctor_name, "DHA ID:", matchedDoctor.dha_id);
-                  setDoctorName(matchedDoctor.dha_id);
-                }
+              if (matchedDoctor && matchedDoctor.dha_id && matchedDoctor.dha_id.trim() !== "") {
+                console.log("✅ Pre-filling doctor from appointment (fallback):", matchedDoctor.doctor_name, "DHA ID:", matchedDoctor.dha_id);
+                setDoctorName(matchedDoctor.dha_id);
               }
             }
           }
@@ -865,28 +876,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
     setLoadingPreviousSearches(true);
     try {
-      let searches: EligibilityCheckMetadata[] = [];
+      let searches: EligibilityHistoryItem[] = [];
 
       // Try by patientId first
       if (patientId) {
-        const response = await fetch(`/api/eligibility/get-by-patient-id?patientId=${patientId}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            searches = data.data;
-          }
-        }
+        searches = await eligibilityHistoryApi.getByPatientId(String(patientId));
       }
 
       // If no results and we have mpi, try by mpi
       if (searches.length === 0 && mpi) {
-        const response = await fetch(`/api/eligibility/get-by-mpi?mpi=${mpi}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            searches = data.data;
-          }
-        }
+        searches = await eligibilityHistoryApi.getByMPI(mpi);
       }
 
       setPreviousSearches(searches);

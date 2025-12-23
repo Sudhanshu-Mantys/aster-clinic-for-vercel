@@ -139,6 +139,22 @@ export const patientApi = {
       body: params,
       timeout: 5000,
     }),
+
+  updateContext: (params: {
+    appointmentId?: number;
+    patientId?: number;
+    mpi?: string;
+    updates: Record<string, unknown>;
+  }) =>
+    fetchJson<{ success: boolean; message?: string }>('/api/patient/context/update', {
+      method: 'POST',
+      body: {
+        appointmentId: params.appointmentId,
+        patientId: params.patientId,
+        mpi: params.mpi,
+        updates: params.updates,
+      },
+    }),
 };
 
 // Appointment APIs
@@ -254,43 +270,382 @@ export const mantysApi = {
     }),
 };
 
+function extractConfigList<T>(data: unknown): T[] {
+  if (Array.isArray(data)) {
+    return data as T[];
+  }
+  if (data && typeof data === 'object' && 'configs' in data) {
+    return ((data as { configs?: T[] }).configs) ?? [];
+  }
+  return [];
+}
+
+function extractSingleConfig<T>(data: unknown): T | null {
+  if (data && typeof data === 'object' && 'config' in data) {
+    return (data as { config?: T }).config ?? null;
+  }
+  return (data as T) ?? null;
+}
+
+function extractPlans(data: unknown, tpaInsCode?: string): Plan[] {
+  if (Array.isArray(data)) return data as Plan[];
+  if (data && typeof data === 'object') {
+    if ('plans' in data && Array.isArray((data as { plans?: Plan[] }).plans)) {
+      return (data as { plans?: Plan[] }).plans || [];
+    }
+    if ('plans_by_tpa' in data) {
+      const byTpa = (data as { plans_by_tpa?: Record<string, Plan[]> }).plans_by_tpa || {};
+      if (tpaInsCode && byTpa[tpaInsCode]) {
+        return byTpa[tpaInsCode];
+      }
+      return Object.values(byTpa).flat();
+    }
+  }
+  return [];
+}
+
+function extractPlansByTPA(data: unknown): Record<string, Plan[]> {
+  if (data && typeof data === 'object' && 'plans_by_tpa' in data) {
+    return (data as { plans_by_tpa?: Record<string, Plan[]> }).plans_by_tpa || {};
+  }
+  if (data && typeof data === 'object' && 'plans' in data && 'tpa_ins_code' in data) {
+    const plans = (data as { plans?: Plan[] }).plans || [];
+    const tpaInsCode = (data as { tpa_ins_code?: string }).tpa_ins_code;
+    if (tpaInsCode) {
+      return { [tpaInsCode]: plans };
+    }
+  }
+  return {};
+}
+
+function extractPayers(data: unknown, tpaInsCode?: string): Payer[] {
+  if (Array.isArray(data)) return data as Payer[];
+  if (data && typeof data === 'object') {
+    if ('payers' in data && Array.isArray((data as { payers?: Payer[] }).payers)) {
+      return (data as { payers?: Payer[] }).payers || [];
+    }
+    if ('payers_by_tpa' in data) {
+      const byTpa = (data as { payers_by_tpa?: Record<string, Payer[]> }).payers_by_tpa || {};
+      if (tpaInsCode && byTpa[tpaInsCode]) {
+        return byTpa[tpaInsCode];
+      }
+      return Object.values(byTpa).flat();
+    }
+  }
+  return [];
+}
+
+function extractPayersByTPA(data: unknown): Record<string, Payer[]> {
+  if (data && typeof data === 'object' && 'payers_by_tpa' in data) {
+    return (data as { payers_by_tpa?: Record<string, Payer[]> }).payers_by_tpa || {};
+  }
+  if (data && typeof data === 'object' && 'payers' in data && 'tpa_ins_code' in data) {
+    const payers = (data as { payers?: Payer[] }).payers || [];
+    const tpaInsCode = (data as { tpa_ins_code?: string }).tpa_ins_code;
+    if (tpaInsCode) {
+      return { [tpaInsCode]: payers };
+    }
+  }
+  return {};
+}
+
+function extractMantysNetworks(data: unknown, tpaInsCode?: string): MantysNetwork[] {
+  if (Array.isArray(data)) return data as MantysNetwork[];
+  if (data && typeof data === 'object') {
+    if ('networks' in data && Array.isArray((data as { networks?: MantysNetwork[] }).networks)) {
+      return (data as { networks?: MantysNetwork[] }).networks || [];
+    }
+    if ('networks_by_tpa' in data) {
+      const byTpa = (data as { networks_by_tpa?: Record<string, MantysNetwork[]> }).networks_by_tpa || {};
+      if (tpaInsCode && byTpa[tpaInsCode]) {
+        return byTpa[tpaInsCode];
+      }
+      return Object.values(byTpa).flat();
+    }
+  }
+  return [];
+}
+
+function extractMantysNetworksByTPA(data: unknown): Record<string, MantysNetwork[]> {
+  if (data && typeof data === 'object' && 'networks_by_tpa' in data) {
+    return (data as { networks_by_tpa?: Record<string, MantysNetwork[]> }).networks_by_tpa || {};
+  }
+  if (data && typeof data === 'object' && 'networks' in data && 'tpa_ins_code' in data) {
+    const networks = (data as { networks?: MantysNetwork[] }).networks || [];
+    const tpaInsCode = (data as { tpa_ins_code?: string }).tpa_ins_code;
+    if (tpaInsCode) {
+      return { [tpaInsCode]: networks };
+    }
+  }
+  return {};
+}
+
+function extractPlanMappings(data: unknown): PlanNetworkMapping[] {
+  if (Array.isArray(data)) return data as PlanNetworkMapping[];
+  if (data && typeof data === 'object' && 'mappings' in data) {
+    return ((data as { mappings?: PlanNetworkMapping[] }).mappings) ?? [];
+  }
+  return [];
+}
+
+function extractSpecialisations(data: unknown): Specialisation[] {
+  if (Array.isArray(data)) return data as Specialisation[];
+  if (data && typeof data === 'object' && 'specialisations' in data) {
+    return ((data as { specialisations?: Specialisation[] }).specialisations) ?? [];
+  }
+  return [];
+}
+
 // Clinic Config APIs
 export const clinicConfigApi = {
-  getSettings: (clinicId: string) =>
-    fetchJson<ClinicConfigSettings>(`/api/clinic-config?clinic_id=${clinicId}`),
+  getSettings: async (clinicId: string) => {
+    const response = await fetchJson<ClinicConfigSettings | { config?: ClinicConfigSettings }>(
+      `/api/clinic-config/clinic?clinic_id=${clinicId}`
+    );
+    return extractSingleConfig<ClinicConfigSettings>(response);
+  },
 
-  updateSettings: (clinicId: string, settings: Partial<ClinicConfigSettings>) =>
-    fetchJson<void>('/api/clinic-config', {
-      method: 'PUT',
-      body: { clinic_id: clinicId, ...settings },
+  updateSettings: async (clinicId: string, settings: Partial<ClinicConfigSettings>) => {
+    const response = await fetchJson<ClinicConfigSettings | { config?: ClinicConfigSettings }>(
+      '/api/clinic-config/clinic',
+      {
+        method: 'POST',
+        body: { clinic_id: clinicId, ...settings },
+      }
+    );
+    return extractSingleConfig<ClinicConfigSettings>(response);
+  },
+
+  getTPA: async (clinicId: string) => {
+    const response = await fetchJson<TPAConfig[] | { configs?: TPAConfig[] }>(
+      `/api/clinic-config/tpa?clinic_id=${clinicId}`
+    );
+    return extractConfigList<TPAConfig>(response);
+  },
+
+  getTPAByName: async (clinicId: string, tpaName: string) => {
+    const configs = await clinicConfigApi.getTPA(clinicId);
+    return configs.find((config) => config.tpa_name === tpaName) || null;
+  },
+
+  createTPA: (clinicId: string, config: Partial<TPAConfig> & { tpa_id?: string; ins_code?: string }) =>
+    fetchJson<{ config?: TPAConfig }>('/api/clinic-config/tpa', {
+      method: 'POST',
+      body: { clinic_id: clinicId, ...config },
     }),
 
-  getTPA: (clinicId: string) =>
-    fetchJson<TPAConfig[]>(`/api/clinic-config/tpa?clinic_id=${clinicId}`),
-
-  getTPAByName: (clinicId: string, tpaName: string) =>
-    fetchJson<TPAConfig>(`/api/clinic-config/tpa?clinic_id=${clinicId}&tpa_name=${encodeURIComponent(tpaName)}`),
-
-  updateTPA: (clinicId: string, tpaName: string, config: Partial<TPAConfig>) =>
-    fetchJson<void>('/api/clinic-config/tpa', {
-      method: 'PUT',
-      body: { clinic_id: clinicId, tpa_name: tpaName, ...config },
+  bulkImportTPAMappings: (clinicId: string, mappings: unknown[]) =>
+    fetchJson<{ imported?: number; errors?: number }>('/api/clinic-config/tpa', {
+      method: 'POST',
+      body: { clinic_id: clinicId, bulk_import: true, mappings },
     }),
 
-  getDoctors: (clinicId: string) =>
-    fetchJson<Doctor[]>(`/api/clinic-config/doctors?clinic_id=${clinicId}`),
+  updateTPA: (clinicId: string, tpaId: string, config: Partial<TPAConfig>) =>
+    fetchJson<{ config?: TPAConfig }>(`/api/clinic-config/tpa/${encodeURIComponent(tpaId)}`, {
+      method: 'PUT',
+      body: { clinic_id: clinicId, ...config },
+    }),
 
-  getPlans: (clinicId: string) =>
-    fetchJson<Plan[]>(`/api/clinic-config/plans?clinic_id=${clinicId}`),
+  deleteTPA: (clinicId: string, tpaId: string) =>
+    fetchJson<void>(`/api/clinic-config/tpa/${encodeURIComponent(tpaId)}?clinic_id=${clinicId}`, {
+      method: 'DELETE',
+    }),
 
-  getNetworks: (clinicId: string) =>
-    fetchJson<Network[]>(`/api/clinic-config/networks?clinic_id=${clinicId}`),
+  getDoctors: async (clinicId: string) => {
+    const response = await fetchJson<Doctor[] | { configs?: Doctor[] }>(
+      `/api/clinic-config/doctors?clinic_id=${clinicId}`
+    );
+    return extractConfigList<Doctor>(response);
+  },
 
-  getPayers: (clinicId: string) =>
-    fetchJson<Payer[]>(`/api/clinic-config/payers?clinic_id=${clinicId}`),
+  getPlans: async (clinicId: string, tpaInsCode?: string) => {
+    const url = tpaInsCode
+      ? `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}`
+      : `/api/clinic-config/plans?clinic_id=${clinicId}`;
+    const response = await fetchJson<unknown>(url);
+    return extractPlans(response, tpaInsCode);
+  },
 
-  getSpecialisations: (clinicId: string) =>
-    fetchJson<Specialisation[]>(`/api/clinic-config/specialisations?clinic_id=${clinicId}`),
+  getPlansByTPA: async (clinicId: string) => {
+    const response = await fetchJson<unknown>(`/api/clinic-config/plans?clinic_id=${clinicId}`);
+    return extractPlansByTPA(response);
+  },
+
+  fetchPlansFromApi: async (clinicId: string, tpaInsCode: string) =>
+    fetchJson<{ plans?: Plan[]; record_count?: number }>(
+      `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&fetch_from_api=true`
+    ),
+
+  exportPlansTemplate: async (clinicId: string, tpaInsCode: string) =>
+    fetchJson<unknown>(
+      `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=mapping_template`
+    ),
+
+  getMantysNetworks: async (clinicId: string, tpaInsCode?: string) => {
+    const url = tpaInsCode
+      ? `/api/clinic-config/mantys-networks?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}`
+      : `/api/clinic-config/mantys-networks?clinic_id=${clinicId}`;
+    const response = await fetchJson<unknown>(url);
+    return extractMantysNetworks(response, tpaInsCode);
+  },
+
+  getMantysNetworksByTPA: async (clinicId: string) => {
+    const response = await fetchJson<unknown>(`/api/clinic-config/mantys-networks?clinic_id=${clinicId}`);
+    return extractMantysNetworksByTPA(response);
+  },
+
+  importMantysNetworks: async (clinicId: string, tpaInsCode: string) =>
+    fetchJson<{ networks?: MantysNetwork[]; record_count?: number }>(
+      `/api/clinic-config/mantys-networks?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&import_from_mapping=true`
+    ),
+
+  getNetworks: async (clinicId: string) => {
+    const response = await fetchJson<Network[] | { configs?: Network[] }>(
+      `/api/clinic-config/networks?clinic_id=${clinicId}`
+    );
+    return extractConfigList<Network>(response);
+  },
+
+  getPlanMappings: async (clinicId: string, tpaInsCode?: string) => {
+    const url = tpaInsCode
+      ? `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}`
+      : `/api/clinic-config/plan-mappings?clinic_id=${clinicId}`;
+    const response = await fetchJson<unknown>(url);
+    return extractPlanMappings(response);
+  },
+
+  createPlanMapping: (
+    clinicId: string,
+    mapping: Omit<PlanNetworkMapping, 'id' | 'clinic_id'>
+  ) =>
+    fetchJson<{ mapping?: PlanNetworkMapping }>(`/api/clinic-config/plan-mappings?clinic_id=${clinicId}`, {
+      method: 'POST',
+      body: mapping,
+    }),
+
+  bulkImportPlanMappings: (
+    clinicId: string,
+    mappings: Array<Omit<PlanNetworkMapping, 'id' | 'clinic_id'>>
+  ) =>
+    fetchJson<{ imported?: number; errors?: number; defaults_fixed?: number }>(
+      `/api/clinic-config/plan-mappings?clinic_id=${clinicId}`,
+      {
+        method: 'POST',
+        body: { bulk_import: true, mappings },
+      }
+    ),
+
+  setDefaultPlanMapping: (clinicId: string, tpaInsCode: string, mappingId: string) =>
+    fetchJson<void>(
+      `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}&set_default=true`,
+      { method: 'PUT' }
+    ),
+
+  unsetDefaultPlanMapping: (clinicId: string, tpaInsCode: string, mappingId: string) =>
+    fetchJson<void>(
+      `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}&unset_default=true`,
+      { method: 'PUT' }
+    ),
+
+  deletePlanMapping: (clinicId: string, tpaInsCode: string, mappingId: string) =>
+    fetchJson<void>(
+      `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}`,
+      { method: 'DELETE' }
+    ),
+
+  getPayers: async (clinicId: string, tpaInsCode?: string) => {
+    const url = tpaInsCode
+      ? `/api/clinic-config/payers?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}`
+      : `/api/clinic-config/payers?clinic_id=${clinicId}`;
+    const response = await fetchJson<unknown>(url);
+    return extractPayers(response, tpaInsCode);
+  },
+
+  getPayersByTPA: async (clinicId: string) => {
+    const response = await fetchJson<unknown>(`/api/clinic-config/payers?clinic_id=${clinicId}`);
+    return extractPayersByTPA(response);
+  },
+
+  fetchPayersFromApi: async (clinicId: string, tpaInsCode: string) =>
+    fetchJson<{ payers?: Payer[]; record_count?: number }>(
+      `/api/clinic-config/payers?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&fetch_from_api=true`
+    ),
+
+  deletePayersByTPA: (clinicId: string, tpaInsCode: string) =>
+    fetchJson<void>(`/api/clinic-config/payers/${encodeURIComponent(tpaInsCode)}?clinic_id=${clinicId}`, {
+      method: 'DELETE',
+    }),
+
+  getSpecialisations: async () => {
+    const response = await fetchJson<unknown>('/api/clinic-config/specialisations');
+    return extractSpecialisations(response);
+  },
+
+  getSpecialisationsMapping: async () => {
+    const response = await fetchJson<{ mapping?: Record<string, string> }>('/api/clinic-config/specialisations');
+    return response.mapping || {};
+  },
+
+  updateSpecialisations: (payload: unknown) =>
+    fetchJson<{ mapping?: Record<string, string> }>('/api/clinic-config/specialisations', {
+      method: 'POST',
+      body: payload,
+    }),
+
+  createDoctor: (clinicId: string, doctor: Partial<Doctor>) =>
+    fetchJson<{ config?: Doctor }>('/api/clinic-config/doctors', {
+      method: 'POST',
+      body: { clinic_id: clinicId, ...doctor },
+    }),
+
+  updateDoctor: (clinicId: string, doctorId: string, doctor: Partial<Doctor>) =>
+    fetchJson<{ config?: Doctor }>(`/api/clinic-config/doctors/${encodeURIComponent(doctorId)}`, {
+      method: 'PUT',
+      body: { clinic_id: clinicId, ...doctor },
+    }),
+
+  deleteDoctor: (clinicId: string, doctorId: string) =>
+    fetchJson<void>(`/api/clinic-config/doctors/${encodeURIComponent(doctorId)}?clinic_id=${clinicId}`, {
+      method: 'DELETE',
+    }),
+};
+
+export const asterApi = {
+  savePolicy: (payload: {
+    policyData: unknown;
+    patientId: number;
+    appointmentId?: number;
+    encounterId?: number;
+    payerId?: number;
+  }) =>
+    fetchJson<unknown>('/api/aster/save-policy', {
+      method: 'POST',
+      body: payload,
+    }),
+
+  saveEligibilityOrder: (payload: Record<string, unknown>) =>
+    fetchJson<unknown>('/api/aster/save-eligibility-order', {
+      method: 'POST',
+      body: payload,
+    }),
+
+  uploadAttachment: (payload: {
+    patientId: number;
+    encounterId?: number | null;
+    appointmentId: number;
+    insTpaPatId: number;
+    fileName: string;
+    fileUrl?: string;
+    fileBase64?: string;
+    uploadDate?: string;
+    expiryDate?: string;
+    reportDate?: string;
+    createdBy?: number;
+  }) =>
+    fetchJson<unknown>('/api/aster/upload-attachment', {
+      method: 'POST',
+      body: payload,
+    }),
 };
 
 // ============================================================================
@@ -683,6 +1038,7 @@ export interface Doctor {
   dha_id?: string;
   lt_user_id?: string;
   specialisation?: string;
+  specialization?: string;
   [key: string]: unknown;
 }
 
@@ -691,6 +1047,27 @@ export interface Plan {
   name: string;
   payer_id?: string;
   [key: string]: unknown;
+}
+
+export interface PlanNetworkMapping {
+  id: string;
+  clinic_id: string;
+  tpa_ins_code: string;
+  lt_plan_id: number;
+  lt_plan_name: string;
+  lt_plan_code: string;
+  mantys_network_name: string;
+  is_default?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MantysNetwork {
+  name: string;
+  tpa_ins_code: string;
+  clinic_id?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Network {

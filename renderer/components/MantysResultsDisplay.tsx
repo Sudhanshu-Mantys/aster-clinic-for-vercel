@@ -18,7 +18,13 @@ import { LifetrenzEligibilityPreview } from "./LifetrenzEligibilityPreview";
 import { useAuth } from "../contexts/AuthContext";
 import { Modal } from "./ui/modal";
 import Select from "react-select";
-import { ApiError, patientApi } from "../lib/api-client";
+import {
+  ApiError,
+  appointmentApi,
+  asterApi,
+  clinicConfigApi,
+  patientApi,
+} from "../lib/api-client";
 
 interface MantysResultsDisplayProps {
   response: MantysEligibilityResponse;
@@ -216,17 +222,29 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         try {
           const today = new Date();
           const fromDate = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
-          const response = await fetch(`/api/appointments/today?fromDate=${fromDate}&toDate=${fromDate}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.body?.Data && Array.isArray(data.body.Data)) {
-              const appointment = data.body.Data.find(
-                (apt: any) => apt.appointment_id === finalAppointmentId
-              );
-              if (appointment?.physician_id) {
-                console.log("✅ Found physician_id from appointment API:", appointment.physician_id);
-                setEnrichedPhysicianId(appointment.physician_id);
-              }
+          const appointmentResponse = await appointmentApi.getToday({
+            fromDate,
+            toDate: fromDate,
+          });
+          const data = appointmentResponse as {
+            body?: { Data?: any[] };
+            appointments?: any[];
+          };
+          if (data.body?.Data && Array.isArray(data.body.Data)) {
+            const appointment = data.body.Data.find(
+              (apt: any) => apt.appointment_id === finalAppointmentId
+            );
+            if (appointment?.physician_id) {
+              console.log("✅ Found physician_id from appointment API:", appointment.physician_id);
+              setEnrichedPhysicianId(appointment.physician_id);
+            }
+          } else if (data.appointments && Array.isArray(data.appointments)) {
+            const appointment = data.appointments.find(
+              (apt: any) => apt.appointment_id === finalAppointmentId
+            );
+            if (appointment?.physician_id) {
+              console.log("✅ Found physician_id from appointment API (fallback):", appointment.physician_id);
+              setEnrichedPhysicianId(appointment.physician_id);
             }
           }
         } catch (error) {
@@ -281,21 +299,17 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           if (finalAppointmentId && insuranceResponse) {
             try {
               console.log("💾 Storing insurance details in Redis for appointment:", finalAppointmentId);
-              const updateResponse = await fetch("/api/patient/context/update", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  appointmentId: finalAppointmentId,
-                  updates: {
-                    insuranceDetails: insuranceResponse,
-                  },
-                }),
+              const updateResult = await patientApi.updateContext({
+                appointmentId: finalAppointmentId,
+                updates: {
+                  insuranceDetails: insuranceResponse,
+                },
               });
 
-              if (updateResponse.ok) {
+              if (updateResult.success) {
                 console.log("✅ Stored insurance details in Redis");
               } else {
-                console.warn("⚠️ Failed to store insurance details in Redis:", updateResponse.status);
+                console.warn("⚠️ Failed to store insurance details in Redis");
               }
             } catch (updateError) {
               console.error("❌ Error storing insurance details in Redis:", updateError);
@@ -320,135 +334,110 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
       try {
         console.log("🔍 Loading TPA config for save policy:", response.tpa, "clinic:", selectedClinicId);
-        const configResponse = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
-        if (configResponse.ok) {
-          const configData = await configResponse.json();
-          if (configData.configs && Array.isArray(configData.configs)) {
-            let config: any = null;
-            let tpaInsCodeToUse: string | null = null;
+        const configs = await clinicConfigApi.getTPA(selectedClinicId);
+        if (configs.length > 0) {
+          let config: any = null;
+          let tpaInsCodeToUse: string | null = null;
 
-            // PRIORITY 1: Try to extract payer code from payer_name first (most reliable)
-            if (data?.policy_network?.payer_name) {
-              const payerName = data.policy_network.payer_name;
-              console.log("🔍 PRIORITY: Extracting payer code from payer_name:", payerName);
-              // Extract payer code from payer_name (e.g., "QATAR INSURANCE COMPANY - INS019" -> "INS019")
-              const codeMatch = payerName.match(/\b(INS|TPA|SP|A|D)\d+\b/i);
-              if (codeMatch) {
-                const extractedCode = codeMatch[0].toUpperCase().trim();
-                console.log("📋 Extracted payer code from payer_name:", extractedCode);
-                // Try to find TPA config by this extracted code
-                config = configData.configs.find((c: any) => c.ins_code === extractedCode);
-                if (!config) {
-                  config = configData.configs.find((c: any) => c.tpa_id === extractedCode);
-                }
-                if (!config) {
-                  config = configData.configs.find((c: any) => c.payer_code === extractedCode);
-                }
-                if (config) {
-                  console.log("✅ Found TPA config by extracted payer code from payer_name:", extractedCode);
-                  tpaInsCodeToUse = config.ins_code || extractedCode;
-                }
-              }
-            }
-
-            // FALLBACK: If not found from payer_name, try to find config by response.tpa
-            if (!config) {
-              console.log("🔍 FALLBACK: Trying to find TPA config by response.tpa:", response.tpa);
-              config = configData.configs.find(
-                (c: any) => c.ins_code === response.tpa
-              );
+          // PRIORITY 1: Try to extract payer code from payer_name first (most reliable)
+          if (data?.policy_network?.payer_name) {
+            const payerName = data.policy_network.payer_name;
+            console.log("🔍 PRIORITY: Extracting payer code from payer_name:", payerName);
+            // Extract payer code from payer_name (e.g., "QATAR INSURANCE COMPANY - INS019" -> "INS019")
+            const codeMatch = payerName.match(/\b(INS|TPA|SP|A|D)\d+\b/i);
+            if (codeMatch) {
+              const extractedCode = codeMatch[0].toUpperCase().trim();
+              console.log("📋 Extracted payer code from payer_name:", extractedCode);
+              // Try to find TPA config by this extracted code
+              config = configs.find((c: any) => c.ins_code === extractedCode);
               if (!config) {
-                config = configData.configs.find(
-                  (c: any) => c.tpa_id === response.tpa
-                );
+                config = configs.find((c: any) => c.tpa_id === extractedCode);
               }
               if (!config) {
-                config = configData.configs.find(
-                  (c: any) => c.payer_code === response.tpa
-                );
+                config = configs.find((c: any) => c.payer_code === extractedCode);
               }
               if (config) {
-                console.log("✅ Found TPA config by response.tpa:", response.tpa);
-                tpaInsCodeToUse = config.ins_code || response.tpa;
+                console.log("✅ Found TPA config by extracted payer code from payer_name:", extractedCode);
+                tpaInsCodeToUse = config.ins_code || extractedCode;
               }
             }
+          }
 
+          // FALLBACK: If not found from payer_name, try to find config by response.tpa
+          if (!config) {
+            console.log("🔍 FALLBACK: Trying to find TPA config by response.tpa:", response.tpa);
+            config = configs.find(
+              (c: any) => c.ins_code === response.tpa
+            );
+            if (!config) {
+              config = configs.find(
+                (c: any) => c.tpa_id === response.tpa
+              );
+            }
+            if (!config) {
+              config = configs.find(
+                (c: any) => c.payer_code === response.tpa
+              );
+            }
             if (config) {
-              console.log("✅ Found TPA config for save policy:", {
-                ins_code: config.ins_code,
-                tpa_name: config.tpa_name,
-                hospital_insurance_mapping_id: config.hospital_insurance_mapping_id,
-                lt_site_id: config.lt_site_id,
-                lt_customer_id: config.lt_customer_id,
-                lt_other_config: config.lt_other_config
-              });
-              setTpaConfig(config);
-
-              // Load plans, networks, and plan mappings for this TPA
-              const tpaInsCode = tpaInsCodeToUse || config.ins_code || response.tpa;
-              try {
-                // Load plans
-                const plansResponse = await fetch(`/api/clinic-config/plans?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
-                if (plansResponse.ok) {
-                  const plansData = await plansResponse.json();
-                  // Handle both response formats: { plans, tpa_ins_code } or { plans_by_tpa: {...} }
-                  let plans: any[] = [];
-                  if (plansData.plans && Array.isArray(plansData.plans)) {
-                    plans = plansData.plans;
-                  } else if (plansData.plans_by_tpa && plansData.plans_by_tpa[tpaInsCode]) {
-                    plans = plansData.plans_by_tpa[tpaInsCode];
-                  }
-                  if (plans.length > 0) {
-                    setPlansConfig(plans);
-                    console.log("✅ Loaded plans config:", plans.length, "plans for TPA:", tpaInsCode);
-                  }
-                }
-
-                // Load Mantys networks (for display/matching)
-                const networksResponse = await fetch(`/api/clinic-config/mantys-networks?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
-                if (networksResponse.ok) {
-                  const networksData = await networksResponse.json();
-                  if (networksData.networks && Array.isArray(networksData.networks)) {
-                    setNetworksConfig(networksData.networks);
-                    console.log("✅ Loaded Mantys networks config:", networksData.networks.length, "networks for TPA:", tpaInsCode);
-                  }
-                }
-
-                // Load Aster networks config (with numeric network_id)
-                const asterNetworksResponse = await fetch(`/api/clinic-config/networks?clinic_id=${selectedClinicId}`);
-                if (asterNetworksResponse.ok) {
-                  const asterNetworksData = await asterNetworksResponse.json();
-                  if (asterNetworksData.configs && Array.isArray(asterNetworksData.configs)) {
-                    setAsterNetworksConfig(asterNetworksData.configs);
-                    console.log("✅ Loaded Aster networks config:", asterNetworksData.configs.length, "networks with IDs");
-                  }
-                }
-
-                // Load plan mappings
-                const mappingsResponse = await fetch(`/api/clinic-config/plan-mappings?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
-                if (mappingsResponse.ok) {
-                  const mappingsData = await mappingsResponse.json();
-                  if (mappingsData.mappings && Array.isArray(mappingsData.mappings)) {
-                    setPlanMappings(mappingsData.mappings);
-                    console.log("✅ Loaded plan mappings:", mappingsData.mappings.length, "mappings for TPA:", tpaInsCode);
-                  }
-                }
-
-                // Load payers
-                const payersResponse = await fetch(`/api/clinic-config/payers?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
-                if (payersResponse.ok) {
-                  const payersData = await payersResponse.json();
-                  if (payersData.payers && Array.isArray(payersData.payers)) {
-                    setPayersConfig(payersData.payers);
-                    console.log("✅ Loaded payers config:", payersData.payers.length, "payers for TPA:", tpaInsCode);
-                  }
-                }
-              } catch (error) {
-                console.error("❌ Failed to load config data:", error);
-              }
-            } else {
-              console.log("⚠️ No TPA config found for:", response.tpa);
+              console.log("✅ Found TPA config by response.tpa:", response.tpa);
+              tpaInsCodeToUse = config.ins_code || response.tpa;
             }
+          }
+
+          if (config) {
+            console.log("✅ Found TPA config for save policy:", {
+              ins_code: config.ins_code,
+              tpa_name: config.tpa_name,
+              hospital_insurance_mapping_id: config.hospital_insurance_mapping_id,
+              lt_site_id: config.lt_site_id,
+              lt_customer_id: config.lt_customer_id,
+              lt_other_config: config.lt_other_config
+            });
+            setTpaConfig(config);
+
+            // Load plans, networks, and plan mappings for this TPA
+            const tpaInsCode = tpaInsCodeToUse || config.ins_code || response.tpa;
+            try {
+              // Load plans
+              const plans = await clinicConfigApi.getPlans(selectedClinicId, tpaInsCode);
+              if (plans.length > 0) {
+                setPlansConfig(plans);
+                console.log("✅ Loaded plans config:", plans.length, "plans for TPA:", tpaInsCode);
+              }
+
+              // Load Mantys networks (for display/matching)
+              const networks = await clinicConfigApi.getMantysNetworks(selectedClinicId, tpaInsCode);
+              if (networks.length > 0) {
+                setNetworksConfig(networks);
+                console.log("✅ Loaded Mantys networks config:", networks.length, "networks for TPA:", tpaInsCode);
+              }
+
+              // Load Aster networks config (with numeric network_id)
+              const asterNetworks = await clinicConfigApi.getNetworks(selectedClinicId);
+              if (asterNetworks.length > 0) {
+                setAsterNetworksConfig(asterNetworks);
+                console.log("✅ Loaded Aster networks config:", asterNetworks.length, "networks with IDs");
+              }
+
+              // Load plan mappings
+              const mappings = await clinicConfigApi.getPlanMappings(selectedClinicId, tpaInsCode);
+              if (mappings.length > 0) {
+                setPlanMappings(mappings);
+                console.log("✅ Loaded plan mappings:", mappings.length, "mappings for TPA:", tpaInsCode);
+              }
+
+              // Load payers
+              const payers = await clinicConfigApi.getPayers(selectedClinicId, tpaInsCode);
+              if (payers.length > 0) {
+                setPayersConfig(payers);
+                console.log("✅ Loaded payers config:", payers.length, "payers for TPA:", tpaInsCode);
+              }
+            } catch (error) {
+              console.error("❌ Failed to load config data:", error);
+            }
+          } else {
+            console.log("⚠️ No TPA config found for:", response.tpa);
           }
         }
       } catch (error) {
@@ -690,15 +679,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         console.log('🔄 PayersConfig not loaded yet, loading on-demand...');
 
         // First, try to get TPA config to get the ins_code
-        const configResponse = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
-        if (!configResponse.ok) {
+        const configs = await clinicConfigApi.getTPA(selectedClinicId);
+        if (configs.length === 0) {
           console.log('⚠️ Could not load TPA config');
-          return [];
-        }
-
-        const configData = await configResponse.json();
-        if (!configData.configs || !Array.isArray(configData.configs)) {
-          console.log('⚠️ Invalid TPA config response');
           return [];
         }
 
@@ -716,12 +699,12 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             const extractedCode = codeMatch[0].toUpperCase().trim();
             console.log('📋 Extracted payer code from payer_name:', extractedCode);
             // Try to find TPA config by this extracted code
-            config = configData.configs.find((c: any) => c.ins_code === extractedCode);
+            config = configs.find((c: any) => c.ins_code === extractedCode);
             if (!config) {
-              config = configData.configs.find((c: any) => c.tpa_id === extractedCode);
+              config = configs.find((c: any) => c.tpa_id === extractedCode);
             }
             if (!config) {
-              config = configData.configs.find((c: any) => c.payer_code === extractedCode);
+              config = configs.find((c: any) => c.payer_code === extractedCode);
             }
             if (config) {
               console.log('✅ Found TPA config by extracted payer code from payer_name:', extractedCode);
@@ -733,12 +716,12 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         // FALLBACK: If not found from payer_name, try to find config by response.tpa
         if (!config) {
           console.log('🔍 FALLBACK: Trying to find TPA config by response.tpa:', response.tpa);
-          config = configData.configs.find((c: any) => c.ins_code === response.tpa);
+          config = configs.find((c: any) => c.ins_code === response.tpa);
           if (!config) {
-            config = configData.configs.find((c: any) => c.tpa_id === response.tpa);
+            config = configs.find((c: any) => c.tpa_id === response.tpa);
           }
           if (!config) {
-            config = configData.configs.find((c: any) => c.payer_code === response.tpa);
+            config = configs.find((c: any) => c.payer_code === response.tpa);
           }
           if (config) {
             console.log('✅ Found TPA config by response.tpa:', response.tpa);
@@ -757,14 +740,11 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         const tpaInsCode = tpaInsCodeToUse || config.ins_code || response.tpa;
 
         // Load payers
-        const payersResponse = await fetch(`/api/clinic-config/payers?clinic_id=${selectedClinicId}&tpa_ins_code=${tpaInsCode}`);
-        if (payersResponse.ok) {
-          const payersData = await payersResponse.json();
-          if (payersData.payers && Array.isArray(payersData.payers)) {
-            console.log('✅ Loaded payers config on-demand:', payersData.payers.length, 'payers');
-            setPayersConfig(payersData.payers);
-            return payersData.payers;
-          }
+        const payers = await clinicConfigApi.getPayers(selectedClinicId, tpaInsCode);
+        if (payers.length > 0) {
+          console.log('✅ Loaded payers config on-demand:', payers.length, 'payers');
+          setPayersConfig(payers);
+          return payers;
         }
       } catch (error) {
         console.error('❌ Failed to load payers config on-demand:', error);
@@ -1182,35 +1162,24 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
       console.log("Saving policy data:", policyData);
 
-      const response = await fetch("/api/aster/save-policy", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          policyData,
-          patientId: finalPatientId,
-          appointmentId: finalAppointmentId,
-          encounterId: finalEncounterId,
-          payerId: data.patient_info?.payer_id,
-        }),
+      const result = await asterApi.savePolicy({
+        policyData,
+        patientId: finalPatientId,
+        appointmentId: finalAppointmentId,
+        encounterId: finalEncounterId,
+        payerId: data.patient_info?.payer_id,
       });
 
-      const result = await response.json();
-
-      if (response.ok) {
-        setPolicySaved(true);
-        alert("Policy details saved successfully!");
-        console.log("Policy saved:", result);
-      } else {
-        console.error("Failed to save policy:", result);
-        alert(
-          `Failed to save policy details: ${result.error || "Unknown error"}`,
-        );
-      }
+      setPolicySaved(true);
+      alert("Policy details saved successfully!");
+      console.log("Policy saved:", result);
     } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "An error occurred while saving policy details.";
       console.error("Error saving policy:", error);
-      alert("An error occurred while saving policy details. See console for details.");
+      alert(`Failed to save policy details: ${message}`);
     } finally {
       setSavingPolicy(false);
     }
@@ -1338,19 +1307,16 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         if (!currentTpaConfig && selectedClinicId && response.tpa) {
           console.log("⚠️ TPA config not loaded, attempting to load now...");
           try {
-            const configResponse = await fetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
-            if (configResponse.ok) {
-              const configData = await configResponse.json();
-              if (configData.configs && Array.isArray(configData.configs)) {
-                currentTpaConfig = configData.configs.find(
-                  (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
-                );
-                if (currentTpaConfig) {
-                  console.log("✅ Loaded TPA config on-demand:", {
-                    ins_code: currentTpaConfig.ins_code,
-                    hospital_insurance_mapping_id: currentTpaConfig.hospital_insurance_mapping_id,
-                  });
-                }
+            const configs = await clinicConfigApi.getTPA(selectedClinicId);
+            if (configs.length > 0) {
+              currentTpaConfig = configs.find(
+                (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
+              );
+              if (currentTpaConfig) {
+                console.log("✅ Loaded TPA config on-demand:", {
+                  ins_code: currentTpaConfig.ins_code,
+                  hospital_insurance_mapping_id: currentTpaConfig.hospital_insurance_mapping_id,
+                });
               }
             }
           } catch (loadError) {
@@ -1400,84 +1366,64 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             siteId: 31,
           });
 
-          const orderResponse = await fetch("/api/aster/save-eligibility-order", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              patientId: finalPatientId,
-              appointmentId: finalAppointmentId,
-              encounterId: finalEncounterId,
-              insuranceMappingId, // hospital_insurance_mapping_id for main body
-              insTpaPatId: insTpaPatIdForOrder, // insTpaPatId for ordObj.insuranceMappingId
-              physicianId: physicianIdForOrder,
-              authorizationNumber: "",
-              authorizationName: "",
-              createdBy: 13295, // Default user ID
-              vendorId: 24,
-              siteId: 31,
-            }),
+          const orderResult = await asterApi.saveEligibilityOrder({
+            patientId: finalPatientId,
+            appointmentId: finalAppointmentId,
+            encounterId: finalEncounterId,
+            insuranceMappingId, // hospital_insurance_mapping_id for main body
+            insTpaPatId: insTpaPatIdForOrder, // insTpaPatId for ordObj.insuranceMappingId
+            physicianId: physicianIdForOrder,
+            authorizationNumber: "",
+            authorizationName: "",
+            createdBy: 13295, // Default user ID
+            vendorId: 24,
+            siteId: 31,
+          }) as any;
+
+          console.log("📥 Save order API response data:", orderResult);
+          console.log("✅ Eligibility order saved successfully:", orderResult);
+
+          // Extract reqid from response - check both possible response structures
+          savedReqId = orderResult?.data?.body?.Data?.[0]?.reqid ||
+            orderResult?.body?.Data?.[0]?.reqid ||
+            null;
+
+          savedStatusText = orderResult?.data?.body?.Data?.[0]?.status_text ||
+            orderResult?.body?.Data?.[0]?.status_text ||
+            "Eligibility Details Captured Successfully";
+
+          console.log("📋 Order saved with details:", {
+            reqId: savedReqId,
+            statusText: savedStatusText,
+            patientId: finalPatientId,
+            appointmentId: finalAppointmentId,
+            insuranceMappingId,
+            fullResponse: orderResult,
           });
 
-          console.log("📥 Save order API response status:", orderResponse.status);
-
-          const orderResult = await orderResponse.json();
-          console.log("📥 Save order API response data:", orderResult);
-
-          if (orderResponse.ok) {
-            console.log("✅ Eligibility order saved successfully:", orderResult);
-
-            // Extract reqid from response - check both possible response structures
-            savedReqId = orderResult?.data?.body?.Data?.[0]?.reqid ||
-              orderResult?.body?.Data?.[0]?.reqid ||
-              null;
-
-            savedStatusText = orderResult?.data?.body?.Data?.[0]?.status_text ||
-              orderResult?.body?.Data?.[0]?.status_text ||
-              "Eligibility Details Captured Successfully";
-
-            console.log("📋 Order saved with details:", {
-              reqId: savedReqId,
-              statusText: savedStatusText,
-              patientId: finalPatientId,
-              appointmentId: finalAppointmentId,
-              insuranceMappingId,
-              fullResponse: orderResult,
-            });
-
-            // Trigger a custom event to notify other components (like eligibility history)
-            // The order is saved in Aster, so it should be visible in Aster's UI
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('eligibilityOrderSaved', {
-                detail: {
-                  reqId: savedReqId,
-                  patientId: finalPatientId,
-                  appointmentId: finalAppointmentId,
-                  insuranceMappingId,
-                  statusText: savedStatusText,
-                }
-              }));
-              console.log("📢 Dispatched eligibilityOrderSaved event with reqId:", savedReqId);
-            }
-          } else {
-            console.error("❌ Failed to save eligibility order:", {
-              status: orderResponse.status,
-              error: orderResult.error,
-              details: orderResult.details,
-              fullResponse: orderResult,
-            });
-            const errorMessage = orderResult.error || orderResult.message || "Unknown error";
-            const errorDetails = orderResult.details ? `\n\nDetails: ${JSON.stringify(orderResult.details)}` : "";
-            alert(
-              `⚠️ Failed to save eligibility order details.\n\nError: ${errorMessage}${errorDetails}\n\nProceeding with file uploads...\n\nPlease check the browser console for more details.`,
-            );
+          // Trigger a custom event to notify other components (like eligibility history)
+          // The order is saved in Aster, so it should be visible in Aster's UI
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('eligibilityOrderSaved', {
+              detail: {
+                reqId: savedReqId,
+                patientId: finalPatientId,
+                appointmentId: finalAppointmentId,
+                insuranceMappingId,
+                statusText: savedStatusText,
+              }
+            }));
+            console.log("📢 Dispatched eligibilityOrderSaved event with reqId:", savedReqId);
           }
         }
       } catch (orderError) {
-        console.error("❌ Error saving eligibility order:", orderError);
+        const details = orderError instanceof ApiError ? orderError.data : null;
+        console.error("❌ Error saving eligibility order:", details ?? orderError);
+        const errorMessage =
+          orderError instanceof ApiError ? orderError.message : "Unknown error";
+        const errorDetails = details ? `\n\nDetails: ${JSON.stringify(details)}` : "";
         alert(
-          `⚠️ Error occurred while saving eligibility order details. See console for details.\n\nProceeding with file uploads...`,
+          `⚠️ Failed to save eligibility order details.\n\nError: ${errorMessage}${errorDetails}\n\nProceeding with file uploads...\n\nPlease check the browser console for more details.`,
         );
       }
 
@@ -1496,27 +1442,18 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           patientId: finalPatientId,
           encounterId: finalEncounterId || 0, // Default to 0 if not provided
           appointmentId: finalAppointmentId,
-          insTpaPatId: insTpaPatIdForUpload,
+          insTpaPatId: insTpaPatIdForUpload as number,
           fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,
           fileUrl: doc.s3_url,
         };
 
-        const response = await fetch("/api/aster/upload-attachment", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(uploadRequest),
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
+        try {
+          await asterApi.uploadAttachment(uploadRequest);
           newUploadProgress[progressKey] = 100;
           newUploadedFiles.push(doc.tag);
           console.log(`✅ Uploaded ${doc.tag} successfully`);
-        } else {
-          console.error(`❌ Failed to upload ${doc.tag}:`, result.error);
+        } catch (uploadError) {
+          console.error(`❌ Failed to upload ${doc.tag}:`, uploadError);
           newUploadProgress[progressKey] = -1; // Mark as failed
         }
 
