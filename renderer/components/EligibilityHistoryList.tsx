@@ -116,11 +116,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
     }
   };
 
-  const handleClearAll = async () => {
-    if (confirm("Are you sure you want to clear all history? This cannot be undone.")) {
-      await clearAll.mutateAsync();
-    }
-  };
+
 
   const getStatusBadge = (status: EligibilityHistoryItem["status"]) => {
     const badges = {
@@ -215,12 +211,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
             )}
           </p>
         </div>
-        <button
-          onClick={handleClearAll}
-          className="px-4 py-2 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors"
-        >
-          Clear All
-        </button>
+
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
