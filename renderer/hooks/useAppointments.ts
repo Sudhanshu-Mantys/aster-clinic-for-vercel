@@ -14,19 +14,30 @@ export const appointmentKeys = {
 
 export function useAppointmentSearch(
   params: AppointmentSearchParams,
-  options?: { enabled?: boolean }
+  options?: { enabled?: boolean; refetchInterval?: number }
 ) {
   const hasSearchCriteria =
     !!params.mpi ||
     !!params.phoneNumber ||
     !!params.patientName ||
     !!params.mcnNo ||
-    !!params.displayEncounterNumber;
+    !!params.displayEncounterNumber ||
+    !!params.fromDate ||
+    !!params.physicianId ||
+    !!params.visitTypeId ||
+    !!params.specialisationId ||
+    !!params.roomId ||
+    !!params.payerId ||
+    !!params.payerTypeId ||
+    !!params.encounterType ||
+    !!params.visitPurposeId ||
+    !!params.appStatusId;
 
   return useQuery({
     queryKey: appointmentKeys.search(params),
     queryFn: () => appointmentApi.search(params),
     enabled: options?.enabled !== false && hasSearchCriteria,
+    refetchInterval: options?.refetchInterval,
     select: (data) => data.body.Data,
   });
 }

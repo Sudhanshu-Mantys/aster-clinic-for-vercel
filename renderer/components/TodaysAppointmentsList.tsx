@@ -51,11 +51,30 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     isLoading,
     error,
     refetch,
-  } = useTodaysAppointments(
-    currentFilters?.fromDate || todayStr,
-    currentFilters?.toDate || todayStr,
-    currentFilters?.customerSiteId,
-    { refetchInterval: 60000 }
+  } = useAppointmentSearch(
+    {
+      fromDate: currentFilters?.fromDate || todayStr,
+      toDate: currentFilters?.toDate || todayStr,
+      customerSiteId: currentFilters?.customerSiteId || 31,
+      appStatusId: currentFilters?.appStatusId,
+      patientName: currentFilters?.patientName || undefined,
+      mpi: currentFilters?.mpi || undefined,
+      phoneNumber: currentFilters?.phoneNumber || undefined,
+      displayEncounterNumber: currentFilters?.displayEncounterNumber || undefined,
+      physicianId: currentFilters?.physicianId || undefined,
+      visitTypeId: currentFilters?.visitTypeId || undefined,
+      specialisationId: currentFilters?.specialisationId || undefined,
+      roomId: currentFilters?.roomId || undefined,
+      payerId: currentFilters?.payerId || undefined,
+      payerTypeId: currentFilters?.payerTypeId || undefined,
+      insuranceType: currentFilters?.insuranceType || undefined,
+      encounterType: currentFilters?.encounterType,
+      visitPurposeId: currentFilters?.visitPurposeId || undefined,
+      pageNo: currentFilters?.pageNo || 0,
+      recPerPage: currentFilters?.recPerPage || 200,
+      isFilterDate: currentFilters?.isFilterDate,
+    },
+    { enabled: true }
   );
 
   const { data: patientContext } = usePatientContext(
