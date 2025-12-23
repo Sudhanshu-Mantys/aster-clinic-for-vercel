@@ -21,6 +21,11 @@ export interface FetchOptions extends Omit<RequestInit, 'body'> {
 
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 
+// Stack Auth API configuration
+const STACK_API_URL = process.env.NEXT_PUBLIC_STACK_API_URL || 'https://api.stack-auth.com/api/v1';
+const STACK_PROJECT_ID = process.env.NEXT_PUBLIC_STACK_PROJECT_ID;
+const STACK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY;
+
 /**
  * Core fetch function with timeout, error handling, and JSON parsing
  */
@@ -82,6 +87,87 @@ export async function fetchJson<T>(
     throw new ApiError('Unknown error occurred', 0);
   }
 }
+
+function stackAuthHeaders(accessToken?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Stack-Access-Type': 'client',
+    'X-Stack-Project-Id': STACK_PROJECT_ID || '',
+    'X-Stack-Publishable-Client-Key': STACK_PUBLISHABLE_KEY || '',
+  };
+
+  if (accessToken) {
+    headers['X-Stack-Access-Token'] = accessToken;
+  }
+
+  return headers;
+}
+
+function stackAuthFetch<T>(
+  endpoint: string,
+  options: FetchOptions = {},
+  accessToken?: string
+): Promise<T> {
+  return fetchJson<T>(`${STACK_API_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      ...stackAuthHeaders(accessToken),
+      ...(options.headers || {}),
+    },
+  });
+}
+
+export const stackAuthApi = {
+  getCurrentUser: (accessToken: string) =>
+    stackAuthFetch<unknown>('/users/me', {}, accessToken),
+
+  refreshSession: (refreshToken: string) =>
+    stackAuthFetch<{ access_token: string; refresh_token?: string }>(
+      '/auth/sessions/refresh',
+      {
+        method: 'POST',
+        body: { refresh_token: refreshToken },
+      }
+    ),
+
+  signInWithPassword: (email: string, password: string) =>
+    stackAuthFetch<{ access_token: string; refresh_token?: string }>(
+      '/auth/password/sign-in',
+      {
+        method: 'POST',
+        body: { email, password },
+      }
+    ),
+
+  signUpWithPassword: (email: string, password: string) =>
+    stackAuthFetch<{ access_token: string; refresh_token?: string }>(
+      '/auth/password/sign-up',
+      {
+        method: 'POST',
+        body: { email, password },
+      }
+    ),
+
+  updateUser: (updates: Record<string, unknown>, accessToken: string) =>
+    stackAuthFetch<unknown>(
+      '/users/me',
+      {
+        method: 'PATCH',
+        body: updates,
+      },
+      accessToken
+    ),
+
+  getTeams: (accessToken: string) =>
+    stackAuthFetch<{ items?: unknown[] }>('/teams?user_id=me', {}, accessToken),
+
+  signOut: (accessToken: string) =>
+    stackAuthFetch<void>(
+      '/auth/sessions/current',
+      { method: 'DELETE' },
+      accessToken
+    ),
+};
 
 // ============================================================================
 // API ENDPOINT FUNCTIONS

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
-import { isElectron, isWeb } from '../lib/environment'
+import { ApiError, stackAuthApi } from '../lib/api-client'
+import { isElectron } from '../lib/environment'
 
 interface Team {
     id: string
@@ -32,30 +33,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Stack Auth API configuration
-const STACK_API_URL = process.env.NEXT_PUBLIC_STACK_API_URL || 'https://api.stack-auth.com/api/v1'
-const STACK_PROJECT_ID = process.env.NEXT_PUBLIC_STACK_PROJECT_ID
-const STACK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY
-
-// Helper function to make Stack Auth API calls
-function stackAuthFetch(endpoint: string, options: RequestInit = {}, accessToken?: string) {
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'X-Stack-Access-Type': 'client',
-        'X-Stack-Project-Id': STACK_PROJECT_ID || '',
-        'X-Stack-Publishable-Client-Key': STACK_PUBLISHABLE_KEY || '',
-        ...(options.headers as Record<string, string>),
-    }
-
-    if (accessToken) {
-        headers['X-Stack-Access-Token'] = accessToken
-    }
-
-    return fetch(`${STACK_API_URL}${endpoint}`, {
-        ...options,
-        headers,
-    })
-}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null)
@@ -67,17 +44,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const fetchTeams = async (token: string) => {
         try {
             // Stack Auth API: GET /teams?user_id=me
-            const response = await stackAuthFetch('/teams?user_id=me', {}, token)
-            if (response.ok) {
-                const teamsData = await response.json()
-                console.log('✅ User teams:', teamsData)
-                // Stack Auth returns { items: [...] } format
-                setTeams(teamsData.items || [])
-            } else {
-                console.error('❌ Failed to fetch teams - Status:', response.status)
-            }
+            const teamsData = await stackAuthApi.getTeams(token)
+            console.log('✅ User teams:', teamsData)
+            // Stack Auth returns { items: [...] } format
+            setTeams((teamsData as { items?: Team[] }).items || [])
         } catch (error) {
-            console.error('Failed to fetch teams:', error)
+            const status = error instanceof ApiError ? error.status : 'unknown'
+            console.error('Failed to fetch teams:', status, error)
         }
     }
 
@@ -95,49 +68,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     setAccessToken(token)
 
                     // Get current user from Stack Auth
-                    const response = await stackAuthFetch('/users/me', {}, token)
-
-                    if (response.ok) {
-                        const userData = await response.json()
+                    try {
+                        const userData = await stackAuthApi.getCurrentUser(token)
                         console.log('✅ Stack Auth user data received:', userData)
-                        console.log('Available fields:', Object.keys(userData))
-                        setUser(userData)
+                        console.log('Available fields:', Object.keys(userData as object))
+                        setUser(userData as User)
 
                         // Fetch teams
                         await fetchTeams(token)
-                    } else if (response.status === 401 && refreshToken) {
-                        // Try to refresh the token
-                        const refreshResponse = await stackAuthFetch('/auth/sessions/refresh', {
-                            method: 'POST',
-                            body: JSON.stringify({ refresh_token: refreshToken }),
-                        })
+                    } catch (error) {
+                        if (error instanceof ApiError && error.status === 401 && refreshToken) {
+                            // Try to refresh the token
+                            try {
+                                const refreshed = await stackAuthApi.refreshSession(refreshToken)
+                                localStorage.setItem('stack_access_token', refreshed.access_token)
+                                if (refreshed.refresh_token) {
+                                    localStorage.setItem('stack_refresh_token', refreshed.refresh_token)
+                                }
+                                setAccessToken(refreshed.access_token)
 
-                        if (refreshResponse.ok) {
-                            const { access_token, refresh_token } = await refreshResponse.json()
-                            localStorage.setItem('stack_access_token', access_token)
-                            localStorage.setItem('stack_refresh_token', refresh_token)
-                            setAccessToken(access_token)
-
-                            // Retry getting user
-                            const userResponse = await stackAuthFetch('/users/me', {}, access_token)
-                            if (userResponse.ok) {
-                                const userData = await userResponse.json()
+                                // Retry getting user
+                                const userData = await stackAuthApi.getCurrentUser(refreshed.access_token)
                                 console.log('✅ Stack Auth user data (after refresh):', userData)
-                                setUser(userData)
+                                setUser(userData as User)
 
                                 // Fetch teams
-                                await fetchTeams(access_token)
+                                await fetchTeams(refreshed.access_token)
+                            } catch (refreshError) {
+                                // Refresh failed, clear tokens
+                                console.error('❌ Token refresh failed:', refreshError)
+                                localStorage.removeItem('stack_access_token')
+                                localStorage.removeItem('stack_refresh_token')
+                                setAccessToken(null)
                             }
                         } else {
-                            // Refresh failed, clear tokens
                             localStorage.removeItem('stack_access_token')
                             localStorage.removeItem('stack_refresh_token')
                             setAccessToken(null)
                         }
-                    } else {
-                        localStorage.removeItem('stack_access_token')
-                        localStorage.removeItem('stack_refresh_token')
-                        setAccessToken(null)
                     }
                 }
             } catch (error) {
@@ -156,38 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const login = async (email: string, password: string) => {
         try {
             // Sign in with password using Stack Auth API
-            const response = await stackAuthFetch('/auth/password/sign-in', {
-                method: 'POST',
-                body: JSON.stringify({
-                    email,
-                    password,
-                }),
-            })
-
-            if (!response.ok) {
-                const error = await response.json()
-                console.error('❌ Login failed - Status:', response.status, 'Error:', error)
-
-                // Stack Auth error format: { code: "ERROR_CODE", error: "Error message" }
-                const errorMessage = error.error || error.message || 'Login failed'
-                const errorCode = error.code
-
-                // Handle specific error codes from Stack Auth
-                if (errorCode === 'EMAIL_PASSWORD_MISMATCH' || response.status === 400) {
-                    throw new Error('Wrong email or password. Please check your credentials and try again.')
-                } else if (errorCode === 'USER_NOT_FOUND' || response.status === 404) {
-                    throw new Error('No account found with this email. Please sign up first.')
-                } else if (errorCode === 'TOO_MANY_REQUESTS' || response.status === 429) {
-                    throw new Error('Too many login attempts. Please try again in a few minutes.')
-                } else if (errorCode === 'INVALID_EMAIL') {
-                    throw new Error('Invalid email format. Please check your email address.')
-                } else {
-                    // Use Stack Auth's error message if available
-                    throw new Error(errorMessage)
-                }
-            }
-
-            const data = await response.json()
+            const data = await stackAuthApi.signInWithPassword(email, password)
             console.log('✅ Stack Auth login response:', data)
 
             // Store tokens
@@ -198,19 +135,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setAccessToken(data.access_token)
 
             // Get user data
-            const userResponse = await stackAuthFetch('/users/me', {}, data.access_token)
-            if (userResponse.ok) {
-                const userData = await userResponse.json()
-                console.log('✅ Stack Auth user data after login:', userData)
-                console.log('Available user fields:', Object.keys(userData))
-                setUser(userData)
+            const userData = await stackAuthApi.getCurrentUser(data.access_token)
+            console.log('✅ Stack Auth user data after login:', userData)
+            console.log('Available user fields:', Object.keys(userData as object))
+            setUser(userData as User)
 
-                // Fetch teams
-                await fetchTeams(data.access_token)
-            } else {
-                console.error('❌ Failed to get user data:', await userResponse.text())
-            }
+            // Fetch teams
+            await fetchTeams(data.access_token)
         } catch (error) {
+            if (error instanceof ApiError) {
+                const errorData = error.data as { code?: string; error?: string; message?: string } | undefined
+                const errorMessage = errorData?.error || errorData?.message || 'Login failed'
+                const errorCode = errorData?.code
+
+                console.error('❌ Login failed - Status:', error.status, 'Error:', errorData)
+
+                // Handle specific error codes from Stack Auth
+                if (errorCode === 'EMAIL_PASSWORD_MISMATCH' || error.status === 400) {
+                    throw new Error('Wrong email or password. Please check your credentials and try again.')
+                } else if (errorCode === 'USER_NOT_FOUND' || error.status === 404) {
+                    throw new Error('No account found with this email. Please sign up first.')
+                } else if (errorCode === 'TOO_MANY_REQUESTS' || error.status === 429) {
+                    throw new Error('Too many login attempts. Please try again in a few minutes.')
+                } else if (errorCode === 'INVALID_EMAIL') {
+                    throw new Error('Invalid email format. Please check your email address.')
+                } else {
+                    // Use Stack Auth's error message if available
+                    throw new Error(errorMessage)
+                }
+            }
             console.error('Login error:', error)
             throw error
         }
@@ -219,41 +172,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const signup = async (email: string, password: string, name?: string) => {
         try {
             // Sign up with password using Stack Auth API
-            const response = await stackAuthFetch('/auth/password/sign-up', {
-                method: 'POST',
-                body: JSON.stringify({
-                    email,
-                    password,
-                }),
-            })
-
-            if (!response.ok) {
-                const error = await response.json()
-                console.error('❌ Signup failed - Status:', response.status, 'Error:', error)
-
-                // Stack Auth error format: { code: "ERROR_CODE", error: "Error message" }
-                const errorMessage = error.error || error.message || 'Signup failed'
-                const errorCode = error.code
-
-                // Handle specific error codes from Stack Auth
-                if (errorCode === 'USER_ALREADY_EXISTS' || response.status === 409) {
-                    throw new Error('An account with this email already exists. Please try logging in instead.')
-                } else if (errorCode === 'INVALID_PASSWORD') {
-                    throw new Error('Password does not meet requirements. Please use at least 8 characters with letters and numbers.')
-                } else if (errorCode === 'INVALID_EMAIL') {
-                    throw new Error('Invalid email format. Please enter a valid email address.')
-                } else if (errorCode === 'TOO_MANY_REQUESTS' || response.status === 429) {
-                    throw new Error('Too many signup attempts. Please try again in a few minutes.')
-                } else if (response.status === 400) {
-                    // Generic 400 error - use Stack Auth's message
-                    throw new Error(errorMessage)
-                } else {
-                    // Use Stack Auth's error message
-                    throw new Error(errorMessage)
-                }
-            }
-
-            const data = await response.json()
+            const data = await stackAuthApi.signUpWithPassword(email, password)
             console.log('✅ Stack Auth signup response:', data)
 
             // Store tokens
@@ -264,29 +183,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setAccessToken(data.access_token)
 
             // Get user data and update display name if provided
-            const userResponse = await stackAuthFetch('/users/me', {}, data.access_token)
-            if (userResponse.ok) {
-                const userData = await userResponse.json()
-                console.log('✅ Stack Auth user data after signup:', userData)
-                console.log('Available user fields:', Object.keys(userData))
+            const userData = await stackAuthApi.getCurrentUser(data.access_token)
+            console.log('✅ Stack Auth user data after signup:', userData)
+            console.log('Available user fields:', Object.keys(userData as object))
 
-                // Update display name if provided
-                if (name && name.trim()) {
-                    await stackAuthFetch('/users/me', {
-                        method: 'PATCH',
-                        body: JSON.stringify({
-                            display_name: name,
-                        }),
-                    }, data.access_token)
-                    userData.displayName = name
-                }
-
-                setUser(userData)
-
-                // Fetch teams
-                await fetchTeams(data.access_token)
+            // Update display name if provided
+            if (name && name.trim()) {
+                await stackAuthApi.updateUser({ display_name: name }, data.access_token)
+                ;(userData as { displayName?: string }).displayName = name
             }
+
+            setUser(userData as User)
+
+            // Fetch teams
+            await fetchTeams(data.access_token)
         } catch (error) {
+            if (error instanceof ApiError) {
+                const errorData = error.data as { code?: string; error?: string; message?: string } | undefined
+                const errorMessage = errorData?.error || errorData?.message || 'Signup failed'
+                const errorCode = errorData?.code
+
+                console.error('❌ Signup failed - Status:', error.status, 'Error:', errorData)
+
+                // Handle specific error codes from Stack Auth
+                if (errorCode === 'USER_ALREADY_EXISTS' || error.status === 409) {
+                    throw new Error('An account with this email already exists. Please try logging in instead.')
+                } else if (errorCode === 'INVALID_PASSWORD') {
+                    throw new Error('Password does not meet requirements. Please use at least 8 characters with letters and numbers.')
+                } else if (errorCode === 'INVALID_EMAIL') {
+                    throw new Error('Invalid email format. Please enter a valid email address.')
+                } else if (errorCode === 'TOO_MANY_REQUESTS' || error.status === 429) {
+                    throw new Error('Too many signup attempts. Please try again in a few minutes.')
+                } else if (error.status === 400) {
+                    // Generic 400 error - use Stack Auth's message
+                    throw new Error(errorMessage)
+                } else {
+                    // Use Stack Auth's error message
+                    throw new Error(errorMessage)
+                }
+            }
             console.error('Signup error:', error)
             throw error
         }
@@ -299,24 +234,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         try {
             // Use PATCH /users/me to update selected team
-            const response = await stackAuthFetch('/users/me', {
-                method: 'PATCH',
-                body: JSON.stringify({
-                    selected_team_id: teamId,
-                }),
-            }, accessToken)
+            const userData = await stackAuthApi.updateUser(
+                { selected_team_id: teamId },
+                accessToken
+            )
 
-            if (!response.ok) {
-                const error = await response.json()
-                console.error('❌ Failed to switch team - Status:', response.status, 'Error:', error)
-                throw new Error(error.error || 'Failed to switch team')
-            }
-
-            // The response should contain the updated user data
-            const userData = await response.json()
             console.log('✅ Team switched successfully, updated user data:', userData)
-            setUser(userData)
+            setUser(userData as User)
         } catch (error) {
+            if (error instanceof ApiError) {
+                const errorData = error.data as { error?: string; message?: string } | undefined
+                console.error('❌ Failed to switch team - Status:', error.status, 'Error:', errorData)
+                throw new Error(errorData?.error || errorData?.message || 'Failed to switch team')
+            }
             console.error('Switch team error:', error)
             throw error
         }
@@ -326,9 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
             // Sign out from Stack Auth
             if (accessToken) {
-                await stackAuthFetch('/auth/sessions/current', {
-                    method: 'DELETE',
-                }, accessToken)
+                await stackAuthApi.signOut(accessToken)
             }
         } catch (error) {
             console.error('Logout error:', error)
@@ -355,4 +283,3 @@ export function useAuth() {
     }
     return context
 }
-
