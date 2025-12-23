@@ -335,17 +335,17 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         )}
 
         {!error && (
-          <div className="flex items-center gap-6 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
             <div className="flex items-center gap-2">
               <span className="text-gray-600">Total Appointments</span>
               <span className="font-semibold text-gray-900 text-lg">{appointments.length}</span>
             </div>
-            <div className="h-6 w-px bg-gray-300"></div>
+            <div className="hidden sm:block h-6 w-px bg-gray-300"></div>
             <div className="flex items-center gap-2">
               <span className="text-gray-600">Last Updated</span>
               <span className="font-medium text-gray-900">{new Date().toLocaleTimeString()}</span>
             </div>
-            <div className="h-6 w-px bg-gray-300"></div>
+            <div className="hidden sm:block h-6 w-px bg-gray-300"></div>
             <div className="flex items-center gap-2">
               <span className="text-gray-600">Date Range</span>
               <span className="font-medium text-gray-900">

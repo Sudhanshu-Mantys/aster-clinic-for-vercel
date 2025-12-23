@@ -517,11 +517,11 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
             )}
 
             {/* Action Buttons */}
-            <div className="flex items-center gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-3 pt-2">
                 <Button
                     onClick={handleSearch}
                     disabled={isLoading}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-6"
+                    className="bg-black hover:bg-gray-800 text-white px-6 flex-shrink-0"
                 >
                     {isLoading ? (
                         <>
@@ -552,7 +552,7 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     onClick={handleClear}
                     disabled={isLoading}
                     variant="outline"
-                    className="px-6"
+                    className="px-6 flex-shrink-0"
                 >
                     <svg
                         className="w-4 h-4 mr-2"
@@ -574,7 +574,7 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     onClick={onRefresh}
                     disabled={isLoading}
                     variant="outline"
-                    className="px-6"
+                    className="px-6 flex-shrink-0"
                 >
                     <svg
                         className="w-4 h-4 mr-2"
@@ -596,7 +596,7 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     onClick={() => window.print()}
                     disabled={isLoading}
                     variant="outline"
-                    className="px-6"
+                    className="px-6 flex-shrink-0"
                 >
                     <svg
                         className="w-4 h-4 mr-2"

@@ -1623,7 +1623,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               <Button
                 onClick={handleUploadScreenshots}
                 disabled={uploadingFiles}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-black hover:bg-gray-800 text-white"
               >
                 {uploadingFiles ? (
                   <>
@@ -1893,7 +1893,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             className={
               policySaved
                 ? "bg-green-600 hover:bg-green-700 text-white"
-                : "bg-blue-600 hover:bg-blue-700 text-white"
+                : "bg-black hover:bg-gray-800 text-white"
             }
           >
             {savingPolicy ? (
