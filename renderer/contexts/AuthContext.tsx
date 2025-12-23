@@ -40,6 +40,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [isLoading, setIsLoading] = useState(true)
     const [accessToken, setAccessToken] = useState<string | null>(null)
 
+    const persistUser = (userData: User | null) => {
+        try {
+            if (userData) {
+                localStorage.setItem('stack_user', JSON.stringify(userData))
+            } else {
+                localStorage.removeItem('stack_user')
+            }
+        } catch (error) {
+            console.warn('Failed to persist user data:', error)
+        }
+    }
+
+    const loadCachedUser = (): User | null => {
+        try {
+            const cached = localStorage.getItem('stack_user')
+            if (!cached) return null
+            return JSON.parse(cached) as User
+        } catch (error) {
+            console.warn('Failed to load cached user:', error)
+            return null
+        }
+    }
+
+    const clearSession = () => {
+        localStorage.removeItem('stack_access_token')
+        localStorage.removeItem('stack_refresh_token')
+        localStorage.removeItem('stack_user')
+        setAccessToken(null)
+        setUser(null)
+        setTeams([])
+    }
+
     // Fetch all teams for the current user
     const fetchTeams = async (token: string) => {
         try {
@@ -66,6 +98,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
                 if (token) {
                     setAccessToken(token)
+                    const cachedUser = loadCachedUser()
+                    if (cachedUser) {
+                        setUser(cachedUser)
+                    }
 
                     // Get current user from Stack Auth
                     try {
@@ -73,6 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         console.log('✅ Stack Auth user data received:', userData)
                         console.log('Available fields:', Object.keys(userData as object))
                         setUser(userData as User)
+                        persistUser(userData as User)
 
                         // Fetch teams
                         await fetchTeams(token)
@@ -91,28 +128,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                                 const userData = await stackAuthApi.getCurrentUser(refreshed.access_token)
                                 console.log('✅ Stack Auth user data (after refresh):', userData)
                                 setUser(userData as User)
+                                persistUser(userData as User)
 
                                 // Fetch teams
                                 await fetchTeams(refreshed.access_token)
                             } catch (refreshError) {
+                                if (refreshError instanceof ApiError && (refreshError.status === 0 || refreshError.status === 408)) {
+                                    console.warn('⚠️ Token refresh failed due to network issue; keeping session for retry.')
+                                    return
+                                }
                                 // Refresh failed, clear tokens
                                 console.error('❌ Token refresh failed:', refreshError)
-                                localStorage.removeItem('stack_access_token')
-                                localStorage.removeItem('stack_refresh_token')
-                                setAccessToken(null)
+                                clearSession()
                             }
+                        } else if (error instanceof ApiError && (error.status === 0 || error.status === 408)) {
+                            console.warn('⚠️ Auth check failed due to network issue; keeping session for retry.')
                         } else {
-                            localStorage.removeItem('stack_access_token')
-                            localStorage.removeItem('stack_refresh_token')
-                            setAccessToken(null)
+                            clearSession()
                         }
                     }
                 }
             } catch (error) {
                 console.error('Auth check failed:', error)
-                localStorage.removeItem('stack_access_token')
-                localStorage.removeItem('stack_refresh_token')
-                setAccessToken(null)
+                if (error instanceof ApiError && (error.status === 0 || error.status === 408)) {
+                    console.warn('⚠️ Auth check failed due to network issue; keeping session for retry.')
+                } else {
+                    clearSession()
+                }
             } finally {
                 setIsLoading(false)
             }
@@ -139,6 +181,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.log('✅ Stack Auth user data after login:', userData)
             console.log('Available user fields:', Object.keys(userData as object))
             setUser(userData as User)
+            persistUser(userData as User)
 
             // Fetch teams
             await fetchTeams(data.access_token)
@@ -190,10 +233,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Update display name if provided
             if (name && name.trim()) {
                 await stackAuthApi.updateUser({ display_name: name }, data.access_token)
-                ;(userData as { displayName?: string }).displayName = name
+                ;(userData as { display_name?: string }).display_name = name
             }
 
             setUser(userData as User)
+            persistUser(userData as User)
 
             // Fetch teams
             await fetchTeams(data.access_token)
@@ -241,6 +285,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             console.log('✅ Team switched successfully, updated user data:', userData)
             setUser(userData as User)
+            persistUser(userData as User)
         } catch (error) {
             if (error instanceof ApiError) {
                 const errorData = error.data as { error?: string; message?: string } | undefined
@@ -261,11 +306,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (error) {
             console.error('Logout error:', error)
         } finally {
-            localStorage.removeItem('stack_access_token')
-            localStorage.removeItem('stack_refresh_token')
-            setAccessToken(null)
-            setUser(null)
-            setTeams([])
+            clearSession()
         }
     }
 
