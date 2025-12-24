@@ -22,6 +22,19 @@ export const sanitizeInput = (input: string): string => {
 };
 
 /**
+ * Sanitize user input without stripping whitespace
+ */
+export const sanitizeInputAllowSpaces = (input: string): string => {
+  if (!input) return "";
+
+  return input
+    .replace(/[<>]/g, "") // Remove angle brackets to prevent HTML injection
+    .replace(/javascript:/gi, "") // Remove javascript: protocol
+    .replace(/on\w+=/gi, "") // Remove event handlers
+    .slice(0, 500); // Limit length to prevent DOS
+};
+
+/**
  * Sanitize numeric input (digits only)
  */
 export const sanitizeNumericInput = (input: string): string => {

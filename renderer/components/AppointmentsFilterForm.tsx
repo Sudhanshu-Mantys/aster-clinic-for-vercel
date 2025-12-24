@@ -7,7 +7,7 @@ import { DatePicker } from "./ui/date-picker";
 import { PhoneInput } from "./ui/phone-input";
 import { useAuth } from "../contexts/AuthContext";
 import { useDoctors } from "../hooks/useClinicConfig";
-import { sanitizeNumericInput, sanitizeInput } from "../utils/form-validations";
+import { sanitizeInputAllowSpaces } from "../utils/form-validations";
 
 export interface AppointmentFilters {
     // Date filters
@@ -120,18 +120,18 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
     };
 
     const handlePatientNameChange = (value: string) => {
-        const sanitized = sanitizeInput(value);
-        handleInputChange("patientName", sanitized || null);
+        const sanitized = sanitizeInputAllowSpaces(value);
+        handleInputChange("patientName", sanitized.trim() ? sanitized : null);
     };
 
     const handleMPIChange = (value: string) => {
-        const sanitized = sanitizeInput(value);
-        handleInputChange("mpi", sanitized || null);
+        const sanitized = sanitizeInputAllowSpaces(value);
+        handleInputChange("mpi", sanitized.trim() ? sanitized : null);
     };
 
     const handleEncounterNumberChange = (value: string) => {
-        const sanitized = sanitizeInput(value);
-        handleInputChange("displayEncounterNumber", sanitized || null);
+        const sanitized = sanitizeInputAllowSpaces(value);
+        handleInputChange("displayEncounterNumber", sanitized.trim() ? sanitized : null);
     };
 
     const handleVisitTypeIdChange = (value: string) => {
