@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { Drawer } from "./ui/drawer";
+import { Badge } from "./ui/badge";
 import { InsuranceDetailsSection } from "./InsuranceDetailsSection";
 import { AppointmentsFilterForm, AppointmentFilters } from "./AppointmentsFilterForm";
 import { AppointmentsTable } from "./AppointmentsTable";
@@ -22,6 +23,7 @@ import {
 } from "../hooks/useEligibility";
 import type { PatientData, InsuranceData } from "../lib/api-client";
 import type { MantysEligibilityResponse } from "../types/mantys";
+import { extractMantysKeyFields } from "../lib/mantys-utils";
 
 interface TodaysAppointmentsListProps {
   onRefresh?: () => void;
@@ -557,6 +559,18 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           isOpen={showEligibilityDrawer}
           onClose={handleCloseEligibilityDrawer}
           title={`Eligibility Check Results - ${selectedEligibilityItem.patientName || selectedEligibilityItem.patientId}`}
+          headerRight={
+            resultData ? (
+              (() => {
+                const keyFields = extractMantysKeyFields(resultData);
+                return (
+                  <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                    {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+                  </Badge>
+                );
+              })()
+            ) : null
+          }
           size="xl"
         >
           <div className="p-6">

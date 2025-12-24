@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import type { AppointmentData } from "../lib/api-client";
 import { Button } from "./ui/button";
 import { Drawer } from "./ui/drawer";
+import { Badge } from "./ui/badge";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import type { MantysEligibilityResponse } from "../types/mantys";
 import { asterApi, patientApi } from "../lib/api-client";
@@ -611,6 +612,16 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
           isOpen={showActionDrawer}
           onClose={handleCloseActionDrawer}
           title={`Eligibility Actions - ${actionAppointment.full_name}`}
+          headerRight={
+            (() => {
+              const keyFields = extractMantysKeyFields(eligibilityResult);
+              return (
+                <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                  {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+                </Badge>
+              );
+            })()
+          }
           size="xl"
         >
           <MantysResultsDisplay

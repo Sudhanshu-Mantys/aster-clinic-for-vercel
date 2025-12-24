@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { Drawer } from "./ui/drawer";
+import { Badge } from "./ui/badge";
 import {
   useEligibilityHistory,
   useActiveEligibilityChecks,
@@ -14,6 +15,7 @@ import {
 import { usePatientContext } from "../hooks/usePatient";
 import { useAuth } from "../contexts/AuthContext";
 import type { MantysEligibilityResponse } from "../types/mantys";
+import { extractMantysKeyFields } from "../lib/mantys-utils";
 
 interface EligibilityHistoryListProps {
   onRefresh?: () => void;
@@ -359,6 +361,18 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
           isOpen={showDrawer}
           onClose={handleCloseDrawer}
           title={`Eligibility Check Results - ${selectedItem.patientName || selectedItem.patientId}`}
+          headerRight={
+            resultData ? (
+              (() => {
+                const keyFields = extractMantysKeyFields(resultData);
+                return (
+                  <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                    {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+                  </Badge>
+                );
+              })()
+            ) : null
+          }
           size="xl"
         >
           <div className="p-6">
