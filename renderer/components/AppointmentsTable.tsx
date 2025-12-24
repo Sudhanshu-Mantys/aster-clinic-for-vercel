@@ -321,39 +321,39 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
   };
 
   return (
-    <div className="border border-gray-200 rounded-lg">
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
       <div className="hidden lg:block overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
+        <table className="w-full table-fixed divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-12">
                 SI.No
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-40">
                 Patient Details
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-28">
                 Appt Date/Time
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-40">
                 Payer
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-36">
                 Physician
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-28">
                 Status
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-24">
                 Visit Type
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-center text-xs font-medium text-gray-700 uppercase tracking-wider w-20">
                 Eligibility
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-28">
                 Mobile
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-36">
                 Actions
               </th>
             </tr>
@@ -365,27 +365,27 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                 className="hover:bg-gray-50 cursor-pointer transition-colors"
                 onClick={() => onAppointmentClick(appointment)}
               >
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{index + 1}</td>
-                <td className="px-4 py-3 text-sm text-gray-900">
-                  <div className="max-w-xs">
+                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 truncate">{index + 1}</td>
+                <td className="px-3 py-3 text-sm text-gray-900">
+                  <div className="truncate">
                     <p className="font-medium truncate">{appointment.full_name || "N/A"}</p>
-                    <p className="text-xs text-gray-500">MPI: {appointment.mpi}</p>
+                    <p className="text-xs text-gray-500 truncate">MPI: {appointment.mpi}</p>
                     {appointment.age && (
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-500 truncate">
                         {appointment.age} | {appointment.gender}
                       </p>
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-900">
-                  <div>
-                    <p className="font-medium">{appointment.appointment_date || "N/A"}</p>
-                    <p className="text-xs text-gray-500">{appointment.appointment_time || ""}</p>
+                <td className="px-3 py-3 text-sm text-gray-900">
+                  <div className="truncate">
+                    <p className="font-medium truncate">{appointment.appointment_date || "N/A"}</p>
+                    <p className="text-xs text-gray-500 truncate">{appointment.appointment_time || ""}</p>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-900">
-                  <div className="max-w-xs flex items-start gap-2">
-                    <div className="flex-1 min-w-0">
+                <td className="px-3 py-3 text-sm text-gray-900">
+                  <div className="flex items-start gap-2 truncate">
+                    <div className="flex-1 min-w-0 truncate">
                       {(() => {
                         const tpaName = getTPAName(appointment);
                         return (
@@ -417,8 +417,8 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-900">
-                  <div className="max-w-xs">
+                <td className="px-3 py-3 text-sm text-gray-900">
+                  <div className="truncate">
                     <p className="font-medium truncate">
                       {appointment.provider || appointment.physician_name || "N/A"}
                     </p>
@@ -430,7 +430,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">
+                <td className="px-3 py-3 whitespace-nowrap">
                   <span
                     className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
                       appointment.appointment_status
@@ -439,16 +439,16 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                     {appointment.appointment_status || "Unknown"}
                   </span>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 truncate">
                   {(appointment as any).visit_type || "N/A"}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-center">
+                <td className="px-3 py-3 whitespace-nowrap text-center">
                   {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status)}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 truncate">
                   {appointment.mobile_phone || "N/A"}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900">
                   {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
                     <div className="flex items-center gap-2">
                       <button
@@ -456,7 +456,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                           e.stopPropagation();
                           handleSavePolicy(appointment);
                         }}
-                        className="bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium"
+                        className="bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap"
                       >
                         Save Policy
                       </button>
@@ -465,7 +465,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                           e.stopPropagation();
                           handleUploadScreenshot(appointment);
                         }}
-                        className="bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium"
+                        className="bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap"
                       >
                         Upload SS
                       </button>
@@ -476,7 +476,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                         e.stopPropagation();
                         onAppointmentClick(appointment);
                       }}
-                      className="text-blue-600 hover:text-blue-800 font-medium"
+                      className="text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
                     >
                       View Details
                     </button>
