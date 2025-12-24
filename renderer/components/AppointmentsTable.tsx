@@ -26,7 +26,8 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
   const { user } = useAuth();
   const clinicId = user?.selected_team_id;
 
-  const [actionAppointment, setActionAppointment] = useState<AppointmentData | null>(null);
+  const [actionAppointment, setActionAppointment] =
+    useState<AppointmentData | null>(null);
   const [actionTaskId, setActionTaskId] = useState<string | null>(null);
   const [showActionDrawer, setShowActionDrawer] = useState(false);
 
@@ -39,13 +40,19 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
   }, [actionTaskId, historyItems]);
 
   const eligibilityStatusMap = useMemo(() => {
-    const statusMap: Record<string, { status: EligibilityStatus; taskId: string }> = {};
+    const statusMap: Record<
+      string,
+      { status: EligibilityStatus; taskId: string }
+    > = {};
 
     const validEligibilityChecks = historyItems.filter((item) =>
-      ["complete", "error", "pending", "processing"].includes(item.status)
+      ["complete", "error", "pending", "processing"].includes(item.status),
     );
 
-    const mpiChecks: Record<string, { item: (typeof historyItems)[0]; timestamp: number }[]> = {};
+    const mpiChecks: Record<
+      string,
+      { item: (typeof historyItems)[0]; timestamp: number }[]
+    > = {};
 
     validEligibilityChecks.forEach((item) => {
       const mpi = item.patientMPI;
@@ -53,7 +60,9 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
         if (!mpiChecks[mpi]) {
           mpiChecks[mpi] = [];
         }
-        const timestamp = item.createdAt ? new Date(item.createdAt).getTime() : 0;
+        const timestamp = item.createdAt
+          ? new Date(item.createdAt).getTime()
+          : 0;
         mpiChecks[mpi].push({ item, timestamp });
       }
     });
@@ -66,7 +75,10 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       let status: EligibilityStatus = null;
       if (mostRecent.status === "error") {
         status = "error";
-      } else if (mostRecent.status === "pending" || mostRecent.status === "processing") {
+      } else if (
+        mostRecent.status === "pending" ||
+        mostRecent.status === "processing"
+      ) {
         status = "processing";
       } else if (mostRecent.status === "complete") {
         const resultData = (mostRecent.result as any)?.data;
@@ -126,8 +138,12 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       return;
     }
 
-    const eligibilityItem = historyItems.find((item) => item.taskId === taskInfo.taskId);
-    const response = eligibilityItem?.result as MantysEligibilityResponse | undefined;
+    const eligibilityItem = historyItems.find(
+      (item) => item.taskId === taskInfo.taskId,
+    );
+    const response = eligibilityItem?.result as
+      | MantysEligibilityResponse
+      | undefined;
 
     if (!response) {
       alert("Eligibility result not found");
@@ -136,7 +152,10 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
 
     const keyFields = extractMantysKeyFields(response);
 
-    if (!keyFields.referralDocuments || keyFields.referralDocuments.length === 0) {
+    if (
+      !keyFields.referralDocuments ||
+      keyFields.referralDocuments.length === 0
+    ) {
       alert("No referral documents to upload");
       return;
     }
@@ -163,13 +182,20 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
 
       let insTpaPatId: number | null = null;
 
-      if (insuranceResponse?.body?.Data && Array.isArray(insuranceResponse.body.Data)) {
-        const selectedInsurance = insuranceResponse.body.Data.find((record: any) => record.is_current === 1);
+      if (
+        insuranceResponse?.body?.Data &&
+        Array.isArray(insuranceResponse.body.Data)
+      ) {
+        const selectedInsurance = insuranceResponse.body.Data.find(
+          (record: any) => record.is_current === 1,
+        );
         if (!selectedInsurance) {
           alert("There is no active Insurance policy for this user");
           return;
         }
-        const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+        const insTpaPatIdValue =
+          selectedInsurance?.patient_insurance_tpa_policy_id_sites ||
+          selectedInsurance?.patient_insurance_tpa_policy_id;
         if (insTpaPatIdValue) {
           insTpaPatId = Number(insTpaPatIdValue);
         }
@@ -182,7 +208,9 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
         return;
       }
 
-      const confirmed = confirm(`Upload ${keyFields.referralDocuments.length} document(s) to Aster?`);
+      const confirmed = confirm(
+        `Upload ${keyFields.referralDocuments.length} document(s) to Aster?`,
+      );
       if (!confirmed) return;
 
       let uploadedCount = 0;
@@ -206,9 +234,13 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       }
 
       if (failedCount === 0) {
-        alert(`SUCCESS!\n\nAll ${uploadedCount} documents uploaded successfully!`);
+        alert(
+          `SUCCESS!\n\nAll ${uploadedCount} documents uploaded successfully!`,
+        );
       } else {
-        alert(`Partially completed\n\nUploaded: ${uploadedCount}\nFailed: ${failedCount}`);
+        alert(
+          `Partially completed\n\nUploaded: ${uploadedCount}\nFailed: ${failedCount}`,
+        );
       }
     } catch (error) {
       console.error("Upload error:", error);
@@ -251,8 +283,12 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
             d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
           />
         </svg>
-        <h3 className="mt-2 text-sm font-medium text-gray-900">No appointments found</h3>
-        <p className="mt-1 text-sm text-gray-500">Try adjusting your search filters.</p>
+        <h3 className="mt-2 text-sm font-medium text-gray-900">
+          No appointments found
+        </h3>
+        <p className="mt-1 text-sm text-gray-500">
+          Try adjusting your search filters.
+        </p>
       </div>
     );
   }
@@ -263,23 +299,41 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
 
     if (statusLower.includes("open") || statusLower.includes("scheduled")) {
       return "bg-blue-100 text-blue-800";
-    } else if (statusLower.includes("confirmed") || statusLower.includes("approved")) {
+    } else if (
+      statusLower.includes("confirmed") ||
+      statusLower.includes("approved")
+    ) {
       return "bg-green-100 text-green-800";
-    } else if (statusLower.includes("arrived") || statusLower.includes("checked in")) {
+    } else if (
+      statusLower.includes("arrived") ||
+      statusLower.includes("checked in")
+    ) {
       return "bg-indigo-100 text-indigo-800";
-    } else if (statusLower.includes("in progress") || statusLower.includes("waiting")) {
+    } else if (
+      statusLower.includes("in progress") ||
+      statusLower.includes("waiting")
+    ) {
       return "bg-yellow-100 text-yellow-800";
     } else if (statusLower.includes("completed")) {
       return "bg-emerald-100 text-emerald-800";
-    } else if (statusLower.includes("cancelled") || statusLower.includes("no show")) {
+    } else if (
+      statusLower.includes("cancelled") ||
+      statusLower.includes("no show")
+    ) {
       return "bg-red-100 text-red-800";
-    } else if (statusLower.includes("pending") || statusLower.includes("on hold")) {
+    } else if (
+      statusLower.includes("pending") ||
+      statusLower.includes("on hold")
+    ) {
       return "bg-orange-100 text-orange-800";
     }
     return "bg-gray-100 text-gray-800";
   };
 
-  const renderEligibilityIcon = (status: EligibilityStatus, size: "sm" | "md" = "md") => {
+  const renderEligibilityIcon = (
+    status: EligibilityStatus,
+    size: "sm" | "md" = "md",
+  ) => {
     const sizeClass = size === "sm" ? "w-5 h-5" : "w-6 h-6";
     const iconSize = size === "sm" ? "w-3 h-3" : "w-4 h-4";
 
@@ -293,8 +347,18 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
           className={`inline-flex items-center justify-center ${sizeClass} rounded-full bg-green-100 text-green-600`}
           title="Eligibility check successful"
         >
-          <svg className={iconSize} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+          <svg
+            className={iconSize}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={3}
+              d="M5 13l4 4L19 7"
+            />
           </svg>
         </span>
       );
@@ -314,8 +378,18 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
         className={`inline-flex items-center justify-center ${sizeClass} rounded-full bg-red-100 text-red-600`}
         title="Eligibility check failed"
       >
-        <svg className={iconSize} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+        <svg
+          className={iconSize}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={3}
+            d="M6 18L18 6M6 6l12 12"
+          />
         </svg>
       </span>
     );
@@ -330,31 +404,22 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
               <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-12">
                 SI.No
               </th>
-              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-40">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-48">
                 Patient Details
               </th>
-              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-28">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-32">
                 Appt Date/Time
               </th>
               <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-40">
                 Payer
               </th>
-              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-36">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-40">
                 Physician
               </th>
-              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-28">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-36">
                 Status
               </th>
-              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-24">
-                Visit Type
-              </th>
-              <th className="px-3 py-3 text-center text-xs font-medium text-gray-700 uppercase tracking-wider w-20">
-                Eligibility
-              </th>
-              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-28">
-                Mobile
-              </th>
-              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-36">
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-40">
                 Actions
               </th>
             </tr>
@@ -366,22 +431,37 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                 className="hover:bg-gray-50 cursor-pointer transition-colors"
                 onClick={() => onAppointmentClick(appointment)}
               >
-                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 truncate">{index + 1}</td>
+                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 truncate">
+                  {index + 1}
+                </td>
                 <td className="px-3 py-3 text-sm text-gray-900">
                   <div className="truncate">
-                    <p className="font-medium truncate">{appointment.full_name || "N/A"}</p>
-                    <p className="text-xs text-gray-500 truncate">MPI: {appointment.mpi}</p>
+                    <p className="font-medium truncate">
+                      {appointment.full_name || "N/A"}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">
+                      MPI: {appointment.mpi}
+                    </p>
                     {appointment.age && (
                       <p className="text-xs text-gray-500 truncate">
                         {appointment.age} | {appointment.gender}
+                      </p>
+                    )}
+                    {appointment.mobile_phone && (
+                      <p className="text-xs text-gray-500 truncate">
+                        Mo No. {appointment.mobile_phone}
                       </p>
                     )}
                   </div>
                 </td>
                 <td className="px-3 py-3 text-sm text-gray-900">
                   <div className="truncate">
-                    <p className="font-medium truncate">{appointment.appointment_date || "N/A"}</p>
-                    <p className="text-xs text-gray-500 truncate">{appointment.appointment_time || ""}</p>
+                    <p className="font-medium truncate">
+                      {appointment.appointment_date || "N/A"}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {appointment.appointment_time || ""}
+                    </p>
                   </div>
                 </td>
                 <td className="px-3 py-3 text-sm text-gray-900">
@@ -398,66 +478,55 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                                 appointment.payer_type ||
                                 "N/A"}
                             </p>
-                            {tpaName && appointment.network_name && (
-                              <p className="text-xs text-gray-500 truncate">{appointment.network_name}</p>
-                            )}
-                            {tpaName && appointment.payer_name && (
-                              <p className="text-xs text-gray-500 truncate">{appointment.payer_name}</p>
-                            )}
-                            {appointment.payer_type && (
-                              <p className="text-xs text-gray-500 truncate">Type: {appointment.payer_type}</p>
-                            )}
                           </>
                         );
                       })()}
                     </div>
-                    {eligibilityStatusMap[appointment.mpi] && (
-                      <div className="flex-shrink-0 mt-1">
-                        {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status, "sm")}
-                      </div>
-                    )}
                   </div>
                 </td>
                 <td className="px-3 py-3 text-sm text-gray-900">
                   <div className="truncate">
                     <p className="font-medium truncate">
-                      {appointment.provider || appointment.physician_name || "N/A"}
+                      {appointment.provider ||
+                        appointment.physician_name ||
+                        "N/A"}
                     </p>
                     {appointment.specialisation_name && (
-                      <p className="text-xs text-gray-500 truncate">{appointment.specialisation_name}</p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {appointment.specialisation_name}
+                      </p>
                     )}
                     {appointment.physician_id && (
-                      <p className="text-xs text-gray-400 truncate">ID: {appointment.physician_id}</p>
+                      <p className="text-xs text-gray-400 truncate">
+                        ID: {appointment.physician_id}
+                      </p>
                     )}
                   </div>
                 </td>
                 <td className="px-3 py-3 whitespace-nowrap">
-                  <span
-                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
-                      appointment.appointment_status
-                    )}`}
-                  >
-                    {appointment.appointment_status || "Unknown"}
-                  </span>
+                  <div className="flex flex-col gap-1.5">
+                    <span
+                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium w-fit ${getStatusColor(
+                        appointment.appointment_status,
+                      )}`}
+                    >
+                      {appointment.appointment_status || "Unknown"}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200 w-fit">
+                      {(appointment as any).visit_type || "N/A"}
+                    </span>
+                  </div>
                 </td>
-                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 truncate">
-                  {(appointment as any).visit_type || "N/A"}
-                </td>
-                <td className="px-3 py-3 whitespace-nowrap text-center">
-                  {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status)}
-                </td>
-                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 truncate">
-                  {appointment.mobile_phone || "N/A"}
-                </td>
-                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900">
-                  {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
-                    <div className="flex items-center gap-2">
+                <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 text-left">
+                  {eligibilityStatusMap[appointment.mpi]?.status ===
+                  "success" ? (
+                    <div className="flex flex-col gap-1 items-start">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleSavePolicy(appointment);
                         }}
-                        className="bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap"
+                        className="w-full bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium"
                       >
                         Save Policy
                       </button>
@@ -466,9 +535,9 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                           e.stopPropagation();
                           handleUploadScreenshot(appointment);
                         }}
-                        className="bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap"
+                        className="w-full bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium"
                       >
-                        Upload SS
+                        Upload Documents
                       </button>
                     </div>
                   ) : (
@@ -477,7 +546,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                         e.stopPropagation();
                         onAppointmentClick(appointment);
                       }}
-                      className="text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
+                      className="w-full text-blue-600 hover:text-blue-800 font-medium"
                     >
                       View Details
                     </button>
@@ -500,32 +569,45 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
             >
               <div className="flex items-start justify-between mb-3">
                 <div>
-                  <h3 className="font-semibold text-gray-900">{appointment.full_name || "N/A"}</h3>
-                  <p className="text-sm text-gray-500">MPI: {appointment.mpi}</p>
+                  <h3 className="font-semibold text-gray-900">
+                    {appointment.full_name || "N/A"}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    MPI: {appointment.mpi}
+                  </p>
+                  {appointment.mobile_phone && (
+                    <p className="text-sm text-gray-500">
+                      Mo No. {appointment.mobile_phone}
+                    </p>
+                  )}
                 </div>
-                {eligibilityStatusMap[appointment.mpi] && (
-                  <div className="flex-shrink-0">
-                    {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status, "sm")}
-                  </div>
-                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <p className="text-gray-500 text-xs">Date/Time</p>
-                  <p className="font-medium">{appointment.appointment_date || "N/A"}</p>
-                  <p className="text-gray-600">{appointment.appointment_time || ""}</p>
+                  <p className="font-medium">
+                    {appointment.appointment_date || "N/A"}
+                  </p>
+                  <p className="text-gray-600">
+                    {appointment.appointment_time || ""}
+                  </p>
                 </div>
 
                 <div>
                   <p className="text-gray-500 text-xs">Status</p>
-                  <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
-                      appointment.appointment_status
-                    )}`}
-                  >
-                    {appointment.appointment_status || "Unknown"}
-                  </span>
+                  <div className="flex flex-col gap-1 mt-0.5">
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium w-fit ${getStatusColor(
+                        appointment.appointment_status,
+                      )}`}
+                    >
+                      {appointment.appointment_status || "Unknown"}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200 w-fit">
+                      {(appointment as any).visit_type || "N/A"}
+                    </span>
+                  </div>
                 </div>
 
                 <div>
@@ -542,23 +624,17 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                 <div>
                   <p className="text-gray-500 text-xs">Physician</p>
                   <p className="font-medium truncate">
-                    {appointment.provider || appointment.physician_name || "N/A"}
+                    {appointment.provider ||
+                      appointment.physician_name ||
+                      "N/A"}
                   </p>
-                </div>
-
-                <div>
-                  <p className="text-gray-500 text-xs">Mobile</p>
-                  <p>{appointment.mobile_phone || "N/A"}</p>
-                </div>
-
-                <div>
-                  <p className="text-gray-500 text-xs">Visit Type</p>
-                  <p>{(appointment as any).visit_type || "N/A"}</p>
                 </div>
               </div>
 
               {appointment.specialisation_name && (
-                <p className="mt-2 text-xs text-gray-500">{appointment.specialisation_name}</p>
+                <p className="mt-2 text-xs text-gray-500">
+                  {appointment.specialisation_name}
+                </p>
               )}
 
               {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
@@ -579,7 +655,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                     }}
                     className="flex-1 bg-black hover:bg-gray-800 text-white py-2 rounded text-sm font-medium"
                   >
-                    Upload SS
+                    Upload Documents
                   </button>
                 </div>
               ) : (
@@ -601,9 +677,12 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       <div className="bg-gray-50 px-4 py-3 border-t border-gray-200">
         <div className="flex items-center justify-between">
           <div className="text-sm text-gray-700">
-            Showing <span className="font-medium">{appointments.length}</span> appointment(s)
+            Showing <span className="font-medium">{appointments.length}</span>{" "}
+            appointment(s)
           </div>
-          <div className="text-xs text-gray-500 hidden sm:block">Click on any row to view full details</div>
+          <div className="text-xs text-gray-500 hidden sm:block">
+            Click on any row to view full details
+          </div>
         </div>
       </div>
 
@@ -612,16 +691,20 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
           isOpen={showActionDrawer}
           onClose={handleCloseActionDrawer}
           title={`Eligibility Actions - ${actionAppointment.full_name}`}
-          headerRight={
-            (() => {
-              const keyFields = extractMantysKeyFields(eligibilityResult);
-              return (
-                <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
-                  {keyFields.isEligible ? "Eligible" : "Not Eligible"}
-                </Badge>
-              );
-            })()
-          }
+          headerRight={(() => {
+            const keyFields = extractMantysKeyFields(eligibilityResult);
+            return (
+              <Badge
+                className={
+                  keyFields.isEligible
+                    ? "bg-green-100 text-green-800"
+                    : "bg-red-100 text-red-800"
+                }
+              >
+                {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+              </Badge>
+            );
+          })()}
           size="xl"
         >
           <MantysResultsDisplay
