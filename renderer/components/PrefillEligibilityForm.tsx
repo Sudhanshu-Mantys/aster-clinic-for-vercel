@@ -1,6 +1,6 @@
 import React from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
-import { PatientData, InsuranceData } from '../lib/api'
+import { type PatientData, type InsuranceData } from '../lib/api-client'
 import { SearchType } from '../types/dashboard'
 import { PatientSearchForm } from './PatientSearchForm'
 import { PatientSelectionList } from './PatientSelectionList'
@@ -114,4 +114,3 @@ export const PrefillEligibilityForm: React.FC<PrefillEligibilityFormProps> = ({
         </Card>
     )
 }
-

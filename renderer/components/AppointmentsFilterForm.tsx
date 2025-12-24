@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { format, parse } from "date-fns";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { DatePicker } from "./ui/date-picker";
+import { PhoneInput } from "./ui/phone-input";
 import { useAuth } from "../contexts/AuthContext";
-import { cachedFetch } from "../lib/request-cache";
+import { useDoctors } from "../hooks/useClinicConfig";
+import { sanitizeInputAllowSpaces } from "../utils/form-validations";
 
 export interface AppointmentFilters {
     // Date filters
@@ -77,7 +81,7 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
         mpi: null,
         phoneNumber: null,
         displayEncounterNumber: null,
-        appStatusId: "16,3,21,22,6,23,24,17,25,18,7,8,15,11,26,27", // All statuses
+        appStatusId: "16,3,21,22,6,23,24,17,25,18,7,8,15,11,26,27",
         physicianId: null,
         visitTypeId: null,
         specialisationId: null,
@@ -92,51 +96,17 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
         recPerPage: 200,
     });
 
+    const [fromDate, setFromDate] = useState<Date>(new Date());
+    const [toDate, setToDate] = useState<Date>(new Date());
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
     // Doctors from clinic-config
     const { user } = useAuth();
-    const selectedClinicId = user?.selected_team_id || null;
-    const [doctorsList, setDoctorsList] = useState<any[]>([]);
-    const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
-
-    // Load doctors from clinic-config
-    useEffect(() => {
-        if (!selectedClinicId) {
-            setDoctorsList([]);
-            return;
-        }
-
-        // Reset doctors list when clinic changes
-        setDoctorsList([]);
-
-        let isCancelled = false;
-
-        const loadDoctors = async () => {
-            setIsLoadingDoctors(true);
-            try {
-                const response = await cachedFetch(`/api/clinic-config/doctors?clinic_id=${selectedClinicId}`);
-                if (response.ok && !isCancelled) {
-                    const data = await response.json();
-                    setDoctorsList(data.configs || []);
-                }
-            } catch (error) {
-                if (!isCancelled) {
-                    console.error("Failed to load doctors:", error);
-                }
-            } finally {
-                if (!isCancelled) {
-                    setIsLoadingDoctors(false);
-                }
-            }
-        };
-
-        loadDoctors();
-
-        return () => {
-            isCancelled = true;
-        };
-    }, [selectedClinicId]);
+    const selectedClinicId = user?.selected_team_id || "";
+    const { data: doctorsList = [], isLoading: isLoadingDoctors } = useDoctors(
+        selectedClinicId,
+        { enabled: !!selectedClinicId }
+    );
 
     const handleInputChange = (field: keyof AppointmentFilters, value: any) => {
         setFilters((prev) => ({
@@ -145,26 +115,55 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
         }));
     };
 
-    // Convert YYYY-MM-DD to MM/DD/YYYY
-    const convertDateFormat = (dateStr: string) => {
-        if (!dateStr) return getTodayFormatted();
-        const [year, month, day] = dateStr.split('-');
-        return `${month}/${day}/${year}`;
+    const handlePhoneNumberChange = (value: string | undefined) => {
+        handleInputChange("phoneNumber", value || null);
     };
 
-    // Convert MM/DD/YYYY to YYYY-MM-DD
-    const convertToInputFormat = (dateStr: string) => {
-        if (!dateStr) return getTodayInputFormat();
-        const [month, day, year] = dateStr.split('/');
-        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    const handlePatientNameChange = (value: string) => {
+        const sanitized = sanitizeInputAllowSpaces(value);
+        handleInputChange("patientName", sanitized.trim() ? sanitized : null);
     };
 
-    const handleDateChange = (field: 'fromDate' | 'toDate', value: string) => {
-        const formattedDate = convertDateFormat(value);
-        setFilters((prev) => ({
-            ...prev,
-            [field]: formattedDate,
-        }));
+    const handleMPIChange = (value: string) => {
+        const sanitized = sanitizeInputAllowSpaces(value);
+        handleInputChange("mpi", sanitized.trim() ? sanitized : null);
+    };
+
+    const handleEncounterNumberChange = (value: string) => {
+        const sanitized = sanitizeInputAllowSpaces(value);
+        handleInputChange("displayEncounterNumber", sanitized.trim() ? sanitized : null);
+    };
+
+    const handleVisitTypeIdChange = (value: string) => {
+        const numValue = value ? Math.max(1, parseInt(value, 10)) : null;
+        handleInputChange("visitTypeId", numValue);
+    };
+
+    const handleRoomIdChange = (value: string) => {
+        const numValue = value ? Math.max(1, parseInt(value, 10)) : null;
+        handleInputChange("roomId", numValue);
+    };
+
+    const handleFromDateChange = (date: Date | undefined) => {
+        if (date) {
+            setFromDate(date);
+            const formattedDate = `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+            setFilters((prev) => ({
+                ...prev,
+                fromDate: formattedDate,
+            }));
+        }
+    };
+
+    const handleToDateChange = (date: Date | undefined) => {
+        if (date) {
+            setToDate(date);
+            const formattedDate = `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+            setFilters((prev) => ({
+                ...prev,
+                toDate: formattedDate,
+            }));
+        }
     };
 
     const handleSearch = () => {
@@ -172,6 +171,10 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
     };
 
     const handleClear = () => {
+        const today = new Date();
+        setFromDate(today);
+        setToDate(today);
+
         const clearedFilters: AppointmentFilters = {
             fromDate: getTodayFormatted(),
             toDate: getTodayFormatted(),
@@ -250,12 +253,11 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     <Label htmlFor="fromDate" className="text-sm font-medium">
                         From Date
                     </Label>
-                    <Input
-                        id="fromDate"
-                        type="date"
-                        value={convertToInputFormat(filters.fromDate)}
-                        onChange={(e) => handleDateChange("fromDate", e.target.value)}
-                        className="w-full"
+                    <DatePicker
+                        date={fromDate}
+                        onDateChange={handleFromDateChange}
+                        placeholder="Select from date"
+                        disabled={isLoading}
                     />
                 </div>
 
@@ -263,12 +265,11 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     <Label htmlFor="toDate" className="text-sm font-medium">
                         To Date
                     </Label>
-                    <Input
-                        id="toDate"
-                        type="date"
-                        value={convertToInputFormat(filters.toDate)}
-                        onChange={(e) => handleDateChange("toDate", e.target.value)}
-                        className="w-full"
+                    <DatePicker
+                        date={toDate}
+                        onDateChange={handleToDateChange}
+                        placeholder="Select to date"
+                        disabled={isLoading}
                     />
                 </div>
 
@@ -276,14 +277,13 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     <Label htmlFor="phoneNumber" className="text-sm font-medium">
                         Mobile Phone
                     </Label>
-                    <Input
+                    <PhoneInput
                         id="phoneNumber"
-                        type="text"
-                        placeholder="Phone number"
+                        placeholder="Enter phone number"
                         value={filters.phoneNumber || ""}
-                        onChange={(e) => handleInputChange("phoneNumber", e.target.value)}
-                        onKeyPress={handleKeyPress}
-                        className="w-full"
+                        onChange={handlePhoneNumberChange}
+                        defaultCountry="AE"
+                        disabled={isLoading}
                     />
                 </div>
 
@@ -296,9 +296,11 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                         type="text"
                         placeholder="Patient MPI"
                         value={filters.mpi || ""}
-                        onChange={(e) => handleInputChange("mpi", e.target.value)}
+                        onChange={(e) => handleMPIChange(e.target.value)}
                         onKeyPress={handleKeyPress}
+                        maxLength={50}
                         className="w-full"
+                        disabled={isLoading}
                     />
                 </div>
 
@@ -311,9 +313,11 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                         type="text"
                         placeholder="Enter patient name"
                         value={filters.patientName || ""}
-                        onChange={(e) => handleInputChange("patientName", e.target.value)}
+                        onChange={(e) => handlePatientNameChange(e.target.value)}
                         onKeyPress={handleKeyPress}
+                        maxLength={100}
                         className="w-full"
+                        disabled={isLoading}
                     />
                 </div>
 
@@ -410,11 +414,11 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                                 type="text"
                                 placeholder="Encounter number"
                                 value={filters.displayEncounterNumber || ""}
-                                onChange={(e) =>
-                                    handleInputChange("displayEncounterNumber", e.target.value)
-                                }
+                                onChange={(e) => handleEncounterNumberChange(e.target.value)}
                                 onKeyPress={handleKeyPress}
+                                maxLength={50}
                                 className="w-full"
+                                disabled={isLoading}
                             />
                         </div>
 
@@ -431,7 +435,8 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                                         e.target.value ? Number(e.target.value) : null
                                     )
                                 }
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                disabled={isLoading}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {payerTypeOptions.map((option) => (
                                     <option key={option.value || "all"} value={option.value || ""}>
@@ -448,16 +453,18 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                             <Input
                                 id="visitTypeId"
                                 type="number"
-                                placeholder="Visit Type ID"
+                                placeholder="Visit Type ID (min: 1)"
                                 value={filters.visitTypeId || ""}
-                                onChange={(e) =>
-                                    handleInputChange(
-                                        "visitTypeId",
-                                        e.target.value ? Number(e.target.value) : null
-                                    )
-                                }
+                                onChange={(e) => handleVisitTypeIdChange(e.target.value)}
                                 onKeyPress={handleKeyPress}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                        e.preventDefault();
+                                    }
+                                }}
+                                min="1"
                                 className="w-full"
+                                disabled={isLoading}
                             />
                         </div>
 
@@ -468,16 +475,18 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                             <Input
                                 id="roomId"
                                 type="number"
-                                placeholder="Room ID"
+                                placeholder="Room ID (min: 1)"
                                 value={filters.roomId || ""}
-                                onChange={(e) =>
-                                    handleInputChange(
-                                        "roomId",
-                                        e.target.value ? Number(e.target.value) : null
-                                    )
-                                }
+                                onChange={(e) => handleRoomIdChange(e.target.value)}
                                 onKeyPress={handleKeyPress}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                        e.preventDefault();
+                                    }
+                                }}
+                                min="1"
                                 className="w-full"
+                                disabled={isLoading}
                             />
                         </div>
                     </div>
@@ -508,11 +517,11 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
             )}
 
             {/* Action Buttons */}
-            <div className="flex items-center gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-3 pt-2">
                 <Button
                     onClick={handleSearch}
                     disabled={isLoading}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-6"
+                    className="bg-black hover:bg-gray-800 text-white px-6 flex-shrink-0"
                 >
                     {isLoading ? (
                         <>
@@ -543,7 +552,7 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     onClick={handleClear}
                     disabled={isLoading}
                     variant="outline"
-                    className="px-6"
+                    className="px-6 flex-shrink-0"
                 >
                     <svg
                         className="w-4 h-4 mr-2"
@@ -565,7 +574,7 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     onClick={onRefresh}
                     disabled={isLoading}
                     variant="outline"
-                    className="px-6"
+                    className="px-6 flex-shrink-0"
                 >
                     <svg
                         className="w-4 h-4 mr-2"
@@ -587,7 +596,7 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     onClick={() => window.print()}
                     disabled={isLoading}
                     variant="outline"
-                    className="px-6"
+                    className="px-6 flex-shrink-0"
                 >
                     <svg
                         className="w-4 h-4 mr-2"
@@ -608,4 +617,3 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
         </div>
     );
 };
-

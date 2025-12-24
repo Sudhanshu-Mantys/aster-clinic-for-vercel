@@ -1,12 +1,21 @@
-import React, { useState, useEffect } from "react";
-import {
-  EligibilityHistoryService,
-  EligibilityHistoryItem,
-} from "../utils/eligibilityHistory";
+import React, { useState, useMemo } from "react";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { Drawer } from "./ui/drawer";
-import { fetchWithTimeout } from "../lib/request-cache";
+import { Badge } from "./ui/badge";
+import {
+  useEligibilityHistory,
+  useActiveEligibilityChecks,
+  useEligibilityHistoryItem,
+  useDeleteEligibilityHistoryItem,
+  useClearEligibilityHistory,
+  useEligibilityTaskStatus,
+  type EligibilityHistoryItem,
+} from "../hooks/useEligibility";
+import { usePatientContext } from "../hooks/usePatient";
+import { useAuth } from "../contexts/AuthContext";
+import type { MantysEligibilityResponse } from "../types/mantys";
+import { extractMantysKeyFields } from "../lib/mantys-utils";
 
 interface EligibilityHistoryListProps {
   onRefresh?: () => void;
@@ -15,193 +24,70 @@ interface EligibilityHistoryListProps {
 export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
   onRefresh,
 }) => {
-  const [historyItems, setHistoryItems] = useState<EligibilityHistoryItem[]>(
-    [],
-  );
+  const { user } = useAuth();
+  const clinicId = user?.selected_team_id;
+
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterStatus, setFilterStatus] = useState<
-    "all" | "active" | "completed"
-  >("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "completed">("all");
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
 
-  // Get the selected item from history by ID
-  const [selectedItem, setSelectedItem] = useState<EligibilityHistoryItem | null>(null);
-  const [freshResult, setFreshResult] = useState<any>(null);
-  const [loadingFreshResult, setLoadingFreshResult] = useState(false);
-  const [enrichedPatientId, setEnrichedPatientId] = useState<number | undefined>(undefined);
+  const { data: allHistory = [], refetch: refetchHistory } = useEligibilityHistory(clinicId);
+  const { data: activeChecks = [] } = useActiveEligibilityChecks(clinicId);
+  const deleteItem = useDeleteEligibilityHistoryItem();
+  const clearAll = useClearEligibilityHistory();
 
-  // Load selected item when selectedItemId changes
-  useEffect(() => {
-    const loadSelectedItem = async () => {
-      if (selectedItemId) {
-        const item = await EligibilityHistoryService.getById(selectedItemId);
-        setSelectedItem(item);
+  const { data: selectedItem } = useEligibilityHistoryItem(selectedItemId || "", {
+    enabled: !!selectedItemId,
+  });
 
-        // Try to get patient ID from Redis if we have appointment ID or MPI
-        if (item?.appointmentId || item?.patientMPI) {
-          try {
-            console.log("🔍 Fetching patient context from Redis for:", {
-              appointmentId: item.appointmentId,
-              mpi: item.patientMPI,
-            });
+  const { data: patientContext } = usePatientContext(
+    {
+      appointmentId: selectedItem?.appointmentId?.toString(),
+      mpi: selectedItem?.patientMPI,
+    },
+    { enabled: !!selectedItem && (!!selectedItem.appointmentId || !!selectedItem.patientMPI) }
+  );
 
-            const contextResponse = await fetchWithTimeout(
-              "/api/patient/context",
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  appointmentId: item.appointmentId,
-                  mpi: item.patientMPI,
-                }),
-              },
-              3000 // 3 second timeout
-            );
+  const { data: freshResult, isLoading: loadingFreshResult } = useEligibilityTaskStatus(
+    selectedItem?.taskId || "",
+    {
+      enabled: !!selectedItem?.taskId && (selectedItem?.status === "complete" || selectedItem?.status === "error"),
+      refetchInterval: false,
+    }
+  );
 
-            if (contextResponse.ok) {
-              const context = await contextResponse.json();
-              setEnrichedPatientId(context.patientId);
-              console.log("✅ Enriched patient ID from Redis:", context.patientId, "Full context:", context);
-            } else {
-              console.warn("⚠️ Redis context not found, status:", contextResponse.status);
-              const errorData = await contextResponse.json();
-              console.warn("Error details:", errorData);
-              // Reset if not found
-              setEnrichedPatientId(undefined);
-            }
-          } catch (error) {
-            console.error("❌ Could not fetch patient context from Redis:", error);
-            setEnrichedPatientId(undefined);
-          }
-        } else {
-          console.log("⚠️ No appointment ID or MPI available for Redis lookup");
-          // No appointment ID or MPI, clear enriched patient ID
-          setEnrichedPatientId(undefined);
-        }
+  const enrichedPatientId = patientContext?.patientId
+    ? parseInt(patientContext.patientId)
+    : undefined;
 
-        // If item is complete or error, fetch fresh result from API instead of using cached
-        if (item && (item.status === 'complete' || item.status === 'error') && item.taskId) {
-          setLoadingFreshResult(true);
-          try {
-            const response = await fetch('/api/mantys/check-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ task_id: item.taskId }),
-            });
-
-            if (response.ok) {
-              const apiResponse = await response.json();
-              console.log('API Response:', apiResponse);
-
-              // Update history status if it changed (e.g., was 'complete' but is actually 'error')
-              if (apiResponse.status !== item.status) {
-                console.log(`Status changed from ${item.status} to ${apiResponse.status}, updating history`);
-                await EligibilityHistoryService.update(item.id, {
-                  status: apiResponse.status as any,
-                  error: apiResponse.status === 'error' ? (apiResponse.message || apiResponse.result?.message) : undefined,
-                });
-                // Reload the item to get updated status
-                const updatedItem = await EligibilityHistoryService.getById(item.id);
-                setSelectedItem(updatedItem);
-              }
-
-              if (apiResponse.status === 'complete' && apiResponse.result) {
-                // Validate that result has data property
-                if (apiResponse.result.data) {
-                  console.log('Setting fresh result with data:', apiResponse.result);
-                  setFreshResult(apiResponse.result);
-                } else {
-                  console.warn('API result missing data property, using cached result');
-                  setFreshResult(null);
-                }
-              } else if (apiResponse.status === 'error' && apiResponse.result) {
-                // Store error result for display
-                console.log('Setting error result:', apiResponse.result);
-                setFreshResult(apiResponse.result);
-              } else {
-                console.warn('API response not complete/error or missing result');
-                setFreshResult(null);
-              }
-            } else {
-              console.error('API response not OK:', response.status);
-              setFreshResult(null);
-            }
-          } catch (error) {
-            console.error('Error fetching fresh result:', error);
-            // Fall back to cached result if API call fails
-            setFreshResult(null);
-          } finally {
-            setLoadingFreshResult(false);
-          }
-        } else {
-          setFreshResult(null);
-        }
-      } else {
-        setSelectedItem(null);
-        setFreshResult(null);
-      }
-    };
-    loadSelectedItem();
-  }, [selectedItemId]);
-
-  const loadHistory = React.useCallback(async () => {
-    let items: EligibilityHistoryItem[] = [];
+  const historyItems = useMemo(() => {
+    let items = allHistory;
 
     if (filterStatus === "active") {
-      items = await EligibilityHistoryService.getActive();
+      items = items.filter((item) => item.status === "pending" || item.status === "processing");
     } else if (filterStatus === "completed") {
-      items = await EligibilityHistoryService.getCompleted();
-    } else {
-      items = await EligibilityHistoryService.getAll();
+      items = items.filter((item) => item.status === "complete" || item.status === "error");
     }
 
     if (searchQuery) {
+      const lowerQuery = searchQuery.toLowerCase();
       items = items.filter(
         (item) =>
-          item.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.patientName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.insurancePayer
-            ?.toLowerCase()
-            .includes(searchQuery.toLowerCase()),
+          item.patientId.toLowerCase().includes(lowerQuery) ||
+          item.patientName?.toLowerCase().includes(lowerQuery) ||
+          item.insurancePayer?.toLowerCase().includes(lowerQuery)
       );
     }
 
-    setHistoryItems(items);
-  }, [filterStatus, searchQuery]);
+    return items;
+  }, [allHistory, filterStatus, searchQuery]);
 
-  useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
-
-  // Separate effect for auto-refresh that pauses when drawer/modal is open
-  useEffect(() => {
-    // Only auto-refresh if drawer/modal is not open
-    // This prevents re-renders from closing the drawer
-    if (!showDrawer && !showModal) {
-      const interval = setInterval(() => {
-        loadHistory();
-      }, 5000); // Increased from 2s to 5s to reduce load
-
-      return () => clearInterval(interval);
-    }
-  }, [showDrawer, showModal, loadHistory]);
-
-  // Close drawer/modal if selected item no longer exists in history
-  useEffect(() => {
-    if (selectedItemId && !selectedItem) {
-      console.warn("Selected item not found in history, closing drawer/modal");
-      setShowDrawer(false);
-      setShowModal(false);
-      setSelectedItemId(null);
-    }
-  }, [selectedItemId, selectedItem]);
+  const activeCount = activeChecks.length;
 
   const handleViewDetails = (item: EligibilityHistoryItem) => {
     setSelectedItemId(item.id);
-
-    // Use drawer for completed checks (with or without errors), modal for active checks
     if ((item.status === "complete" || item.status === "error") && item.result) {
       setShowDrawer(true);
     } else {
@@ -217,35 +103,22 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
   const handleCloseDrawer = () => {
     setShowDrawer(false);
     setSelectedItemId(null);
-    setFreshResult(null);
-    setEnrichedPatientId(undefined);
   };
 
   const handleCheckAnother = () => {
     setShowDrawer(false);
     setShowModal(false);
     setSelectedItemId(null);
-    setEnrichedPatientId(undefined);
   };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm("Are you sure you want to delete this eligibility check?")) {
-      await EligibilityHistoryService.delete(id);
-      await loadHistory();
+      await deleteItem.mutateAsync(id);
     }
   };
 
-  const handleClearAll = async () => {
-    if (
-      confirm(
-        "Are you sure you want to clear all history? This cannot be undone.",
-      )
-    ) {
-      await EligibilityHistoryService.clearAll();
-      await loadHistory();
-    }
-  };
+
 
   const getStatusBadge = (status: EligibilityHistoryItem["status"]) => {
     const badges = {
@@ -275,72 +148,27 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
     switch (status) {
       case "pending":
         return (
-          <svg
-            className="w-5 h-5 text-yellow-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
+          <svg className="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         );
       case "processing":
         return (
-          <svg
-            className="w-5 h-5 text-blue-500 animate-spin"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            ></circle>
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            ></path>
+          <svg className="w-5 h-5 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
         );
       case "complete":
         return (
-          <svg
-            className="w-5 h-5 text-green-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
+          <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         );
       case "error":
         return (
-          <svg
-            className="w-5 h-5 text-red-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
+          <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         );
     }
@@ -356,8 +184,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
 
     if (diffMins < 1) return "Just now";
     if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? "s" : ""} ago`;
-    if (diffHours < 24)
-      return `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`;
     if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? "s" : ""} ago`;
 
     return date.toLocaleDateString("en-US", {
@@ -367,25 +194,13 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
     });
   };
 
-  const [activeCount, setActiveCount] = useState(0);
-
-  // Update active count from existing historyItems (no additional API call)
-  useEffect(() => {
-    // Count active items from the already loaded history
-    const count = historyItems.filter(
-      (item) => item.status === "pending" || item.status === "processing"
-    ).length;
-    setActiveCount(count);
-  }, [historyItems]);
+  const resultData = (freshResult?.result || selectedItem?.result) as MantysEligibilityResponse | undefined;
 
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">
-            Eligibility Check History
-          </h2>
+          <h2 className="text-2xl font-bold text-gray-900">Eligibility Check History</h2>
           <p className="text-sm text-gray-500 mt-1">
             {activeCount > 0 && (
               <span className="inline-flex items-center">
@@ -398,15 +213,9 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
             )}
           </p>
         </div>
-        <button
-          onClick={handleClearAll}
-          className="px-4 py-2 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors"
-        >
-          Clear All
-        </button>
+
       </div>
 
-      {/* Search and Filter Bar */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex-1 relative">
           <input
@@ -422,47 +231,27 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
         </div>
 
         <div className="flex gap-2">
-          <button
-            onClick={() => setFilterStatus("all")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === "all"
-              ? "bg-blue-600 text-white"
-              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          {(["all", "active", "completed"] as const).map((status) => (
+            <button
+              key={status}
+              onClick={() => setFilterStatus(status)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                filterStatus === status
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setFilterStatus("active")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === "active"
-              ? "bg-blue-600 text-white"
-              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-          >
-            Active
-          </button>
-          <button
-            onClick={() => setFilterStatus("completed")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === "completed"
-              ? "bg-blue-600 text-white"
-              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-          >
-            Completed
-          </button>
+            >
+              {status.charAt(0).toUpperCase() + status.slice(1)}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* History List */}
       <div className="space-y-3">
         {historyItems.length === 0 ? (
           <div className="text-center py-12 bg-gray-50 rounded-lg">
@@ -479,9 +268,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                 d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
               />
             </svg>
-            <h3 className="mt-2 text-sm font-medium text-gray-900">
-              No eligibility checks found
-            </h3>
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No eligibility checks found</h3>
             <p className="mt-1 text-sm text-gray-500">
               {searchQuery || filterStatus !== "all"
                 ? "Try adjusting your filters or search query"
@@ -497,9 +284,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-start space-x-3 flex-1">
-                  <div className="flex-shrink-0 mt-1">
-                    {getStatusIcon(item.status)}
-                  </div>
+                  <div className="flex-shrink-0 mt-1">{getStatusIcon(item.status)}</div>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -511,32 +296,25 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
 
                     <div className="space-y-1">
                       <p className="text-sm text-gray-600">
-                        <span className="font-medium">Patient ID:</span>{" "}
-                        {item.patientId}
+                        <span className="font-medium">Patient ID:</span> {item.patientId}
                       </p>
                       {item.dateOfBirth && (
                         <p className="text-sm text-gray-600">
-                          <span className="font-medium">DOB:</span>{" "}
-                          {item.dateOfBirth}
+                          <span className="font-medium">DOB:</span> {item.dateOfBirth}
                         </p>
                       )}
                       {item.insurancePayer && (
                         <p className="text-sm text-gray-600">
-                          <span className="font-medium">Payer:</span>{" "}
-                          {item.insurancePayer}
+                          <span className="font-medium">Payer:</span> {item.insurancePayer}
                         </p>
                       )}
                       {item.taskId && (
-                        <p className="text-xs text-gray-500 font-mono">
-                          Task: {item.taskId}
-                        </p>
+                        <p className="text-xs text-gray-500 font-mono">Task: {item.taskId}</p>
                       )}
                     </div>
 
                     {item.error && (
-                      <p className="text-sm text-red-600 mt-2 bg-red-50 p-2 rounded">
-                        {item.error}
-                      </p>
+                      <p className="text-sm text-red-600 mt-2 bg-red-50 p-2 rounded">{item.error}</p>
                     )}
 
                     {item.pollingAttempts && item.status === "processing" && (
@@ -549,9 +327,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
 
                 <div className="flex items-center gap-2 ml-4">
                   <div className="text-right">
-                    <p className="text-xs text-gray-500">
-                      {formatDate(item.createdAt)}
-                    </p>
+                    <p className="text-xs text-gray-500">{formatDate(item.createdAt)}</p>
                     {item.completedAt && (
                       <p className="text-xs text-gray-400 mt-1">
                         Completed {formatDate(item.completedAt)}
@@ -564,12 +340,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                     className="opacity-0 group-hover:opacity-100 p-2 text-gray-400 hover:text-red-600 transition-all"
                     title="Delete"
                   >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -585,12 +356,23 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
         )}
       </div>
 
-      {/* Drawer for completed check results (including errors) */}
-      {showDrawer && (selectedItem?.status === "complete" || selectedItem?.status === "error") && (
+      {showDrawer && selectedItem && (selectedItem.status === "complete" || selectedItem.status === "error") && (
         <Drawer
           isOpen={showDrawer}
           onClose={handleCloseDrawer}
           title={`Eligibility Check Results - ${selectedItem.patientName || selectedItem.patientId}`}
+          headerRight={
+            resultData ? (
+              (() => {
+                const keyFields = extractMantysKeyFields(resultData);
+                return (
+                  <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                    {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+                  </Badge>
+                );
+              })()
+            ) : null
+          }
           size="xl"
         >
           <div className="p-6">
@@ -601,20 +383,9 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                   <p className="mt-4 text-gray-600">Loading results...</p>
                 </div>
               </div>
-            ) : freshResult ? (
+            ) : resultData ? (
               <MantysResultsDisplay
-                response={freshResult}
-                onClose={handleCloseDrawer}
-                onCheckAnother={handleCheckAnother}
-                screenshot={selectedItem.interimResults?.screenshot || null}
-                patientMPI={selectedItem.patientMPI}
-                patientId={enrichedPatientId || (selectedItem.patientId ? parseInt(selectedItem.patientId) : undefined)}
-                appointmentId={selectedItem.appointmentId}
-                encounterId={selectedItem.encounterId}
-              />
-            ) : selectedItem?.result ? (
-              <MantysResultsDisplay
-                response={selectedItem.result}
+                response={resultData}
                 onClose={handleCloseDrawer}
                 onCheckAnother={handleCheckAnother}
                 screenshot={selectedItem.interimResults?.screenshot || null}
@@ -632,7 +403,6 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
         </Drawer>
       )}
 
-      {/* Modal for pending/processing/error checks */}
       {showModal && selectedItem && selectedItem.taskId && (
         <ExtractionProgressModal
           isOpen={showModal}

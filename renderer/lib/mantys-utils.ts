@@ -87,34 +87,6 @@ export function buildMantysPayload(params: {
 }
 
 /**
- * Call Mantys eligibility check API
- */
-export async function checkMantysEligibility(
-    request: MantysEligibilityRequest
-): Promise<MantysEligibilityResponse> {
-    try {
-        const response = await fetch('/api/mantys/eligibility-check', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(request)
-        })
-
-        const data = await response.json()
-
-        if (!response.ok) {
-            throw new Error(data.error || `API request failed with status ${response.status}`)
-        }
-
-        return data
-    } catch (error) {
-        console.error('Error checking Mantys eligibility:', error)
-        throw error
-    }
-}
-
-/**
  * Format Emirates ID with dashes
  */
 export function formatEmiratesId(id: string): string {
@@ -246,4 +218,3 @@ export function getTPARequirements(tpaCode: TPACode): {
         hasMaternityExtraArgs: false
     }
 }
-

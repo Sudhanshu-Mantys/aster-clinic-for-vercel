@@ -16,3 +16,8 @@ dist
 .env.local
 .env*.local
 renderer/.env.local
+
+package-lock.json
+yarn.lock
+
+.env

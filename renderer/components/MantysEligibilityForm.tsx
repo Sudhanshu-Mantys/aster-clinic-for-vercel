@@ -1,8 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import Select from "react-select";
-import { PatientData, InsuranceData } from "../lib/api";
 import { Button } from "./ui/button";
-import { cachedFetch, fetchWithTimeout } from "../lib/request-cache";
 import {
   MantysEligibilityResponse,
   TPACode,
@@ -10,15 +8,43 @@ import {
   VisitType,
 } from "../types/mantys";
 import {
-  buildMantysPayload,
-  checkMantysEligibility,
-} from "../lib/mantys-utils";
+  ApiError,
+  appointmentApi,
+  eligibilityHistoryApi,
+  patientApi,
+  type EligibilityHistoryItem,
+  type InsuranceData,
+  type PatientData,
+} from "../lib/api-client";
+import { buildMantysPayload } from "../lib/mantys-utils";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
-import { EligibilityHistoryService } from "../utils/eligibilityHistory";
-import pollingService from "../services/eligibilityPollingService";
 import { useAuth } from "../contexts/AuthContext";
-import { EligibilityCheckMetadata } from "../lib/redis-eligibility-mapping";
+import { useTPAConfigs, useDoctors } from "../hooks/useClinicConfig";
+import {
+  useCreateEligibilityCheck,
+  useCreateEligibilityHistoryItem,
+  useEligibilityHistoryItem,
+} from "../hooks/useEligibility";
+import {
+  validateIdByType,
+  validateName,
+  validatePhoneNumber,
+  validateDoctorName,
+  validatePodId,
+  validateReferralCode,
+  validateVisitType,
+  validateVisitCategory,
+  validateMaternityType,
+  validatePayerName,
+  validateUAEMobileCode,
+  validateUAEMobileSuffix,
+  sanitizeInput,
+  sanitizeNumericInput,
+  sanitizeAlphanumericInput,
+  formatEmiratesId,
+  formatDhaMemberId,
+} from "../utils/form-validations";
 
 interface MantysEligibilityFormProps {
   patientData: PatientData | null;
@@ -95,7 +121,22 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
   // History tracking
   const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
-  const monitoringIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const createEligibilityCheck = useCreateEligibilityCheck();
+  const createHistoryItem = useCreateEligibilityHistoryItem();
+
+  const { data: currentHistoryItem } = useEligibilityHistoryItem(
+    currentHistoryId || "",
+    {
+      enabled: !!currentHistoryId,
+      refetchInterval: (query) => {
+        const status = query.state.data?.status;
+        if (status === "complete" || status === "error") {
+          return false;
+        }
+        return 2000;
+      },
+    },
+  );
 
   // Results State
   const [mantysResponse, setMantysResponse] =
@@ -104,123 +145,32 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
   // Organization/Clinic Context
   const { user } = useAuth();
-  const selectedOrganizationId: string = "aster-clinics"; // Example: "medcare", "al-noor", "healthhub", "kims", "org1"
-  const selectedClinicId: string = user?.selected_team_id || "92d5da39-36af-4fa2-bde3-3828600d7871"; // Get from auth context
+  const selectedOrganizationId: string = "aster-clinics";
+  const selectedClinicId: string = user?.selected_team_id || "92d5da39-36af-4fa2-bde3-3828600d7871";
 
-  // TPA Config and Doctors State
-  const [tpaConfig, setTpaConfig] = useState<any>(null);
-  const [doctorsList, setDoctorsList] = useState<any[]>([]);
-  const [isDoctorCompulsory, setIsDoctorCompulsory] = useState(false);
-  const [isLoadingTPAConfig, setIsLoadingTPAConfig] = useState(false);
-  const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
+  // TPA Config and Doctors - use TanStack Query hooks
+  const tpaIdentifier = insuranceData?.payer_code || (options && options !== "BOTH" ? options : null);
+  const { data: tpaConfigs, isLoading: isLoadingTPAConfig } = useTPAConfigs(selectedClinicId, { enabled: !!selectedClinicId });
+  const { data: doctorsList = [], isLoading: isLoadingDoctors } = useDoctors(selectedClinicId, { enabled: !!selectedClinicId });
+
+  const tpaConfig = useMemo(() => {
+    if (!tpaConfigs || !tpaIdentifier) return null;
+    let config = tpaConfigs.find((c: any) => c.ins_code === tpaIdentifier);
+    if (!config) config = tpaConfigs.find((c: any) => c.payer_code === tpaIdentifier);
+    if (!config) config = tpaConfigs.find((c: any) => c.tpa_id === tpaIdentifier);
+    return config || null;
+  }, [tpaConfigs, tpaIdentifier]);
+
+  const isDoctorCompulsory = useMemo(() => {
+    if (!tpaConfig) return false;
+    const extraFormFields = (tpaConfig.extra_form_fields || []) as unknown as Array<{ field: string; required?: boolean }>;
+    const doctorField = extraFormFields.find((field) => field.field === "doctor");
+    return doctorField?.required === true;
+  }, [tpaConfig]);
 
   // Previous Searches State
-  const [previousSearches, setPreviousSearches] = useState<EligibilityCheckMetadata[]>([]);
+  const [previousSearches, setPreviousSearches] = useState<EligibilityHistoryItem[]>([]);
   const [loadingPreviousSearches, setLoadingPreviousSearches] = useState(false);
-
-  // ============================================================================
-  // PRE-FILL FORM WITH PATIENT DATA
-  // ============================================================================
-
-  // Load TPA config and doctors when insurance data, options, or clinic ID changes
-  useEffect(() => {
-    if (selectedClinicId) {
-      loadDoctors();
-      // Try to load TPA config - prioritize payer_code, then options
-      const identifier = insuranceData?.payer_code || (options && options !== "BOTH" ? options : null);
-      if (identifier) {
-        loadTPAConfig(identifier);
-      }
-    }
-  }, [selectedClinicId, insuranceData?.payer_code, options]);
-
-  const loadTPAConfig = async (identifier: string) => {
-    if (!selectedClinicId || !identifier) return;
-    // Skip if already loading
-    if (isLoadingTPAConfig) return;
-
-    setIsLoadingTPAConfig(true);
-    try {
-      console.log("🔍 Loading TPA config for identifier:", identifier, "clinic:", selectedClinicId);
-      const response = await cachedFetch(`/api/clinic-config/tpa?clinic_id=${selectedClinicId}`);
-      if (response.ok) {
-        const data = await response.json();
-        console.log("📦 Received TPA configs:", data.configs?.length || 0, "configs");
-        if (data.configs && Array.isArray(data.configs)) {
-          // Log all config identifiers for debugging
-          console.log("🔑 Available TPA config identifiers:", data.configs.map((c: any) => ({
-            ins_code: c.ins_code,
-            payer_code: c.payer_code,
-            tpa_id: c.tpa_id,
-            tpa_name: c.tpa_name
-          })));
-
-          // Try multiple ways to find the config:
-          // 1. By ins_code (primary identifier)
-          // 2. By payer_code
-          // 3. By tpa_id
-          let config = data.configs.find(
-            (c: any) => c.ins_code === identifier
-          );
-          if (!config) {
-            config = data.configs.find(
-              (c: any) => c.payer_code === identifier
-            );
-          }
-          if (!config) {
-            config = data.configs.find(
-              (c: any) => c.tpa_id === identifier
-            );
-          }
-
-          if (config) {
-            console.log("✅ Found TPA config:", {
-              ins_code: config.ins_code,
-              tpa_name: config.tpa_name,
-              extra_form_fields: config.extra_form_fields
-            });
-            setTpaConfig(config);
-            // Check if doctor is compulsory
-            const extraFormFields = config.extra_form_fields || [];
-            const doctorField = extraFormFields.find((field: any) => field.field === "doctor");
-            const isCompulsory = doctorField?.required === true;
-            console.log("👨‍⚕️ Doctor compulsory:", isCompulsory, "doctorField:", doctorField);
-            setIsDoctorCompulsory(isCompulsory);
-          } else {
-            console.log("⚠️ No TPA config found for identifier:", identifier, "- Available configs:", data.configs.map((c: any) => c.ins_code || c.tpa_id));
-            // Reset if not found
-            setTpaConfig(null);
-            setIsDoctorCompulsory(false);
-          }
-        }
-      } else {
-        console.error("❌ Failed to fetch TPA configs, status:", response.status);
-      }
-    } catch (error) {
-      console.error("❌ Failed to load TPA config:", error);
-    } finally {
-      setIsLoadingTPAConfig(false);
-    }
-  };
-
-  const loadDoctors = async () => {
-    if (!selectedClinicId) return;
-    // Skip if already loading or already loaded
-    if (isLoadingDoctors || doctorsList.length > 0) return;
-
-    setIsLoadingDoctors(true);
-    try {
-      const response = await cachedFetch(`/api/clinic-config/doctors?clinic_id=${selectedClinicId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setDoctorsList(data.configs || []);
-      }
-    } catch (error) {
-      console.error("Failed to load doctors:", error);
-    } finally {
-      setIsLoadingDoctors(false);
-    }
-  };
 
   // Fetch appointment data to get physician information and pre-fill doctor
   useEffect(() => {
@@ -231,10 +181,15 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           const today = new Date();
           const fromDate = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
 
-          const response = await fetch(`/api/appointments/today?fromDate=${fromDate}&toDate=${fromDate}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.body?.Data && Array.isArray(data.body.Data)) {
+          const appointmentResponse = await appointmentApi.getToday({
+            fromDate,
+            toDate: fromDate,
+          });
+          const data = appointmentResponse as {
+            body?: { Data?: any[] };
+            appointments?: any[];
+          };
+          if (data.body?.Data && Array.isArray(data.body.Data)) {
               // Find the appointment matching our appointment_id
               const appointment = data.body.Data.find(
                 (apt: any) => apt.appointment_id === patientData.appointment_id
@@ -298,22 +253,21 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   console.log("⚠️ No matching doctor found for:", { providerName, physicianName, physicianId });
                 }
               }
-            } else if (data.appointments && Array.isArray(data.appointments)) {
-              // Fallback to old format
-              const appointment = data.appointments.find(
-                (apt: any) => apt.appointment_id === patientData.appointment_id
+          } else if (data.appointments && Array.isArray(data.appointments)) {
+            // Fallback to old format
+            const appointment = data.appointments.find(
+              (apt: any) => apt.appointment_id === patientData.appointment_id
+            );
+
+            if (appointment && appointment.physician_name) {
+              const physicianName = appointment.physician_name.trim();
+              const matchedDoctor = doctorsList.find(
+                (doc) => doc.doctor_name?.trim().toLowerCase() === physicianName.toLowerCase()
               );
 
-              if (appointment && appointment.physician_name) {
-                const physicianName = appointment.physician_name.trim();
-                const matchedDoctor = doctorsList.find(
-                  (doc) => doc.doctor_name?.trim().toLowerCase() === physicianName.toLowerCase()
-                );
-
-                if (matchedDoctor && matchedDoctor.dha_id && matchedDoctor.dha_id.trim() !== "") {
-                  console.log("✅ Pre-filling doctor from appointment (fallback):", matchedDoctor.doctor_name, "DHA ID:", matchedDoctor.dha_id);
-                  setDoctorName(matchedDoctor.dha_id);
-                }
+              if (matchedDoctor && matchedDoctor.dha_id && matchedDoctor.dha_id.trim() !== "") {
+                console.log("✅ Pre-filling doctor from appointment (fallback):", matchedDoctor.doctor_name, "DHA ID:", matchedDoctor.dha_id);
+                setDoctorName(matchedDoctor.dha_id);
               }
             }
           }
@@ -364,28 +318,21 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           // Then try to get nationality_id from appointment Redis if we have appointment_id (this will override if found)
           if (patientData.appointment_id && (!emiratesIdValue || emiratesIdValue.length === 0)) {
             try {
-              const contextResponse = await fetchWithTimeout(
-                "/api/patient/context",
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    appointmentId: patientData.appointment_id,
-                    mpi: patientData.mpi,
-                  }),
-                },
-                3000 // 3 second timeout
-              );
+              const context = await patientApi.getContext({
+                appointmentId: patientData.appointment_id.toString(),
+                mpi: patientData.mpi,
+              });
 
-              if (contextResponse.ok) {
-                const context = await contextResponse.json();
-                if (context.nationality_id && context.nationality_id.trim()) {
-                  emiratesIdValue = context.nationality_id.trim();
-                  console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
-                }
+              if (context.nationality_id && context.nationality_id.trim()) {
+                emiratesIdValue = context.nationality_id.trim();
+                console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
               }
             } catch (error) {
-              console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+              if (error instanceof ApiError && error.status === 404) {
+                console.warn("⚠️ Appointment context not found in Redis");
+              } else {
+                console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+              }
             }
           }
 
@@ -504,28 +451,21 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
           // Then try to get nationality_id from appointment Redis if we have appointment_id (this will override if found)
           if (patientData?.appointment_id) {
             try {
-              const contextResponse = await fetchWithTimeout(
-                "/api/patient/context",
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    appointmentId: patientData.appointment_id,
-                    mpi: patientData.mpi,
-                  }),
-                },
-                3000 // 3 second timeout
-              );
+              const context = await patientApi.getContext({
+                appointmentId: patientData.appointment_id.toString(),
+                mpi: patientData.mpi,
+              });
 
-              if (contextResponse.ok) {
-                const context = await contextResponse.json();
-                if (context.nationality_id) {
-                  emiratesIdValue = context.nationality_id;
-                  console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
-                }
+              if (context.nationality_id) {
+                emiratesIdValue = context.nationality_id;
+                console.log("✅ Using Emirates ID from appointment Redis (nationality_id):", emiratesIdValue);
               }
             } catch (error) {
-              console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+              if (error instanceof ApiError && error.status === 404) {
+                console.warn("⚠️ Appointment context not found in Redis");
+              } else {
+                console.warn("⚠️ Could not fetch appointment context from Redis:", error);
+              }
             }
           }
 
@@ -955,28 +895,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
     setLoadingPreviousSearches(true);
     try {
-      let searches: EligibilityCheckMetadata[] = [];
+      let searches: EligibilityHistoryItem[] = [];
 
       // Try by patientId first
       if (patientId) {
-        const response = await fetch(`/api/eligibility/get-by-patient-id?patientId=${patientId}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            searches = data.data;
-          }
-        }
+        searches = await eligibilityHistoryApi.getByPatientId(String(patientId));
       }
 
       // If no results and we have mpi, try by mpi
       if (searches.length === 0 && mpi) {
-        const response = await fetch(`/api/eligibility/get-by-mpi?mpi=${mpi}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            searches = data.data;
-          }
-        }
+        searches = await eligibilityHistoryApi.getByMPI(mpi);
       }
 
       setPreviousSearches(searches);
@@ -998,103 +926,63 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // ============================================================================
 
   const handleEmiratesIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawValue = e.target.value.trim();
-    const digits = rawValue.replace(/\D/g, "");
-    const containsLetters = /[a-zA-Z]/.test(rawValue);
+    const rawValue = e.target.value;
 
     // Clear warnings
     setEmiratesIdInputWarning(null);
 
+    // Clear error for this field
+    if (errors.emiratesId) {
+      setErrors({ ...errors, emiratesId: "" });
+    }
+
     // ========== EMIRATES ID HANDLING ==========
     if (idType === "EMIRATESID") {
-      // If letters detected, show warning
-      if (containsLetters) {
-        setEmiratesIdInputWarning(
-          "Emirates ID contains numbers and dashes only. Please switch to Member ID if needed.",
-        );
-        // Format only the digits found
-        let formattedId = digits;
-        if (digits.length > 3) {
-          formattedId = `${digits.slice(0, 3)}-${digits.slice(3)}`;
-        }
-        if (digits.length > 7) {
-          formattedId = `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-        }
-        setEmiratesId(formattedId.slice(0, 18));
-        return;
-      }
+      const sanitized = sanitizeNumericInput(rawValue);
+      const formatted = formatEmiratesId(sanitized);
+      setEmiratesId(formatted);
 
-      // If too many digits
-      if (digits.length > 15) {
-        setEmiratesIdInputWarning("Emirates ID has only 15 digits.");
-        const limitedDigits = digits.slice(0, 15);
-        const formattedId = `${limitedDigits.slice(0, 3)}-${limitedDigits.slice(3, 7)}-${limitedDigits.slice(7, 14)}-${limitedDigits.slice(14, 15)}`;
-        setEmiratesId(formattedId.slice(0, 18));
-        return;
+      // Real-time validation feedback
+      if (formatted.length > 0) {
+        const validation = validateIdByType(formatted, idType);
+        if (!validation.isValid) {
+          setEmiratesIdInputWarning(validation.error);
+        }
       }
-
-      // Format progressively: XXX-XXXX-XXXXXXX-X
-      let formattedId = digits;
-      if (digits.length > 3) {
-        formattedId = `${digits.slice(0, 3)}-${digits.slice(3)}`;
-      }
-      if (digits.length > 7) {
-        formattedId = `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-      }
-      if (digits.length > 14) {
-        formattedId = `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 14)}-${digits.slice(14, 15)}`;
-      }
-      setEmiratesId(formattedId.slice(0, 18));
     }
     // ========== DHA MEMBER ID HANDLING ==========
     else if (idType === "DHAMEMBERID") {
-      // DHA Member ID format: XXXX-XXX-XXXXXXXXX-XX (alphanumeric)
-      const alphanumericOnly = rawValue
-        .replace(/[^A-Za-z0-9]/g, "")
-        .toUpperCase();
+      const sanitized = sanitizeAlphanumericInput(rawValue);
+      const formatted = formatDhaMemberId(sanitized);
+      setEmiratesId(formatted);
 
-      let formattedDhaId = "";
-
-      if (alphanumericOnly.length > 0) {
-        formattedDhaId += alphanumericOnly.substring(
-          0,
-          Math.min(4, alphanumericOnly.length),
-        );
-      }
-      if (alphanumericOnly.length > 4) {
-        formattedDhaId +=
-          "-" +
-          alphanumericOnly.substring(4, Math.min(7, alphanumericOnly.length));
-      }
-      if (alphanumericOnly.length > 7) {
-        formattedDhaId +=
-          "-" +
-          alphanumericOnly.substring(7, Math.min(16, alphanumericOnly.length));
-      }
-      if (alphanumericOnly.length > 16) {
-        formattedDhaId +=
-          "-" +
-          alphanumericOnly.substring(16, Math.min(18, alphanumericOnly.length));
-      }
-
-      setEmiratesId(formattedDhaId.slice(0, 21)); // Max 21 chars with dashes
-
-      // Validation warning
-      const dhaMemberIdRegex =
-        /^[A-Za-z0-9]{4}-[A-Za-z0-9]{3}-[A-Za-z0-9]{9}-[A-Za-z0-9]{2}$/;
-      if (
-        formattedDhaId.length > 0 &&
-        alphanumericOnly.length <= 18 &&
-        !dhaMemberIdRegex.test(formattedDhaId)
-      ) {
-        setEmiratesIdInputWarning(
-          "Please ensure the DHA Member ID is in the format XXXX-XXX-XXXXXXXXX-XX.",
-        );
+      // Real-time validation feedback
+      if (formatted.length > 0) {
+        const validation = validateIdByType(formatted, idType);
+        if (!validation.isValid) {
+          setEmiratesIdInputWarning(validation.error);
+        }
       }
     }
     // ========== OTHER ID TYPES (Member ID, Policy Number, etc.) ==========
     else {
-      setEmiratesId(rawValue);
+      // Sanitize based on ID type
+      let sanitized = rawValue;
+      if (idType === "CARDNUMBER" || idType === "POLICYNUMBER") {
+        sanitized = sanitizeAlphanumericInput(rawValue);
+      } else if (idType === "Passport") {
+        sanitized = sanitizeAlphanumericInput(rawValue).toUpperCase();
+      }
+
+      setEmiratesId(sanitized);
+
+      // Real-time validation feedback
+      if (sanitized.length > 0) {
+        const validation = validateIdByType(sanitized, idType);
+        if (!validation.isValid) {
+          setEmiratesIdInputWarning(validation.error);
+        }
+      }
     }
   };
 
@@ -1106,79 +994,218 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   };
 
   // ============================================================================
+  // ENHANCED INPUT HANDLERS WITH VALIDATION
+  // ============================================================================
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeInput(rawValue);
+    setName(sanitized);
+
+    // Clear error for this field
+    if (errors.name) {
+      setErrors({ ...errors, name: "" });
+    }
+  };
+
+  const handlePhoneNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeNumericInput(rawValue);
+    setPhoneNumber(sanitized);
+
+    // Clear error for this field
+    if (errors.phoneNumber) {
+      setErrors({ ...errors, phoneNumber: "" });
+    }
+  };
+
+  const handleDoctorNameChange = (selected: any) => {
+    setDoctorName(selected?.value || "");
+
+    // Clear error for this field
+    if (errors.doctorName) {
+      setErrors({ ...errors, doctorName: "" });
+    }
+  };
+
+  const handleVisitTypeChange = (selected: any) => {
+    setVisitType(selected?.value || "");
+
+    // Clear error for this field
+    if (errors.visitType) {
+      setErrors({ ...errors, visitType: "" });
+    }
+  };
+
+  const handleVisitCategoryChange = (selected: any) => {
+    setVisitCategory(selected?.value || "");
+
+    // Clear error for this field
+    if (errors.visitCategory) {
+      setErrors({ ...errors, visitCategory: "" });
+    }
+  };
+
+  const handleMaternityTypeChange = (selected: any) => {
+    setMaternityType(selected?.value || "");
+
+    // Clear error for this field
+    if (errors.maternityType) {
+      setErrors({ ...errors, maternityType: "" });
+    }
+  };
+
+  const handlePayerNameChange = (selected: any) => {
+    setPayerName(selected?.value || null);
+
+    // Clear error for this field
+    if (errors.payerName) {
+      setErrors({ ...errors, payerName: "" });
+    }
+  };
+
+  const handlePodIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeAlphanumericInput(rawValue);
+    setPodId(sanitized);
+
+    // Clear error for this field
+    if (errors.pod) {
+      setErrors({ ...errors, pod: "" });
+    }
+  };
+
+  const handleReferralCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeAlphanumericInput(rawValue);
+    setReferralCode(sanitized);
+  };
+
+  const handlePhoneCodeChange = (selected: any) => {
+    const code = selected?.value || "";
+    setPhoneNumberParts(code, phoneSuffix);
+
+    // Clear error for this field
+    if (errors.phoneNumber) {
+      setErrors({ ...errors, phoneNumber: "" });
+    }
+  };
+
+  const handlePhoneSuffixChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeNumericInput(rawValue).slice(0, 7);
+    setPhoneNumberParts(phoneCode, sanitized);
+
+    // Clear error for this field
+    if (errors.phoneNumber) {
+      setErrors({ ...errors, phoneNumber: "" });
+    }
+  };
+
+  // ============================================================================
   // FORM VALIDATION
   // ============================================================================
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    // Emirates ID / Member ID validation
-    if (!emiratesId) {
-      newErrors.emiratesId = "This field is required";
-    } else if (idType === "EMIRATESID") {
-      const emiratesIdRegex = /^\d{3}-\d{4}-\d{7}-\d{1}$/;
-      if (!emiratesIdRegex.test(emiratesId)) {
-        newErrors.emiratesId =
-          "Invalid Emirates ID format (must be XXX-XXXX-XXXXXXX-X)";
-      }
+    // Emirates ID / Member ID validation using comprehensive utility
+    const idValidation = validateIdByType(emiratesId, idType);
+    if (!idValidation.isValid) {
+      newErrors.emiratesId = idValidation.error || "Invalid ID";
     }
 
     // Visit type validation
-    if (!visitType) {
-      newErrors.visitType = "Visit type is required";
+    const visitTypeValidation = validateVisitType(visitType);
+    if (!visitTypeValidation.isValid) {
+      newErrors.visitType = visitTypeValidation.error || "Visit type is required";
     }
 
     // Doctor name validation
-    if (showDoctorsNameField && !doctorName) {
-      newErrors.doctorName = "Doctor name is required";
-    }
+    if (showDoctorsNameField) {
+      const doctorValidation = validateDoctorName(doctorName);
+      if (!doctorValidation.isValid) {
+        newErrors.doctorName = doctorValidation.error || "Doctor name is required";
+      }
 
-    // DHA ID validation when doctor is compulsory
-    if (isDoctorCompulsory && doctorName) {
-      const selectedDoctor = doctorsList.find(
-        (doc) => doc.dha_id === doctorName || doc.doctor_id === doctorName
-      );
-      if (!selectedDoctor || !selectedDoctor.dha_id || selectedDoctor.dha_id.trim() === "") {
-        newErrors.doctorName = "Selected doctor must have a DHA ID";
+      // DHA ID validation when doctor is compulsory
+      if (isDoctorCompulsory && doctorName) {
+        const selectedDoctor = doctorsList.find(
+          (doc) => doc.dha_id === doctorName || doc.doctor_id === doctorName
+        );
+        if (!selectedDoctor || !selectedDoctor.dha_id || selectedDoctor.dha_id.trim() === "") {
+          newErrors.doctorName = "Selected doctor must have a DHA ID";
+        }
       }
     }
 
     // Name validation
-    if (showNameField && !name) {
-      newErrors.name = "Name is required";
+    if (showNameField) {
+      const nameValidation = validateName(name);
+      if (!nameValidation.isValid) {
+        newErrors.name = nameValidation.error || "Name is required";
+      }
     }
 
     // Phone validation
-    if (showPhoneField && !phoneNumber) {
-      newErrors.phoneNumber = "Phone number is required";
-    }
+    if (showPhoneField) {
+      if (isOrg1Ins017) {
+        // Split phone validation for ADNIC Org1
+        const codeValidation = validateUAEMobileCode(phoneCode);
+        const suffixValidation = validateUAEMobileSuffix(phoneSuffix);
 
-    if (
-      isOrg1Ins017 &&
-      (!phoneCode || !phoneSuffix || phoneSuffix.length !== 7)
-    ) {
-      newErrors.phoneNumber =
-        "Please enter a valid mobile number (code + 7 digits)";
+        if (!codeValidation.isValid) {
+          newErrors.phoneNumber = codeValidation.error || "Invalid mobile code";
+        } else if (!suffixValidation.isValid) {
+          newErrors.phoneNumber = suffixValidation.error || "Invalid mobile number";
+        }
+      } else {
+        // Regular phone validation
+        const phoneValidation = validatePhoneNumber(phoneNumber);
+        if (!phoneValidation.isValid) {
+          newErrors.phoneNumber = phoneValidation.error || "Phone number is required";
+        }
+      }
     }
 
     // POD validation
-    if (shouldShowPodFields && isPod && !podId) {
-      newErrors.pod = "POD ID is required when POD is Yes";
+    if (shouldShowPodFields && isPod) {
+      const podValidation = validatePodId(podId);
+      if (!podValidation.isValid) {
+        newErrors.pod = podValidation.error || "POD ID is required";
+      }
     }
 
     // Payer name validation (NextCare Policy Number)
-    if (showPayerNameField && !payerName) {
-      newErrors.payerName = "Payer name is required";
+    if (showPayerNameField) {
+      const payerValidation = validatePayerName(payerName || "");
+      if (!payerValidation.isValid) {
+        newErrors.payerName = payerValidation.error || "Payer name is required";
+      }
     }
 
     // Visit category validation (ADNIC Org1)
-    if (showVisitCategoryField && !visitCategory) {
-      newErrors.visitCategory = "Visit category is required";
+    if (showVisitCategoryField) {
+      const categoryValidation = validateVisitCategory(visitCategory);
+      if (!categoryValidation.isValid) {
+        newErrors.visitCategory = categoryValidation.error || "Visit category is required";
+      }
     }
 
-    // Maternity extra args validation
-    if (showMaternityExtraArgs && !maternityType) {
-      newErrors.maternityType = "Maternity type is required";
+    // Maternity type validation
+    if (showMaternityExtraArgs) {
+      const maternityValidation = validateMaternityType(maternityType);
+      if (!maternityValidation.isValid) {
+        newErrors.maternityType = maternityValidation.error || "Maternity type is required";
+      }
+    }
+
+    // Referral code validation (optional field, but validate if present)
+    if (referralCode) {
+      const referralValidation = validateReferralCode(referralCode);
+      if (!referralValidation.isValid) {
+        newErrors.referralCode = referralValidation.error || "Invalid referral code";
+      }
     }
 
     setErrors(newErrors);
@@ -1189,85 +1216,55 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // FORM SUBMISSION
   // ============================================================================
 
-  // Cleanup monitoring interval on unmount
   useEffect(() => {
-    return () => {
-      if (monitoringIntervalRef.current) {
-        clearInterval(monitoringIntervalRef.current);
-      }
-    };
-  }, []);
-
-  // Monitor status updates from background polling service
-  // The actual polling happens in the background service
-  const monitorTaskStatus = (taskId: string, historyId: string) => {
-    setStatusMessage("Task created, monitoring status...");
-    setCurrentStatus("pending");
-
-    // Clear any existing interval
-    if (monitoringIntervalRef.current) {
-      clearInterval(monitoringIntervalRef.current);
+    if (!currentHistoryItem) {
+      return;
     }
 
-    // Check status periodically to update UI
-    monitoringIntervalRef.current = setInterval(async () => {
-      const historyItem = await EligibilityHistoryService.getById(historyId);
+    setPollingAttempts(currentHistoryItem.pollingAttempts || 0);
 
-      if (!historyItem) {
-        if (monitoringIntervalRef.current) {
-          clearInterval(monitoringIntervalRef.current);
-          monitoringIntervalRef.current = null;
+    if (currentHistoryItem.status === "pending") {
+      setStatusMessage("Navigating Insurance Portal...");
+      setCurrentStatus("pending");
+      return;
+    }
+
+    if (currentHistoryItem.status === "processing") {
+      setStatusMessage("Extracting eligibility data from TPA portal...");
+      setCurrentStatus("processing");
+
+      if (currentHistoryItem.interimResults) {
+        if (currentHistoryItem.interimResults.screenshot) {
+          setInterimScreenshot(currentHistoryItem.interimResults.screenshot);
         }
-        return;
-      }
-
-      // Update UI based on history item status
-      setPollingAttempts(historyItem.pollingAttempts || 0);
-
-      if (historyItem.status === "pending") {
-        setStatusMessage("Navigating Insurance Portal...");
-        setCurrentStatus("pending");
-      } else if (historyItem.status === "processing") {
-        setStatusMessage("Extracting eligibility data from TPA portal...");
-        setCurrentStatus("processing");
-
-        // Update interim results in UI
-        if (historyItem.interimResults) {
-          if (historyItem.interimResults.screenshot) {
-            setInterimScreenshot(historyItem.interimResults.screenshot);
-          }
-          if (historyItem.interimResults.documents) {
-            setInterimDocuments(
-              historyItem.interimResults.documents.map((doc) => ({
-                id: doc.name,
-                tag: doc.type,
-                url: doc.url,
-              })),
-            );
-          }
-        }
-      } else if (historyItem.status === "complete") {
-        setStatusMessage("Eligibility check complete!");
-        setCurrentStatus("complete");
-        setMantysResponse(historyItem.result);
-        setShowResults(true);
-        setIsMinimized(false); // Reopen modal when complete to show results
-        // Keep isSubmitting true so modal stays open to show completion status
-        if (monitoringIntervalRef.current) {
-          clearInterval(monitoringIntervalRef.current);
-          monitoringIntervalRef.current = null;
-        }
-      } else if (historyItem.status === "error") {
-        setApiError(historyItem.error || "Eligibility check failed");
-        setIsMinimized(false); // Reopen modal when error occurs
-        // Keep isSubmitting true so modal stays open to show error
-        if (monitoringIntervalRef.current) {
-          clearInterval(monitoringIntervalRef.current);
-          monitoringIntervalRef.current = null;
+        if (currentHistoryItem.interimResults.documents) {
+          setInterimDocuments(
+            currentHistoryItem.interimResults.documents.map((doc: any) => ({
+              id: doc.name,
+              tag: doc.type,
+              url: doc.url,
+            })),
+          );
         }
       }
-    }, 2000); // Check every 2 seconds for UI updates (reduced from 500ms to reduce API load)
-  };
+
+      return;
+    }
+
+    if (currentHistoryItem.status === "complete") {
+      setStatusMessage("Eligibility check complete!");
+      setCurrentStatus("complete");
+      setMantysResponse(currentHistoryItem.result as MantysEligibilityResponse);
+      setShowResults(true);
+      setIsMinimized(false);
+      return;
+    }
+
+    if (currentHistoryItem.status === "error") {
+      setApiError(currentHistoryItem.error || "Eligibility check failed");
+      setIsMinimized(false);
+    }
+  }, [currentHistoryItem]);
 
   const handleSubmit = async () => {
     if (!validateForm()) {
@@ -1288,32 +1285,26 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       if (patientData?.appointment_id && !patientData?.patient_id) {
         try {
           setStatusMessage("Fetching patient details...");
-          const contextResponse = await fetchWithTimeout(
-            "/api/patient/context",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                appointmentId: patientData.appointment_id,
-                mpi: patientData.mpi,
-              }),
-            },
-            3000 // 3 second timeout
-          );
+          const context = await patientApi.getContext({
+            appointmentId: patientData.appointment_id?.toString(),
+            mpi: patientData.mpi,
+            patientId: patientData.patient_id ? String(patientData.patient_id) : undefined,
+          });
 
-          if (contextResponse.ok) {
-            const context = await contextResponse.json();
-            enrichedPatientData = {
-              ...patientData,
-              patient_id: context.patientId,
-              appointment_id: context.appointmentId,
-              encounter_id: context.encounterId,
-            };
-            setEnrichedPatientContext(enrichedPatientData);
-            console.log("✅ Enriched patient data from Redis:", enrichedPatientData);
-          }
+          enrichedPatientData = {
+            ...patientData,
+            patient_id: context.patientId ? parseInt(context.patientId, 10) : patientData.patient_id,
+            appointment_id: context.appointmentId ? parseInt(context.appointmentId, 10) : patientData.appointment_id,
+            encounter_id: context.encounterId ? parseInt(context.encounterId, 10) : patientData.encounter_id,
+          };
+          setEnrichedPatientContext(enrichedPatientData);
+          console.log("✅ Enriched patient data from Redis:", enrichedPatientData);
         } catch (redisError) {
-          console.warn("⚠️ Could not fetch patient context from Redis:", redisError);
+          if (redisError instanceof ApiError && redisError.status === 404) {
+            console.warn("⚠️ Patient context not found in Redis");
+          } else {
+            console.warn("⚠️ Could not fetch patient context from Redis:", redisError);
+          }
           // Continue with existing data
         }
       }
@@ -1367,18 +1358,9 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       console.log("Submitting eligibility check to Mantys:", payloadWithMetadata);
 
       // Step 1: Create the task
-      const response = await fetch("/api/mantys/eligibility-check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadWithMetadata),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to create task");
-      }
-
-      const data = await response.json();
+      const data = await createEligibilityCheck.mutateAsync(
+        payloadWithMetadata,
+      );
       const createdTaskId = data.task_id;
 
       if (!createdTaskId) {
@@ -1389,13 +1371,11 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       setTaskId(createdTaskId);
       setStatusMessage("Task created, checking status...");
 
-      // Add to history (use enriched data if available)
-      // Store the actual numeric patient ID if available
       const actualPatientId = enrichedPatientData?.patient_id?.toString();
 
-      const historyItem = await EligibilityHistoryService.add({
+      const historyItem = await createHistoryItem.mutateAsync({
         clinicId: selectedClinicId,
-        patientId: actualPatientId || emiratesId, // Use patient ID if available, fall back to Emirates ID
+        patientId: actualPatientId || emiratesId,
         taskId: createdTaskId,
         patientName:
           name ||
@@ -1412,13 +1392,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
       console.log("📝 Saved to history with patient ID:", actualPatientId || emiratesId);
       setCurrentHistoryId(historyItem.id);
-
-      // Step 2: Add to background polling service
-      // This will continue polling even if user closes the tab
-      await pollingService.addTask(createdTaskId, historyItem.id);
-
-      // Step 3: Monitor status for UI updates (optional - user can close modal)
-      monitorTaskStatus(createdTaskId, historyItem.id);
+      setStatusMessage("Task created, monitoring status...");
+      setCurrentStatus("pending");
 
       // Refresh previous searches after successful submission
       // Wait a bit for Redis to be updated
@@ -1451,11 +1426,6 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     setPollingAttempts(0);
     setTaskId(null);
 
-    // Clear monitoring interval if exists
-    if (monitoringIntervalRef.current) {
-      clearInterval(monitoringIntervalRef.current);
-      monitoringIntervalRef.current = null;
-    }
   };
 
   // ============================================================================
@@ -1626,7 +1596,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   value={visitTypeOptions.find(
                     (opt) => opt.value === visitType,
                   )}
-                  onChange={(selected) => setVisitType(selected?.value || "")}
+                  onChange={handleVisitTypeChange}
                   options={visitTypeOptions}
                   placeholder={
                     visitTypeOptions.length > 0
@@ -1637,7 +1607,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   isSearchable
                 />
                 {errors.visitType && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.visitType}
                   </span>
                 )}
@@ -1654,14 +1624,12 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   value={visitCategoryOptions.find(
                     (opt) => opt.value === visitCategory,
                   )}
-                  onChange={(selected) =>
-                    setVisitCategory(selected?.value || "")
-                  }
+                  onChange={handleVisitCategoryChange}
                   options={visitCategoryOptions}
                   placeholder="Select visit category"
                 />
                 {errors.visitCategory && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.visitCategory}
                   </span>
                 )}
@@ -1679,15 +1647,13 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   value={maternityExtraArgs.options.find(
                     (opt: any) => opt.value === maternityType,
                   )}
-                  onChange={(selected) =>
-                    setMaternityType(selected?.value || "")
-                  }
+                  onChange={handleMaternityTypeChange}
                   options={maternityExtraArgs.options}
                   placeholder="Select maternity type"
                   isSearchable
                 />
                 {errors.maternityType && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.maternityType}
                   </span>
                 )}
@@ -1703,15 +1669,19 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                 <input
                   type="text"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Enter patient's name"
+                  onChange={handleNameChange}
+                  placeholder="Enter patient's full name"
+                  maxLength={100}
                   className={`w-full border ${errors.name ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                 />
                 {errors.name && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.name}
                   </span>
                 )}
+                <small className="text-gray-500 mt-1 block">
+                  Full name as per Emirates ID or official documents
+                </small>
               </div>
             )}
 
@@ -1723,10 +1693,11 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                 </label>
                 <Select
                   value={DOCTORS_LIST.find((opt) => opt.value === doctorName)}
-                  onChange={(selected) => setDoctorName(selected?.value || "")}
+                  onChange={handleDoctorNameChange}
                   options={DOCTORS_LIST}
                   placeholder="Select doctor's name"
                   isSearchable
+                  isDisabled={DOCTORS_LIST.length === 0}
                 />
                 {doctorName && (() => {
                   const selectedDoctor = doctorsList.find(
@@ -1740,7 +1711,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   ) : null;
                 })()}
                 {errors.doctorName && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.doctorName}
                   </span>
                 )}
@@ -1811,9 +1782,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                     value={
                       phoneCode ? { value: phoneCode, label: phoneCode } : null
                     }
-                    onChange={(selected) =>
-                      setPhoneNumberParts(selected?.value || "", phoneSuffix)
-                    }
+                    onChange={handlePhoneCodeChange}
                     options={[
                       { value: "50", label: "50" },
                       { value: "52", label: "52" },
@@ -1831,19 +1800,20 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   <input
                     type="text"
                     value={phoneSuffix}
-                    onChange={(e) =>
-                      setPhoneNumberParts(phoneCode, e.target.value)
-                    }
+                    onChange={handlePhoneSuffixChange}
                     placeholder="7 digit number"
                     maxLength={7}
-                    className="flex-1 border border-gray-300 rounded-md p-3"
+                    className={`flex-1 border ${errors.phoneNumber ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                   />
                 </div>
                 {errors.phoneNumber && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.phoneNumber}
                   </span>
                 )}
+                <small className="text-gray-500 mt-1 block">
+                  UAE mobile number format: 971-XX-XXXXXXX
+                </small>
               </div>
             )}
 
@@ -1851,24 +1821,24 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
             {showPhoneField && !isOrg1Ins017 && (
               <div>
                 <label className="block font-semibold text-gray-700 mb-2">
-                  Phone Number
+                  Phone Number <span className="text-red-600">*</span>
                 </label>
                 <input
-                  type="text"
+                  type="tel"
                   value={phoneNumber}
-                  onChange={(e) => {
-                    const digits = e.target.value.replace(/\D/g, "");
-                    setPhoneNumber(digits);
-                  }}
-                  placeholder="Enter patient's phone number"
+                  onChange={handlePhoneNumberChange}
+                  placeholder="971XXXXXXXXX or 05XXXXXXXX"
                   maxLength={15}
                   className={`w-full border ${errors.phoneNumber ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                 />
                 {errors.phoneNumber && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.phoneNumber}
                   </span>
                 )}
+                <small className="text-gray-500 mt-1 block">
+                  UAE phone number (digits only)
+                </small>
               </div>
             )}
 
@@ -1928,10 +1898,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                 <input
                   type="text"
                   value={referralCode}
-                  onChange={(e) => setReferralCode(e.target.value)}
+                  onChange={handleReferralCodeChange}
                   placeholder="Enter referral code"
-                  className="w-full border border-gray-300 rounded-md p-3"
+                  maxLength={50}
+                  className={`w-full border ${errors.referralCode ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                 />
+                {errors.referralCode && (
+                  <span className="text-red-500 text-sm mt-1 block">
+                    {errors.referralCode}
+                  </span>
+                )}
               </div>
             )}
 
@@ -2012,12 +1988,13 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                       <input
                         type="text"
                         value={podId}
-                        onChange={(e) => setPodId(e.target.value)}
+                        onChange={handlePodIdChange}
                         placeholder="Enter POD ID"
+                        maxLength={50}
                         className={`w-full border ${errors.pod ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                       />
                       {errors.pod && (
-                        <span className="text-red-500 text-sm mt-1">
+                        <span className="text-red-500 text-sm mt-1 block">
                           {errors.pod}
                         </span>
                       )}
@@ -2037,7 +2014,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   value={
                     payerName ? { value: payerName, label: payerName } : null
                   }
-                  onChange={(selected) => setPayerName(selected?.value || null)}
+                  onChange={handlePayerNameChange}
                   options={Object.values(payerOptions).map((name) => ({
                     value: name,
                     label: name,
@@ -2046,7 +2023,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   isSearchable
                 />
                 {errors.payerName && (
-                  <span className="text-red-500 text-sm mt-1">
+                  <span className="text-red-500 text-sm mt-1 block">
                     {errors.payerName}
                   </span>
                 )}
