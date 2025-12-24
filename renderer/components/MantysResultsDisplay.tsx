@@ -3,7 +3,7 @@
  * Uses tabbed interface with collapsible sections
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   MantysEligibilityResponse,
   MantysKeyFields,
@@ -53,6 +53,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   response,
   onClose,
   onCheckAnother,
+  screenshot,
   patientMPI,
   patientId,
   appointmentId,
@@ -66,6 +67,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [showSavePolicyModal, setShowSavePolicyModal] = useState(false);
+  const [showScreenshot, setShowScreenshot] = useState(true);
   const [memberId, setMemberId] = useState<string>("");
   const [receiverId, setReceiverId] = useState<string>("");
   const [startDate, setStartDate] = useState<string>("");
@@ -73,6 +75,11 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const { data } = response;
+  const screenshotSrc = screenshot || data?.screenshot_key || null;
+
+  useEffect(() => {
+    setShowScreenshot(true);
+  }, [screenshotSrc]);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -157,11 +164,11 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     <div className="space-y-4">
       {/* Action Buttons - 2x2 Grid on Mobile */}
       <div className="grid grid-cols-2 gap-2">
-        <Button onClick={handleSavePolicy} className="gap-2 bg-black hover:bg-gray-800 text-white">
+        <Button onClick={handleSavePolicy} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
           <Download className="h-4 w-4" /> Save Policy
         </Button>
         {keyFields.referralDocuments?.length > 0 && (
-          <Button onClick={handleUploadScreenshots} disabled={uploadingFiles} className="gap-2 bg-black hover:bg-gray-800 text-white">
+          <Button onClick={handleUploadScreenshots} disabled={uploadingFiles} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
             <Upload className="h-4 w-4" /> {uploadingFiles ? "Uploading..." : "Upload Documents"}
           </Button>
         )}
@@ -390,6 +397,26 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                   <p className="text-center py-6 text-gray-500">No documents available</p>
                 )}
               </div>
+              {screenshotSrc && showScreenshot && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                    Eligibility Screenshot
+                  </h4>
+                  <a
+                    href={screenshotSrc}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block border border-gray-300 rounded-lg overflow-hidden bg-gray-50 shadow-sm hover:border-gray-400 transition-colors"
+                  >
+                    <img
+                      src={screenshotSrc}
+                      alt="Eligibility verification screenshot"
+                      className="w-full h-auto max-h-[420px] object-contain"
+                      onError={() => setShowScreenshot(false)}
+                    />
+                  </a>
+                </div>
+              )}
             </Card>
           </div>
         )}
