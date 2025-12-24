@@ -185,7 +185,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
   const handlePreviousSearchClick = useCallback((search: any) => {
     setSelectedTaskId(search.taskId);
-    if ((search.status === "complete" || search.status === "error") && search.result) {
+    if (search.status === "complete" || search.status === "error") {
       setShowEligibilityDrawer(true);
     } else {
       setShowEligibilityModal(true);
@@ -554,7 +554,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         )}
       </Drawer>
 
-      {showEligibilityDrawer && selectedEligibilityItem?.status === "complete" && (
+      {showEligibilityDrawer && selectedEligibilityItem?.status === "complete" && resultData && (
         <Drawer
           isOpen={showEligibilityDrawer}
           onClose={handleCloseEligibilityDrawer}
@@ -598,7 +598,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         </Drawer>
       )}
 
-      {showEligibilityModal && selectedTaskId && (
+      {showEligibilityModal && selectedTaskId && !resultData && (
         <ExtractionProgressModal
           isOpen={showEligibilityModal}
           onClose={handleCloseEligibilityModal}
