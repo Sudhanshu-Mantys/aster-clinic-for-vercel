@@ -155,21 +155,33 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Tab Navigation */}
+      {/* Action Buttons - 2x2 Grid on Mobile */}
+      <div className="grid grid-cols-2 gap-2">
+        <Button onClick={handleSavePolicy} className="gap-2 bg-black hover:bg-gray-800 text-white">
+          <Download className="h-4 w-4" /> Save Policy
+        </Button>
+        {keyFields.referralDocuments?.length > 0 && (
+          <Button onClick={handleUploadScreenshots} disabled={uploadingFiles} className="gap-2 bg-black hover:bg-gray-800 text-white">
+            <Upload className="h-4 w-4" /> {uploadingFiles ? "Uploading..." : "Upload Documents"}
+          </Button>
+        )}
+      </div>
+
+      {/* Tab Navigation - 2x2 on Mobile */}
       <div className="border-b border-gray-200">
-        <div className="flex gap-1 -mb-px overflow-x-auto">
+        <div className="grid grid-cols-2 sm:grid-cols-4">
           {tabs.map((tab) => (
             <button
               key={tab.value}
               onClick={() => setActiveTab(tab.value)}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+              className={`flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-all ${
                 activeTab === tab.value
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  ? "border-blue-600 text-blue-700 bg-blue-50"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
               }`}
             >
               {tab.icon}
-              {tab.label}
+              <span className="truncate">{tab.label}</span>
             </button>
           ))}
         </div>
@@ -181,27 +193,50 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         {activeTab === "overview" && (
           <div className="space-y-4">
             <Card className="p-4">
-              <div className="flex items-center gap-2 mb-4">
-                <User className="h-5 w-5 text-gray-500" />
-                <h3 className="font-semibold">Patient Information</h3>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { label: "MPI", value: patientMPI || "N/A", id: "mpi" },
-                  { label: "Patient ID", value: patientId?.toString() || "N/A", id: "patient" },
-                  { label: "Appointment ID", value: appointmentId?.toString() || "N/A", id: "appointment" },
-                  { label: "Encounter ID", value: encounterId?.toString() || "N/A", id: "encounter" },
-                ].map((item) => (
-                  <div key={item.id}>
-                    <p className="text-xs text-gray-500">{item.label}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <p className="font-mono text-sm">{item.value}</p>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(item.value, item.id)}>
-                        {copied === item.id ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+              <h3 className="font-semibold mb-4">Patient Information</h3>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                {/* Left Column - 5 items */}
+                <div>
+                  <p className="text-gray-500">MPI:</p>
+                  <p className="font-mono font-medium">{patientMPI || "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Patient ID:</p>
+                  <p className="font-mono font-medium">{patientId?.toString() || "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Appointment ID:</p>
+                  <p className="font-mono font-medium">{appointmentId?.toString() || "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Encounter ID:</p>
+                  <p className="font-mono font-medium">{encounterId?.toString() || "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Policy Holder:</p>
+                  <p className="font-medium">{data.policy_holder_name || "N/A"}</p>
+                </div>
+                {/* Right Column - 5 items */}
+                <div>
+                  <p className="text-gray-500">Date of Birth:</p>
+                  <p className="font-medium">{data.policy_holder_dob || "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Gender:</p>
+                  <p className="font-medium">{data.patient_info?.policy_holder_gender || "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Member ID:</p>
+                  <p className="font-mono font-medium">{keyFields.memberId || "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Emirates ID:</p>
+                  <p className="font-mono font-medium">{data.policy_holder_emirates_id || "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">DHA Member ID:</p>
+                  <p className="font-mono font-medium">{data.patient_info?.policy_primary_dha_member_id || "N/A"}</p>
+                </div>
               </div>
             </Card>
             {keyFields.specialRemarks?.length > 0 && (
@@ -228,8 +263,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             {hasBenefits ? (
               benefitCategories.map((benefit) => (
                 <Card key={benefit.id} className="overflow-hidden">
-                  <button onClick={() => toggleSection(benefit.id)} className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition">
-                    <div className="flex items-center gap-3">
+                  <button onClick={() => toggleSection(benefit.id)} className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50 transition gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <Badge className={
                         benefit.id === "outpatient" ? "bg-green-100 text-green-800" :
                         benefit.id === "inpatient" ? "bg-blue-100 text-blue-800" :
@@ -238,34 +273,35 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                       }>
                         {benefit.label}
                       </Badge>
-                      <span className="text-sm text-gray-600">
-                        Network: <span className="font-medium">{benefit.network}</span>
+                      <span className="text-sm text-gray-600 truncate">
+                        <span className="hidden sm:inline">Network: </span>
+                        <span className="font-medium">{benefit.network}</span>
                       </span>
                     </div>
                     {expandedSections.includes(benefit.id) ? (
-                      <ChevronUp className="h-4 w-4 text-gray-500" />
+                      <ChevronUp className="h-4 w-4 text-gray-500 shrink-0" />
                     ) : (
-                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                      <ChevronDown className="h-4 w-4 text-gray-500 shrink-0" />
                     )}
                   </button>
                   {expandedSections.includes(benefit.id) && benefit.services.length > 0 && (
                     <div className="border-t overflow-x-auto">
-                      <table className="w-full text-sm">
+                      <table className="w-full text-xs sm:text-sm">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Service</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Copay</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Deductible</th>
-                            <th className="px-4 py-2 text-center text-xs font-medium text-gray-500">Set</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Service</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Copay</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Deductible</th>
+                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">Set</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y">
                           {benefit.services.map((service, idx) => (
                             <tr key={idx} className="hover:bg-gray-50">
-                              <td className="px-4 py-2 font-medium">{service.type}</td>
-                              <td className="px-4 py-2 text-right">{service.copay}</td>
-                              <td className="px-4 py-2 text-right">{service.deductible}</td>
-                              <td className="px-4 py-2 text-center">
+                              <td className="px-3 py-2 font-medium">{service.type}</td>
+                              <td className="px-3 py-2 text-right">{service.copay}</td>
+                              <td className="px-3 py-2 text-right">{service.deductible}</td>
+                              <td className="px-3 py-2 text-center">
                                 {service.setCopay && <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto" />}
                               </td>
                             </tr>
@@ -288,16 +324,11 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         {activeTab === "policy" && (
           <div className="space-y-4">
             <Card className="p-4">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <CreditCard className="h-5 w-5 text-gray-500" />
-                  <h3 className="font-semibold">Policy Details</h3>
-                </div>
-                <Button variant="outline" size="sm" onClick={handleSavePolicy} className="gap-2 bg-black text-white hover:bg-gray-800 border-black">
-                  <Download className="h-4 w-4" /> Save Policy
-                </Button>
+              <div className="flex items-center gap-2 mb-4">
+                <CreditCard className="h-5 w-5 text-gray-500" />
+                <h3 className="font-semibold">Policy Details</h3>
               </div>
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-xs text-gray-500">Payer</p>
                   <p className="font-medium mt-1">{keyFields.payerName || "N/A"}</p>
@@ -341,23 +372,18 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         {activeTab === "documents" && (
           <div className="space-y-4">
             <Card className="p-4">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2 mb-4">
                 <h3 className="font-semibold">Referral Documents</h3>
-                {keyFields.referralDocuments?.length > 0 && (
-                  <Button variant="outline" size="sm" onClick={handleUploadScreenshots} disabled={uploadingFiles} className="gap-2 bg-black text-white hover:bg-gray-800 border-black">
-                    <Upload className="h-4 w-4" /> {uploadingFiles ? "Uploading..." : "Upload Documents"}
-                  </Button>
-                )}
               </div>
               <div className="space-y-2">
                 {keyFields.referralDocuments?.length > 0 ? (
                   keyFields.referralDocuments.map((doc, idx) => (
-                    <a key={idx} href={doc.s3_url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                      <div className="flex items-center gap-3">
-                        <FileText className="h-5 w-5 text-blue-600" />
-                        <span className="text-sm font-medium">{doc.tag}</span>
+                    <a key={idx} href={doc.s3_url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <FileText className="h-5 w-5 text-blue-600 shrink-0" />
+                        <span className="text-sm font-medium truncate">{doc.tag}</span>
                       </div>
-                      <Download className="h-4 w-4 text-gray-500" />
+                      <Download className="h-4 w-4 text-gray-500 shrink-0" />
                     </a>
                   ))
                 ) : (
@@ -381,7 +407,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       )}
 
       {/* Action Buttons */}
-      <div className="flex gap-2 pt-2 border-t">
+      <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t">
         {onCheckAnother && (
           <Button onClick={onCheckAnother} className="flex-1 gap-2">
             Check Another Eligibility
