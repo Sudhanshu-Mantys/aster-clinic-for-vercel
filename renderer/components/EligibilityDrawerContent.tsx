@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { StickyEligibilityToolbar } from "./StickyEligibilityToolbar";
+import { ModernMantysEligibilityForm } from "./ModernMantysEligibilityForm";
 import { EligibilityHistorySection } from "./EligibilityHistorySection";
 import { InsuranceCardGrid } from "./InsuranceCardGrid";
 import type { InsuranceData, PatientData } from "../lib/api-client";
@@ -11,7 +12,6 @@ interface EligibilityDrawerContentProps {
   insuranceError: string | null;
   previousSearches: EligibilityHistoryItem[];
   patientData: PatientData | null;
-  onOpenEligibilityForm: (insurance: InsuranceData | null) => void;
   onPreviousSearchClick: (search: EligibilityHistoryItem) => void;
 }
 
@@ -23,7 +23,6 @@ export const EligibilityDrawerContent: React.FC<
   insuranceError,
   previousSearches,
   patientData,
-  onOpenEligibilityForm,
   onPreviousSearchClick,
 }) => {
   const [selectedInsurance, setSelectedInsurance] =
@@ -97,10 +96,6 @@ export const EligibilityDrawerContent: React.FC<
     setSelectedInsurance(insurance);
   };
 
-  const handleCheckEligibility = () => {
-    onOpenEligibilityForm(selectedInsurance);
-  };
-
   const hasActiveInsurance = insuranceDetails.some(
     (ins) => ins.insurance_status?.toLowerCase() === "active"
   );
@@ -112,14 +107,21 @@ export const EligibilityDrawerContent: React.FC<
 
   return (
     <div className="flex flex-col h-full">
-      {/* Sticky Toolbar - Always visible at top */}
+      {/* Sticky Toolbar - Insurance Details */}
       <StickyEligibilityToolbar
         selectedInsurance={selectedInsurance}
-        onCheckEligibility={handleCheckEligibility}
         isLoading={isLoadingInsurance}
         hasActiveInsurance={hasActiveInsurance}
         hasAnyInsurance={hasAnyInsurance}
       />
+
+      {/* Eligibility Form - Visible Immediately Below Toolbar */}
+      <div className="border-b border-gray-200">
+        <ModernMantysEligibilityForm
+          patientData={patientData}
+          insuranceData={selectedInsurance}
+        />
+      </div>
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">

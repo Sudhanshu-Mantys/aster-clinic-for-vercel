@@ -39,10 +39,6 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentData | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
 
-  // Eligibility form drawer state
-  const [showEligibilityFormDrawer, setShowEligibilityFormDrawer] = useState(false);
-  const [selectedInsuranceForForm, setSelectedInsuranceForForm] = useState<InsuranceData | null>(null);
-
   // Eligibility results drawer/modal state
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showEligibilityResultsDrawer, setShowEligibilityResultsDrawer] = useState(false);
@@ -157,19 +153,6 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     setShowDrawer(false);
     setTimeout(() => {
       setSelectedAppointment(null);
-    }, 300);
-  }, []);
-
-  // Handler for opening eligibility form drawer
-  const handleOpenEligibilityForm = useCallback((insurance: InsuranceData | null) => {
-    setSelectedInsuranceForForm(insurance);
-    setShowEligibilityFormDrawer(true);
-  }, []);
-
-  const handleCloseEligibilityFormDrawer = useCallback(() => {
-    setShowEligibilityFormDrawer(false);
-    setTimeout(() => {
-      setSelectedInsuranceForForm(null);
     }, 300);
   }, []);
 
@@ -319,33 +302,9 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
             insuranceError={insuranceError instanceof Error ? insuranceError.message : null}
             previousSearches={previousSearches}
             patientData={getPatientDataFromAppointment(selectedAppointment)}
-            onOpenEligibilityForm={handleOpenEligibilityForm}
             onPreviousSearchClick={handlePreviousSearchClick}
           />
         )}
-      </Drawer>
-
-      {/* Eligibility Form Drawer */}
-      <Drawer
-        isOpen={showEligibilityFormDrawer}
-        onClose={handleCloseEligibilityFormDrawer}
-        title="Check Eligibility"
-        headerRight={
-          selectedInsuranceForForm && (
-            <Badge className="bg-blue-100 text-blue-800">
-              {selectedInsuranceForForm.tpa_name || selectedInsuranceForForm.payer_name}
-            </Badge>
-          )
-        }
-        size="xl"
-      >
-        <div className="p-6">
-          <MantysEligibilityForm
-            patientData={getPatientDataFromAppointment(selectedAppointment)}
-            insuranceData={selectedInsuranceForForm}
-            onClose={handleCloseEligibilityFormDrawer}
-          />
-        </div>
       </Drawer>
 
       {/* Eligibility Results Drawer */}
