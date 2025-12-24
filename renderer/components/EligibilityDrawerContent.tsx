@@ -105,8 +105,20 @@ export const EligibilityDrawerContent: React.FC<
   const selectedInsuranceId =
     selectedInsurance?.patient_insurance_tpa_policy_id || null;
 
+  const hasTodaySearches = todaySearches.length > 0;
+
   return (
     <div className="flex flex-col h-full">
+      {hasTodaySearches && (
+        <div className="p-4 sm:p-6 border-b border-gray-200">
+          <EligibilityHistorySection
+            todaySearches={todaySearches}
+            olderSearches={[]}
+            onSearchClick={onPreviousSearchClick}
+          />
+        </div>
+      )}
+
       {/* Sticky Toolbar - Insurance Details */}
       <StickyEligibilityToolbar
         selectedInsurance={selectedInsurance}
@@ -127,7 +139,7 @@ export const EligibilityDrawerContent: React.FC<
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
         {/* Previous Eligibility Searches */}
         <EligibilityHistorySection
-          todaySearches={todaySearches}
+          todaySearches={hasTodaySearches ? [] : todaySearches}
           olderSearches={olderSearches}
           onSearchClick={onPreviousSearchClick}
         />
