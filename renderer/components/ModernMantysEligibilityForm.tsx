@@ -40,6 +40,7 @@ import {
 interface MantysEligibilityFormProps {
   patientData: PatientData | null;
   insuranceData: InsuranceData | null;
+  isLoadingInsurance?: boolean;
 }
 
 interface FormData {
@@ -200,6 +201,7 @@ const visitCategoryOptions = [
 export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   patientData,
   insuranceData,
+  isLoadingInsurance = false,
 }) => {
   const { user } = useAuth();
   const selectedClinicId: string = user?.selected_team_id || "92d5da39-36af-4fa2-bde3-3828600d7871";
@@ -863,8 +865,8 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
           </>
         )}
 
-        <Button type="submit" disabled={isSubmitting} className="w-full bg-green-600 hover:bg-green-700">
-          {isSubmitting ? "Checking..." : "Check Eligibility"}
+        <Button type="submit" disabled={isSubmitting || isLoadingInsurance} className="w-full bg-green-600 hover:bg-green-700">
+          {isLoadingInsurance ? "Loading patient data..." : isSubmitting ? "Checking..." : "Check Eligibility"}
         </Button>
       </form>
     </>

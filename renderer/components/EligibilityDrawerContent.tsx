@@ -132,6 +132,7 @@ export const EligibilityDrawerContent: React.FC<
         <ModernMantysEligibilityForm
           patientData={patientData}
           insuranceData={selectedInsurance}
+          isLoadingInsurance={isLoadingInsurance}
         />
       </div>
 
