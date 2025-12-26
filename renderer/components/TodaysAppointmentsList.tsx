@@ -43,6 +43,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showEligibilityResultsDrawer, setShowEligibilityResultsDrawer] = useState(false);
   const [showEligibilityModal, setShowEligibilityModal] = useState(false);
+  const [hasAutoOpened, setHasAutoOpened] = useState(false);
 
   const today = new Date();
   const todayStr = formatDateForApi(today);
@@ -144,14 +145,16 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       showDrawer &&
       !showEligibilityResultsDrawer &&
       !showEligibilityModal &&
+      !hasAutoOpened &&
       todaySearches.length === 1 &&
       todaySearches[0].status === "complete"
     ) {
       const search = todaySearches[0];
       setSelectedTaskId(search.taskId);
       setShowEligibilityResultsDrawer(true);
+      setHasAutoOpened(true);
     }
-  }, [showDrawer, todaySearches, showEligibilityResultsDrawer, showEligibilityModal]);
+  }, [showDrawer, todaySearches, showEligibilityResultsDrawer, showEligibilityModal, hasAutoOpened]);
 
   const { data: selectedEligibilityItem } = useEligibilityHistoryByTaskId(
     selectedTaskId || "",
@@ -187,6 +190,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     setShowDrawer(false);
     setTimeout(() => {
       setSelectedAppointment(null);
+      setHasAutoOpened(false);
     }, 300);
   }, []);
 
