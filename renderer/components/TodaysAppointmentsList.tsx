@@ -43,6 +43,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showEligibilityResultsDrawer, setShowEligibilityResultsDrawer] = useState(false);
   const [showEligibilityModal, setShowEligibilityModal] = useState(false);
+  const [hasAutoOpened, setHasAutoOpened] = useState(false);
 
   const today = new Date();
   const todayStr = formatDateForApi(today);
@@ -119,6 +120,42 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     return eligibilityByMPI;
   }, [eligibilityByPatient, eligibilityByMPI]);
 
+  // Auto-open results drawer if there's exactly one completed eligibility check today
+  const { todaySearches } = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayItems: EligibilityHistoryItem[] = [];
+
+    previousSearches.forEach((search) => {
+      if (!search.createdAt) return;
+      const searchDate = new Date(search.createdAt);
+      searchDate.setHours(0, 0, 0, 0);
+      if (searchDate.getTime() === todayStart.getTime()) {
+        todayItems.push(search);
+      }
+    });
+
+    return { todaySearches: todayItems };
+  }, [previousSearches]);
+
+  // Auto-open effect
+  React.useEffect(() => {
+    if (
+      showDrawer &&
+      !showEligibilityResultsDrawer &&
+      !showEligibilityModal &&
+      !hasAutoOpened &&
+      todaySearches.length === 1 &&
+      todaySearches[0].status === "complete"
+    ) {
+      const search = todaySearches[0];
+      setSelectedTaskId(search.taskId);
+      setShowEligibilityResultsDrawer(true);
+      setHasAutoOpened(true);
+    }
+  }, [showDrawer, todaySearches, showEligibilityResultsDrawer, showEligibilityModal, hasAutoOpened]);
+
   const { data: selectedEligibilityItem } = useEligibilityHistoryByTaskId(
     selectedTaskId || "",
     !!selectedTaskId
@@ -153,13 +190,17 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     setShowDrawer(false);
     setTimeout(() => {
       setSelectedAppointment(null);
+      setHasAutoOpened(false);
     }, 300);
   }, []);
 
   // Handler for previous search clicks (eligibility history)
   const handlePreviousSearchClick = useCallback((search: EligibilityHistoryItem) => {
+    const isErrorStatus = search.status === "error" || (search.status as string) === "failed";
     setSelectedTaskId(search.taskId);
-    if (search.status === "complete" || search.status === "error") {
+    if (isErrorStatus) {
+      setShowEligibilityModal(true);
+    } else if (search.status === "complete") {
       setShowEligibilityResultsDrawer(true);
     } else {
       setShowEligibilityModal(true);
@@ -289,7 +330,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         headerRight={
           selectedAppointment && (
             <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
-              #{selectedAppointment.appointment_id}
+              Appointment No: {selectedAppointment.appointment_id}
             </span>
           )
         }
@@ -352,7 +393,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         </Drawer>
       )}
 
-      {showEligibilityModal && selectedTaskId && !resultData && (
+      {showEligibilityModal && selectedTaskId && (
         <ExtractionProgressModal
           isOpen={showEligibilityModal}
           onClose={handleCloseEligibilityModal}

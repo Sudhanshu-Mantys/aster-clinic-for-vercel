@@ -30,6 +30,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
     useState<AppointmentData | null>(null);
   const [actionTaskId, setActionTaskId] = useState<string | null>(null);
   const [showActionDrawer, setShowActionDrawer] = useState(false);
+  const [copiedMpi, setCopiedMpi] = useState<string | null>(null);
 
   const { data: historyItems = [] } = useEligibilityHistory(clinicId);
 
@@ -256,6 +257,13 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
     }, 300);
   };
 
+  const handleCopyMpi = (mpi: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(mpi);
+    setCopiedMpi(mpi);
+    setTimeout(() => setCopiedMpi(null), 2000);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -439,9 +447,24 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                     <p className="font-medium truncate">
                       {appointment.full_name || "N/A"}
                     </p>
-                    <p className="text-xs text-gray-500 truncate">
-                      MPI: {appointment.mpi}
-                    </p>
+                    <div className="flex items-center gap-1 text-xs text-gray-500">
+                      <span className="truncate">MPI: {appointment.mpi}</span>
+                      <button
+                        onClick={(e) => handleCopyMpi(appointment.mpi, e)}
+                        className="flex-shrink-0 p-0.5 hover:bg-gray-100 rounded transition-colors"
+                        title={copiedMpi === appointment.mpi ? "Copied!" : "Copy MPI"}
+                      >
+                        {copiedMpi === appointment.mpi ? (
+                          <svg className="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                     {appointment.age && (
                       <p className="text-xs text-gray-500 truncate">
                         {appointment.age} | {appointment.gender}
@@ -482,6 +505,54 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                         );
                       })()}
                     </div>
+                    {eligibilityStatusMap[appointment.mpi]?.status && (
+                      <div className="flex-shrink-0 mt-1">
+                        {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600"
+                            title="Eligibility check successful"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={3}
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                          </span>
+                        ) : eligibilityStatusMap[appointment.mpi]?.status === "processing" ? (
+                          <span
+                            className="inline-block w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
+                            title="Eligibility check in progress"
+                          />
+                        ) : (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600"
+                            title="Eligibility check failed"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={3}
+                                d="M6 18L18 6M6 6l12 12"
+                              />
+                            </svg>
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </td>
                 <td className="px-3 py-3 text-sm text-gray-900">
@@ -572,9 +643,24 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                   <h3 className="font-semibold text-gray-900">
                     {appointment.full_name || "N/A"}
                   </h3>
-                  <p className="text-sm text-gray-500">
-                    MPI: {appointment.mpi}
-                  </p>
+                  <div className="flex items-center gap-1 text-sm text-gray-500">
+                    <span>MPI: {appointment.mpi}</span>
+                    <button
+                      onClick={(e) => handleCopyMpi(appointment.mpi, e)}
+                      className="flex-shrink-0 p-0.5 hover:bg-gray-100 rounded transition-colors"
+                      title={copiedMpi === appointment.mpi ? "Copied!" : "Copy MPI"}
+                    >
+                      {copiedMpi === appointment.mpi ? (
+                        <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                   {appointment.mobile_phone && (
                     <p className="text-sm text-gray-500">
                       Mo No. {appointment.mobile_phone}
@@ -612,13 +698,63 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
 
                 <div>
                   <p className="text-gray-500 text-xs">Payer</p>
-                  <p className="font-medium truncate">
-                    {tpaName ||
-                      appointment.network_name ||
-                      appointment.payer_name ||
-                      appointment.payer_type ||
-                      "N/A"}
-                  </p>
+                  <div className="flex items-start gap-2">
+                    <p className="font-medium truncate">
+                      {tpaName ||
+                        appointment.network_name ||
+                        appointment.payer_name ||
+                        appointment.payer_type ||
+                        "N/A"}
+                    </p>
+                    {eligibilityStatusMap[appointment.mpi]?.status && (
+                      <div className="flex-shrink-0 mt-0.5">
+                        {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600"
+                            title="Eligibility check successful"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={3}
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                          </span>
+                        ) : eligibilityStatusMap[appointment.mpi]?.status === "processing" ? (
+                          <span
+                            className="inline-block w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
+                            title="Eligibility check in progress"
+                          />
+                        ) : (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600"
+                            title="Eligibility check failed"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={3}
+                                d="M6 18L18 6M6 6l12 12"
+                              />
+                            </svg>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div>

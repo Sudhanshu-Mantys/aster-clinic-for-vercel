@@ -19,6 +19,7 @@ import { Modal } from "./ui/modal";
 import {
   asterApi,
 } from "../lib/api-client";
+import { useMantysActions } from "../hooks/useMantysActions";
 import {
   CheckCircle2,
   XCircle,
@@ -58,13 +59,14 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   patientId,
   appointmentId,
   encounterId,
+  physicianId,
 }) => {
-  const [activeTab, setActiveTab] = useState<TabValue>("overview");
+  const [activeTab, setActiveTab] = useState<TabValue>("documents");
   const [copied, setCopied] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [showRawJson, setShowRawJson] = useState(false);
+  const [v3Result, setV3Result] = useState<unknown | null>(null);
   const [showLifetrenzPreview, setShowLifetrenzPreview] = useState(false);
-  const [uploadingFiles, setUploadingFiles] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [showSavePolicyModal, setShowSavePolicyModal] = useState(false);
   const [showScreenshot, setShowScreenshot] = useState(true);
@@ -73,6 +75,18 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [startDate, setStartDate] = useState<string>("");
   const [expiryDate, setExpiryDate] = useState<string>("");
 
+  const { user } = useAuth();
+
+  const { handleUploadScreenshots, uploadingFiles } = useMantysActions({
+    clinicId: user?.selected_team_id,
+    response,
+    patientMPI,
+    patientId,
+    appointmentId,
+    encounterId,
+    physicianId,
+  });
+
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const { data } = response;
   const screenshotSrc = screenshot || data?.screenshot_key || null;
@@ -80,6 +94,40 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   useEffect(() => {
     setShowScreenshot(true);
   }, [screenshotSrc]);
+
+  useEffect(() => {
+    const isFinalStatus = ["found", "not_found", "error"].includes(response.status);
+    if (!isFinalStatus) {
+      setV3Result(null);
+      return;
+    }
+
+    const taskId = response.task_id;
+    if (!taskId) return;
+
+    let isMounted = true;
+    const fetchV3Result = async () => {
+      try {
+        const resultResponse = await fetch(
+          `/api/mantys/eligibility-result-v3?task_id=${encodeURIComponent(taskId)}`,
+        );
+        if (!resultResponse.ok) {
+          throw new Error(`Failed to fetch v3 result: ${resultResponse.status}`);
+        }
+        const resultData = await resultResponse.json();
+        if (isMounted) {
+          setV3Result(resultData);
+        }
+      } catch (error) {
+        console.error("Failed to fetch v3 eligibility result:", error);
+      }
+    };
+
+    fetchV3Result();
+    return () => {
+      isMounted = false;
+    };
+  }, [response.status, response.task_id]);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -117,18 +165,6 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     }
   };
 
-  const handleUploadScreenshots = async () => {
-    if (!keyFields.referralDocuments?.length) {
-      alert("No documents to upload");
-      return;
-    }
-    setUploadingFiles(true);
-    setTimeout(() => {
-      setUploadingFiles(false);
-      alert("Documents uploaded!");
-    }, 1500);
-  };
-
   if (!data) {
     return (
       <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -154,10 +190,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const hasBenefits = benefitCategories.some((cat) => cat.services.length > 0);
 
   const tabs: { value: TabValue; label: string; icon: React.ReactNode }[] = [
-    { value: "overview", label: "Overview", icon: <FileText className="h-4 w-4" /> },
+    { value: "documents", label: "Documents", icon: <FileText className="h-4 w-4" /> },
+    { value: "overview", label: "Overview", icon: <User className="h-4 w-4" /> },
     { value: "policy", label: "Policy Details", icon: <CreditCard className="h-4 w-4" /> },
     { value: "benefits", label: "Copay Details", icon: <Hospital className="h-4 w-4" /> },
-    { value: "documents", label: "Documents", icon: <FileText className="h-4 w-4" /> },
   ];
 
   return (
@@ -429,7 +465,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       </button>
       {showRawJson && (
         <pre className="p-3 bg-gray-900 text-green-400 rounded text-xs max-h-32 overflow-auto">
-          {JSON.stringify(response, null, 2)}
+          {JSON.stringify(v3Result ? { response, v3Result } : response, null, 2)}
         </pre>
       )}
 

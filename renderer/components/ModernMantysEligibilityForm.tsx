@@ -40,6 +40,7 @@ import {
 interface MantysEligibilityFormProps {
   patientData: PatientData | null;
   insuranceData: InsuranceData | null;
+  isLoadingInsurance?: boolean;
 }
 
 interface FormData {
@@ -200,6 +201,7 @@ const visitCategoryOptions = [
 export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   patientData,
   insuranceData,
+  isLoadingInsurance = false,
 }) => {
   const { user } = useAuth();
   const selectedClinicId: string = user?.selected_team_id || "92d5da39-36af-4fa2-bde3-3828600d7871";
@@ -210,6 +212,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
   const { data: doctorsList = [] } = useDoctors(selectedClinicId, { enabled: !!selectedClinicId });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [enrichedPatientContext, setEnrichedPatientContext] = useState<PatientData | null>(null);
@@ -360,15 +363,18 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
 
   useEffect(() => {
     if (insuranceData) {
+      const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
       const tpaMapping: Record<string, string> = {
         Neuron: "TPA001", NextCare: "TPA002", "Al Madallah": "TPA003", NAS: "TPA004",
         "First Med": "TPA010", FMC: "TPA010", Daman: "INS026", "Daman Thiqa": "TPA023",
         AXA: "INS010", ADNIC: "INS017", Mednet: "TPA036", Oman: "INS012", Inayah: "TPA008",
       };
-      const mappedTpa = Object.entries(tpaMapping).find(([key]) =>
-        insuranceData.tpa_name?.toLowerCase().includes(key.toLowerCase()) ||
-        insuranceData.payer_name?.toLowerCase().includes(key.toLowerCase())
-      );
+      const normalizedTpaName = normalize(insuranceData.tpa_name || "");
+      const normalizedPayerName = normalize(insuranceData.payer_name || "");
+      const mappedTpa = Object.entries(tpaMapping).find(([key]) => {
+        const normalizedKey = normalize(key);
+        return normalizedTpaName.includes(normalizedKey) || normalizedPayerName.includes(normalizedKey);
+      });
       if (mappedTpa) setValue("options", mappedTpa[1]);
       const memberId = insuranceData.tpa_policy_id || insuranceData.insurance_policy_id || insuranceData.policy_number || null;
       if (memberId) {
@@ -493,15 +499,17 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
   if (showResults && mantysResponse) {
     const contextToUse = enrichedPatientContext || patientData;
     return (
-      <MantysResultsDisplay
-        response={mantysResponse}
-        onClose={() => {}}
-        onCheckAnother={() => { setShowResults(false); setMantysResponse(null); }}
-        patientMPI={contextToUse?.mpi}
-        patientId={contextToUse?.patient_id}
-        appointmentId={contextToUse?.appointment_id}
-        encounterId={contextToUse?.encounter_id}
-      />
+      <div className="p-4">
+        <MantysResultsDisplay
+          response={mantysResponse}
+          onClose={() => {}}
+          onCheckAnother={() => { setShowResults(false); setMantysResponse(null); }}
+          patientMPI={contextToUse?.mpi}
+          patientId={contextToUse?.patient_id}
+          appointmentId={contextToUse?.appointment_id}
+          encounterId={contextToUse?.encounter_id}
+        />
+      </div>
     );
   }
 
@@ -511,11 +519,12 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
     <>
       {taskId && currentStatus !== "complete" && (
         <ExtractionProgressModal
-          isOpen={isSubmitting}
-          onClose={() => { setIsSubmitting(false); }}
+          isOpen={isSubmitting && !isMinimized}
+          onClose={() => { setIsSubmitting(false); setIsMinimized(false); }}
           taskId={taskId}
           viewMode="live"
-          onComplete={(result) => { setMantysResponse(result); setShowResults(true); setIsSubmitting(false); }}
+          onMinimize={() => { setIsMinimized(true); }}
+          onComplete={(result) => { setMantysResponse(result); setShowResults(true); setIsSubmitting(false); setIsMinimized(false); }}
         />
       )}
 
@@ -856,8 +865,8 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
           </>
         )}
 
-        <Button type="submit" disabled={isSubmitting} className="w-full bg-green-600 hover:bg-green-700">
-          {isSubmitting ? "Checking..." : "Check Eligibility"}
+        <Button type="submit" disabled={isSubmitting || isLoadingInsurance} className="w-full bg-green-600 hover:bg-green-700">
+          {isLoadingInsurance ? "Loading patient data..." : isSubmitting ? "Checking..." : "Check Eligibility"}
         </Button>
       </form>
     </>
