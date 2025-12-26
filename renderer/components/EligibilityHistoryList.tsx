@@ -88,7 +88,11 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
 
   const handleViewDetails = (item: EligibilityHistoryItem) => {
     setSelectedItemId(item.id);
-    if ((item.status === "complete" || item.status === "error") && item.result) {
+    if (item.status === "error") {
+      setShowModal(true);
+      return;
+    }
+    if (item.status === "complete" && item.result) {
       setShowDrawer(true);
     } else {
       setShowModal(true);

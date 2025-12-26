@@ -30,6 +30,7 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
   const [actualTaskId, setActualTaskId] = useState<string | null>(null);
   const [pollingAttempts, setPollingAttempts] = useState(0);
   const [hasCalledComplete, setHasCalledComplete] = useState(false);
+  const [v3Result, setV3Result] = useState<unknown | null>(null);
 
   const { data: historyItems = [] } = useEligibilityHistory(clinicId);
 
@@ -73,6 +74,41 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
   const { data: historyItem } = useEligibilityHistoryByTaskId(actualTaskId || "", isOpen && !!actualTaskId && status === "error");
 
   useEffect(() => {
+    if (!isOpen || !actualTaskId) {
+      setV3Result(null);
+      return;
+    }
+
+    if (!["error", "complete"].includes(status)) {
+      setV3Result(null);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchV3Result = async () => {
+      try {
+        const response = await fetch(
+          `/api/mantys/eligibility-result-v3?task_id=${encodeURIComponent(actualTaskId)}`,
+        );
+        if (!response.ok) {
+          throw new Error(`Failed to fetch v3 result: ${response.status}`);
+        }
+        const resultData = await response.json();
+        if (isMounted) {
+          setV3Result(resultData);
+        }
+      } catch (error) {
+        console.error("Failed to fetch v3 eligibility result:", error);
+      }
+    };
+
+    fetchV3Result();
+    return () => {
+      isMounted = false;
+    };
+  }, [actualTaskId, isOpen, status]);
+
+  useEffect(() => {
     if (taskStatus) {
       setPollingAttempts((prev) => prev + 1);
     }
@@ -90,10 +126,16 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
     }
   }, [taskStatus, onComplete, hasCalledComplete]);
 
+  const v3ErrorMessage = useMemo(() => {
+    const dataDump = (v3Result as any)?.eligibility_result?.data_dump;
+    if (!dataDump) return null;
+    return dataDump.message || dataDump.error_type || dataDump.status || null;
+  }, [v3Result]);
+
   const displayError = useMemo(() => {
     if (status !== "error") return null;
-    return historyItem?.error || taskStatus?.error || "An error occurred";
-  }, [status, historyItem, taskStatus]);
+    return v3ErrorMessage || historyItem?.error || taskStatus?.error || "An error occurred";
+  }, [status, v3ErrorMessage, historyItem, taskStatus]);
 
   const statusMessage = useMemo(() => {
     if (!taskStatus) return "Loading...";

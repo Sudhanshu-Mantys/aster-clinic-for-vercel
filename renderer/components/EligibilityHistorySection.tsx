@@ -25,17 +25,20 @@ const getTPAName = (code: string): string => {
   return TPA_NAME_MAP[code] || code;
 };
 
+const normalizeStatus = (status: string) => (status === "failed" ? "error" : status);
+
 const getSearchStatusColors = (search: EligibilityHistoryItem) => {
-  const isComplete = search.status === "complete";
-  const isError = search.status === "error";
+  const normalizedStatus = normalizeStatus(search.status);
+  const isComplete = normalizedStatus === "complete";
+  const isError = normalizedStatus === "error";
 
   if (isError) {
     return {
-      bgColor: "bg-yellow-50",
-      borderColor: "border-yellow-300",
-      hoverBgColor: "hover:bg-yellow-100",
-      iconBgColor: "bg-yellow-500",
-      iconPath: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
+      bgColor: "bg-red-50",
+      borderColor: "border-red-300",
+      hoverBgColor: "hover:bg-red-100",
+      iconBgColor: "bg-red-500",
+      iconPath: "M6 18L18 6M6 6l12 12",
     };
   }
 
@@ -59,6 +62,9 @@ const getSearchStatusColors = (search: EligibilityHistoryItem) => {
 };
 
 const getStatusDisplay = (status: string): string => {
+  const normalizedStatus = normalizeStatus(status);
+  if (normalizedStatus === "complete") return "Active";
+  if (normalizedStatus === "error") return "Failed";
   if (status === "complete") return "Active";
   if (status === "error") return "Failed";
   return status;

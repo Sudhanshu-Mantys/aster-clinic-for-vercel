@@ -108,7 +108,7 @@ export const EligibilityDrawerContent: React.FC<
   const hasTodaySearches = todaySearches.length > 0;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0 overflow-y-auto">
       {hasTodaySearches && (
         <div className="p-4 sm:p-6 border-b border-gray-200">
           <EligibilityHistorySection
@@ -132,11 +132,12 @@ export const EligibilityDrawerContent: React.FC<
         <ModernMantysEligibilityForm
           patientData={patientData}
           insuranceData={selectedInsurance}
+          isLoadingInsurance={isLoadingInsurance}
         />
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
         {/* Previous Eligibility Searches */}
         <EligibilityHistorySection
           todaySearches={hasTodaySearches ? [] : todaySearches}
