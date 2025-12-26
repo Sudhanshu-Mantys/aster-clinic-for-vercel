@@ -482,6 +482,54 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                         );
                       })()}
                     </div>
+                    {eligibilityStatusMap[appointment.mpi]?.status && (
+                      <div className="flex-shrink-0 mt-1">
+                        {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600"
+                            title="Eligibility check successful"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={3}
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                          </span>
+                        ) : eligibilityStatusMap[appointment.mpi]?.status === "processing" ? (
+                          <span
+                            className="inline-block w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
+                            title="Eligibility check in progress"
+                          />
+                        ) : (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600"
+                            title="Eligibility check failed"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={3}
+                                d="M6 18L18 6M6 6l12 12"
+                              />
+                            </svg>
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </td>
                 <td className="px-3 py-3 text-sm text-gray-900">
@@ -612,13 +660,63 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
 
                 <div>
                   <p className="text-gray-500 text-xs">Payer</p>
-                  <p className="font-medium truncate">
-                    {tpaName ||
-                      appointment.network_name ||
-                      appointment.payer_name ||
-                      appointment.payer_type ||
-                      "N/A"}
-                  </p>
+                  <div className="flex items-start gap-2">
+                    <p className="font-medium truncate">
+                      {tpaName ||
+                        appointment.network_name ||
+                        appointment.payer_name ||
+                        appointment.payer_type ||
+                        "N/A"}
+                    </p>
+                    {eligibilityStatusMap[appointment.mpi]?.status && (
+                      <div className="flex-shrink-0 mt-0.5">
+                        {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600"
+                            title="Eligibility check successful"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={3}
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                          </span>
+                        ) : eligibilityStatusMap[appointment.mpi]?.status === "processing" ? (
+                          <span
+                            className="inline-block w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
+                            title="Eligibility check in progress"
+                          />
+                        ) : (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600"
+                            title="Eligibility check failed"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={3}
+                                d="M6 18L18 6M6 6l12 12"
+                              />
+                            </svg>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div>
