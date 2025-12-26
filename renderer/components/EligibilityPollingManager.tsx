@@ -9,14 +9,18 @@ interface PollingTaskProps {
   taskId: string;
   historyId: string;
   clinicId: string;
+  patientId?: string;
+  patientMPI?: string;
 }
 
 const PollingTask: React.FC<PollingTaskProps> = ({
   taskId,
   historyId,
   clinicId,
+  patientId,
+  patientMPI,
 }) => {
-  useEligibilityPolling(taskId, historyId, clinicId, { enabled: true });
+  useEligibilityPolling(taskId, historyId, clinicId, patientId, patientMPI, { enabled: true });
   return null;
 };
 
@@ -40,6 +44,8 @@ export const EligibilityPollingManager: React.FC = () => {
           taskId={item.taskId}
           historyId={item.id}
           clinicId={clinicId}
+          patientId={item.patientId}
+          patientMPI={item.patientMPI}
         />
       ))}
     </>

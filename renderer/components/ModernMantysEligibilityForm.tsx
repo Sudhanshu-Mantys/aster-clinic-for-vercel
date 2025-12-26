@@ -210,6 +210,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
   const { data: doctorsList = [] } = useDoctors(selectedClinicId, { enabled: !!selectedClinicId });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [enrichedPatientContext, setEnrichedPatientContext] = useState<PatientData | null>(null);
@@ -496,15 +497,17 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
   if (showResults && mantysResponse) {
     const contextToUse = enrichedPatientContext || patientData;
     return (
-      <MantysResultsDisplay
-        response={mantysResponse}
-        onClose={() => {}}
-        onCheckAnother={() => { setShowResults(false); setMantysResponse(null); }}
-        patientMPI={contextToUse?.mpi}
-        patientId={contextToUse?.patient_id}
-        appointmentId={contextToUse?.appointment_id}
-        encounterId={contextToUse?.encounter_id}
-      />
+      <div className="p-4">
+        <MantysResultsDisplay
+          response={mantysResponse}
+          onClose={() => {}}
+          onCheckAnother={() => { setShowResults(false); setMantysResponse(null); }}
+          patientMPI={contextToUse?.mpi}
+          patientId={contextToUse?.patient_id}
+          appointmentId={contextToUse?.appointment_id}
+          encounterId={contextToUse?.encounter_id}
+        />
+      </div>
     );
   }
 
@@ -514,11 +517,12 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
     <>
       {taskId && currentStatus !== "complete" && (
         <ExtractionProgressModal
-          isOpen={isSubmitting}
-          onClose={() => { setIsSubmitting(false); }}
+          isOpen={isSubmitting && !isMinimized}
+          onClose={() => { setIsSubmitting(false); setIsMinimized(false); }}
           taskId={taskId}
           viewMode="live"
-          onComplete={(result) => { setMantysResponse(result); setShowResults(true); setIsSubmitting(false); }}
+          onMinimize={() => { setIsMinimized(true); }}
+          onComplete={(result) => { setMantysResponse(result); setShowResults(true); setIsSubmitting(false); setIsMinimized(false); }}
         />
       )}
 

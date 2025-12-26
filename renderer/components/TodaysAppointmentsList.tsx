@@ -158,8 +158,11 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
   // Handler for previous search clicks (eligibility history)
   const handlePreviousSearchClick = useCallback((search: EligibilityHistoryItem) => {
+    const isErrorStatus = search.status === "error" || (search.status as string) === "failed";
     setSelectedTaskId(search.taskId);
-    if (search.status === "complete" || search.status === "error") {
+    if (isErrorStatus) {
+      setShowEligibilityModal(true);
+    } else if (search.status === "complete") {
       setShowEligibilityResultsDrawer(true);
     } else {
       setShowEligibilityModal(true);
@@ -352,7 +355,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         </Drawer>
       )}
 
-      {showEligibilityModal && selectedTaskId && !resultData && (
+      {showEligibilityModal && selectedTaskId && (
         <ExtractionProgressModal
           isOpen={showEligibilityModal}
           onClose={handleCloseEligibilityModal}

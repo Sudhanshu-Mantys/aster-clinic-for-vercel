@@ -184,6 +184,8 @@ export function useEligibilityPolling(
   taskId: string,
   historyId: string,
   clinicId: string,
+  patientId?: string,
+  patientMPI?: string,
   options?: {
     enabled?: boolean;
     onComplete?: (result: MantysStatusResponse) => void;
@@ -250,6 +252,12 @@ export function useEligibilityPolling(
       lastUpdateRef.current = { status: 'complete', resultKey };
       hasCompletedRef.current = true;
       queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
+      if (patientId) {
+        queryClient.invalidateQueries({ queryKey: eligibilityKeys.byPatient(patientId) });
+      }
+      if (patientMPI) {
+        queryClient.invalidateQueries({ queryKey: eligibilityKeys.byMPI(patientMPI) });
+      }
       options?.onComplete?.(data);
     }
 
@@ -265,7 +273,13 @@ export function useEligibilityPolling(
       lastUpdateRef.current = { status: 'error', error: data.error };
       hasErroredRef.current = true;
       queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
+      if (patientId) {
+        queryClient.invalidateQueries({ queryKey: eligibilityKeys.byPatient(patientId) });
+      }
+      if (patientMPI) {
+        queryClient.invalidateQueries({ queryKey: eligibilityKeys.byMPI(patientMPI) });
+      }
       options?.onError?.(data);
     }
-  }, [data, taskId, clinicId, updateHistory, queryClient, options]);
+  }, [data, taskId, clinicId, patientId, patientMPI, updateHistory, queryClient, options]);
 }
