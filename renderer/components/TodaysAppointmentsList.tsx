@@ -119,6 +119,40 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     return eligibilityByMPI;
   }, [eligibilityByPatient, eligibilityByMPI]);
 
+  // Auto-open results drawer if there's exactly one completed eligibility check today
+  const { todaySearches } = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayItems: EligibilityHistoryItem[] = [];
+
+    previousSearches.forEach((search) => {
+      if (!search.createdAt) return;
+      const searchDate = new Date(search.createdAt);
+      searchDate.setHours(0, 0, 0, 0);
+      if (searchDate.getTime() === todayStart.getTime()) {
+        todayItems.push(search);
+      }
+    });
+
+    return { todaySearches: todayItems };
+  }, [previousSearches]);
+
+  // Auto-open effect
+  React.useEffect(() => {
+    if (
+      showDrawer &&
+      !showEligibilityResultsDrawer &&
+      !showEligibilityModal &&
+      todaySearches.length === 1 &&
+      todaySearches[0].status === "complete"
+    ) {
+      const search = todaySearches[0];
+      setSelectedTaskId(search.taskId);
+      setShowEligibilityResultsDrawer(true);
+    }
+  }, [showDrawer, todaySearches, showEligibilityResultsDrawer, showEligibilityModal]);
+
   const { data: selectedEligibilityItem } = useEligibilityHistoryByTaskId(
     selectedTaskId || "",
     !!selectedTaskId
