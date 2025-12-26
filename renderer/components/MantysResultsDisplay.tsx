@@ -19,6 +19,7 @@ import { Modal } from "./ui/modal";
 import {
   asterApi,
 } from "../lib/api-client";
+import { useMantysActions } from "../hooks/useMantysActions";
 import {
   CheckCircle2,
   XCircle,
@@ -58,13 +59,13 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   patientId,
   appointmentId,
   encounterId,
+  physicianId,
 }) => {
   const [activeTab, setActiveTab] = useState<TabValue>("overview");
   const [copied, setCopied] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [showRawJson, setShowRawJson] = useState(false);
   const [showLifetrenzPreview, setShowLifetrenzPreview] = useState(false);
-  const [uploadingFiles, setUploadingFiles] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [showSavePolicyModal, setShowSavePolicyModal] = useState(false);
   const [showScreenshot, setShowScreenshot] = useState(true);
@@ -72,6 +73,18 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [receiverId, setReceiverId] = useState<string>("");
   const [startDate, setStartDate] = useState<string>("");
   const [expiryDate, setExpiryDate] = useState<string>("");
+
+  const { user } = useAuth();
+
+  const { handleUploadScreenshots, uploadingFiles } = useMantysActions({
+    clinicId: user?.selected_team_id,
+    response,
+    patientMPI,
+    patientId,
+    appointmentId,
+    encounterId,
+    physicianId,
+  });
 
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const { data } = response;
@@ -115,18 +128,6 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     } finally {
       setSavingPolicy(false);
     }
-  };
-
-  const handleUploadScreenshots = async () => {
-    if (!keyFields.referralDocuments?.length) {
-      alert("No documents to upload");
-      return;
-    }
-    setUploadingFiles(true);
-    setTimeout(() => {
-      setUploadingFiles(false);
-      alert("Documents uploaded!");
-    }, 1500);
   };
 
   if (!data) {

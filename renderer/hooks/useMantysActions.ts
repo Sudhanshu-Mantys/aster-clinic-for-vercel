@@ -4,6 +4,7 @@ import type { MantysEligibilityResponse, MantysKeyFields } from "../types/mantys
 import { extractMantysKeyFields } from "../lib/mantys-utils";
 
 interface UseMantysActionsProps {
+  clinicId?: string;
   patientMPI?: string;
   patientId?: number;
   appointmentId?: number;
@@ -13,6 +14,7 @@ interface UseMantysActionsProps {
 }
 
 export const useMantysActions = ({
+  clinicId,
   patientMPI,
   patientId: propPatientId,
   appointmentId: propAppointmentId,
@@ -107,9 +109,13 @@ export const useMantysActions = ({
 
   const enrichTPAConfig = useCallback(async () => {
     if (!response.tpa) return;
+    if (!clinicId) {
+      console.warn("TPA config load skipped: missing clinicId.");
+      return;
+    }
 
     try {
-      const configs = await clinicConfigApi.getTPA("31");
+      const configs = await clinicConfigApi.getTPA(clinicId);
       const config = configs.find(
         (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
       );
@@ -119,7 +125,7 @@ export const useMantysActions = ({
     } catch (error) {
       console.error("Error fetching TPA config:", error);
     }
-  }, [response.tpa]);
+  }, [clinicId, response.tpa]);
 
   const ensureDataLoaded = useCallback(async () => {
     await enrichPatientContext();
@@ -187,13 +193,37 @@ export const useMantysActions = ({
     let savedStatusText: string | null = null;
 
     try {
-      if (tpaConfig?.hospital_insurance_mapping_id) {
+      const configMappingId = tpaConfig?.hospital_insurance_mapping_id;
+      const fallbackMappingId = data.patient_info?.insurance_mapping_id
+        ? parseInt(data.patient_info.insurance_mapping_id, 10)
+        : null;
+      const insuranceMappingId = configMappingId ?? fallbackMappingId;
+
+      if (!insuranceMappingId) {
+        const message = `Missing insurance mapping ID for ${response.tpa || "unknown TPA"}.`;
+        console.error(message, {
+          responseTpa: response.tpa,
+          clinicId,
+          configMappingId,
+          fallbackMappingId: data.patient_info?.insurance_mapping_id || null,
+        });
+        throw new Error(message);
+      } else {
+        console.log("Saving eligibility order:", {
+          responseTpa: response.tpa,
+          clinicId,
+          insuranceMappingId,
+          insTpaPatId: insTpaPatIdForUpload,
+          patientId: finalPatientId,
+          appointmentId: finalAppointmentId,
+          encounterId: finalEncounterId || 0,
+        });
         try {
           const orderResult = await asterApi.saveEligibilityOrder({
             patientId: finalPatientId,
             appointmentId: finalAppointmentId,
             encounterId: finalEncounterId || 0,
-            insuranceMappingId: tpaConfig.hospital_insurance_mapping_id,
+            insuranceMappingId,
             insTpaPatId: insTpaPatIdForUpload as number,
             physicianId: enrichedPhysicianId || propPhysicianId || null,
             authorizationNumber: "",
@@ -202,6 +232,8 @@ export const useMantysActions = ({
             vendorId: 24,
             siteId: 31,
           }) as any;
+
+          console.log("Order Result:", orderResult);
 
           savedReqId = orderResult?.data?.body?.Data?.[0]?.reqid ||
             orderResult?.body?.Data?.[0]?.reqid || null;
@@ -249,11 +281,12 @@ export const useMantysActions = ({
       }
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Failed to upload documents");
+      const message = error instanceof Error ? error.message : "Failed to upload documents";
+      alert(message);
     } finally {
       setUploadingFiles(false);
     }
-  }, [keyFields.referralDocuments, enrichedPatientId, enrichedAppointmentId, enrichedEncounterId, enrichedPhysicianId, insTpaPatId, tpaConfig, propPatientId, propAppointmentId, propEncounterId, propPhysicianId, ensureDataLoaded]);
+  }, [keyFields.referralDocuments, enrichedPatientId, enrichedAppointmentId, enrichedEncounterId, enrichedPhysicianId, insTpaPatId, tpaConfig, clinicId, data, response.tpa, propPatientId, propAppointmentId, propEncounterId, propPhysicianId, ensureDataLoaded]);
 
   const handleSavePolicy = useCallback(async () => {
     await ensureDataLoaded();
