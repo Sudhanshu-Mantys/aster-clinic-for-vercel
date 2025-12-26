@@ -65,6 +65,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [copied, setCopied] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [showRawJson, setShowRawJson] = useState(false);
+  const [v3Result, setV3Result] = useState<unknown | null>(null);
   const [showLifetrenzPreview, setShowLifetrenzPreview] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [showSavePolicyModal, setShowSavePolicyModal] = useState(false);
@@ -93,6 +94,40 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   useEffect(() => {
     setShowScreenshot(true);
   }, [screenshotSrc]);
+
+  useEffect(() => {
+    const isFinalStatus = ["found", "not_found", "error"].includes(response.status);
+    if (!isFinalStatus) {
+      setV3Result(null);
+      return;
+    }
+
+    const taskId = response.task_id;
+    if (!taskId) return;
+
+    let isMounted = true;
+    const fetchV3Result = async () => {
+      try {
+        const resultResponse = await fetch(
+          `/api/mantys/eligibility-result-v3?task_id=${encodeURIComponent(taskId)}`,
+        );
+        if (!resultResponse.ok) {
+          throw new Error(`Failed to fetch v3 result: ${resultResponse.status}`);
+        }
+        const resultData = await resultResponse.json();
+        if (isMounted) {
+          setV3Result(resultData);
+        }
+      } catch (error) {
+        console.error("Failed to fetch v3 eligibility result:", error);
+      }
+    };
+
+    fetchV3Result();
+    return () => {
+      isMounted = false;
+    };
+  }, [response.status, response.task_id]);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -430,7 +465,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       </button>
       {showRawJson && (
         <pre className="p-3 bg-gray-900 text-green-400 rounded text-xs max-h-32 overflow-auto">
-          {JSON.stringify(response, null, 2)}
+          {JSON.stringify(v3Result ? { response, v3Result } : response, null, 2)}
         </pre>
       )}
 
