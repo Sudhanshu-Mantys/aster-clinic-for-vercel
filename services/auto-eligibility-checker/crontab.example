@@ -1,0 +1,45 @@
+# Example cron job configuration for auto eligibility checker
+# Run every minute
+
+# ============================================================================
+# HOW TO RUN FROM CLI (MANUAL EXECUTION)
+# ============================================================================
+#
+# 1. Navigate to the service directory:
+#    cd /path/to/services/auto-eligibility-checker
+#
+# 2. Activate virtual environment (if using one):
+#    source venv/bin/activate
+#    # On Windows: venv\Scripts\activate
+#
+# 3. Run the script:
+#    python main.py
+#    # OR if using python3 explicitly:
+#    python3 main.py
+#
+# 4. The script will:
+#    - Fetch today's appointments
+#    - Process new appointments
+#    - Create eligibility checks
+#    - Display metrics and exit
+#
+# Prerequisites:
+# - Python 3.8+ installed
+# - Virtual environment created and dependencies installed (pip install -r requirements.txt)
+# - .env file configured with required variables (REDIS_URL, API_BASE_URL, etc.)
+#
+# ============================================================================
+# SETTING UP CRON JOB (AUTOMATED EXECUTION)
+# ============================================================================
+#
+# To install, run: crontab -e
+# Then add this line (adjust paths as needed):
+#
+# * * * * * cd /path/to/services/auto-eligibility-checker && /path/to/venv/bin/python main.py >> /var/log/eligibility-checker.log 2>&1
+#
+# Make sure to:
+# 1. Update the paths to match your installation
+# 2. Ensure the .env file is in the service directory
+# 3. Set proper permissions on the log file directory
+# 4. Test the script manually before adding to cron (use CLI instructions above)
+
