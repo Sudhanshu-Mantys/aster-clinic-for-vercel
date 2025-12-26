@@ -326,7 +326,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         headerRight={
           selectedAppointment && (
             <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
-              #{selectedAppointment.appointment_id}
+              Appointment No: {selectedAppointment.appointment_id}
             </span>
           )
         }

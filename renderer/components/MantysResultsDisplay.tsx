@@ -61,7 +61,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   encounterId,
   physicianId,
 }) => {
-  const [activeTab, setActiveTab] = useState<TabValue>("overview");
+  const [activeTab, setActiveTab] = useState<TabValue>("documents");
   const [copied, setCopied] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [showRawJson, setShowRawJson] = useState(false);
@@ -190,10 +190,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const hasBenefits = benefitCategories.some((cat) => cat.services.length > 0);
 
   const tabs: { value: TabValue; label: string; icon: React.ReactNode }[] = [
-    { value: "overview", label: "Overview", icon: <FileText className="h-4 w-4" /> },
+    { value: "documents", label: "Documents", icon: <FileText className="h-4 w-4" /> },
+    { value: "overview", label: "Overview", icon: <User className="h-4 w-4" /> },
     { value: "policy", label: "Policy Details", icon: <CreditCard className="h-4 w-4" /> },
     { value: "benefits", label: "Copay Details", icon: <Hospital className="h-4 w-4" /> },
-    { value: "documents", label: "Documents", icon: <FileText className="h-4 w-4" /> },
   ];
 
   return (
