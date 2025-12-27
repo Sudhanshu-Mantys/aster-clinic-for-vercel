@@ -41,6 +41,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
   // Eligibility results drawer/modal state
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedSearchItem, setSelectedSearchItem] = useState<EligibilityHistoryItem | null>(null);
   const [showEligibilityResultsDrawer, setShowEligibilityResultsDrawer] = useState(false);
   const [showEligibilityModal, setShowEligibilityModal] = useState(false);
   const [hasAutoOpened, setHasAutoOpened] = useState(false);
@@ -196,13 +197,43 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
   // Handler for previous search clicks (eligibility history)
   const handlePreviousSearchClick = useCallback((search: EligibilityHistoryItem) => {
+    console.log('[TodaysAppointmentsList] handlePreviousSearchClick called:', {
+      taskId: search.taskId,
+      id: search.id,
+      status: search.status,
+      hasResult: !!search.result,
+      searchObject: {
+        taskId: search.taskId,
+        id: search.id,
+        status: search.status,
+        createdAt: search.createdAt,
+        insurancePayer: search.insurancePayer,
+        appointmentId: search.appointmentId,
+        hasResult: !!search.result,
+      },
+    });
+
+    if (!search.taskId) {
+      console.error('[TodaysAppointmentsList] handlePreviousSearchClick: search.taskId is missing!', {
+        search,
+      });
+      return;
+    }
+
     const isErrorStatus = search.status === "error" || (search.status as string) === "failed";
+
+    console.log('[TodaysAppointmentsList] Setting selectedTaskId and selectedSearchItem:', search.taskId);
     setSelectedTaskId(search.taskId);
+    setSelectedSearchItem(search); // Store the clicked search item
+
     if (isErrorStatus) {
+      console.log('[TodaysAppointmentsList] Opening eligibility modal (error status)');
       setShowEligibilityModal(true);
     } else if (search.status === "complete") {
+      console.log('[TodaysAppointmentsList] Opening eligibility results drawer (complete status)');
       setShowEligibilityResultsDrawer(true);
     } else {
+      console.log('[TodaysAppointmentsList] Opening eligibility modal (other status:', search.status, ')');
       setShowEligibilityModal(true);
     }
   }, []);
@@ -211,6 +242,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     setShowEligibilityResultsDrawer(false);
     setTimeout(() => {
       setSelectedTaskId(null);
+      setSelectedSearchItem(null);
     }, 300);
   }, []);
 
@@ -249,8 +281,32 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     if (freshTaskResult?.result) return freshTaskResult.result as MantysEligibilityResponse;
     if (selectedEligibilityItem?.result)
       return selectedEligibilityItem.result as MantysEligibilityResponse;
+    // Use result from clicked search item if available
+    if (selectedSearchItem?.result)
+      return selectedSearchItem.result as MantysEligibilityResponse;
     return null;
-  }, [freshTaskResult, selectedEligibilityItem]);
+  }, [freshTaskResult, selectedEligibilityItem, selectedSearchItem]);
+
+  // Log drawer rendering conditions
+  React.useEffect(() => {
+    if (showEligibilityResultsDrawer) {
+      console.log('[TodaysAppointmentsList] Drawer rendering check:', {
+        showEligibilityResultsDrawer,
+        selectedTaskId,
+        selectedEligibilityItem: selectedEligibilityItem ? {
+          id: selectedEligibilityItem.id,
+          taskId: selectedEligibilityItem.taskId,
+          status: selectedEligibilityItem.status,
+          hasResult: !!selectedEligibilityItem.result,
+        } : null,
+        resultData: resultData ? 'exists' : null,
+        freshTaskResult: freshTaskResult ? {
+          hasResult: !!freshTaskResult.result,
+        } : null,
+        willRender: showEligibilityResultsDrawer && selectedEligibilityItem?.status === "complete" && resultData,
+      });
+    }
+  }, [showEligibilityResultsDrawer, selectedTaskId, selectedEligibilityItem, resultData, freshTaskResult]);
 
   return (
     <>
@@ -349,49 +405,71 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       </Drawer>
 
       {/* Eligibility Results Drawer */}
-      {showEligibilityResultsDrawer && selectedEligibilityItem?.status === "complete" && resultData && (
-        <Drawer
-          isOpen={showEligibilityResultsDrawer}
-          onClose={handleCloseEligibilityResultsDrawer}
-          title={`Eligibility Check Results - ${selectedEligibilityItem.patientName || selectedEligibilityItem.patientId}`}
-          headerRight={
-            resultData ? (
-              (() => {
-                const keyFields = extractMantysKeyFields(resultData);
-                return (
-                  <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
-                    {keyFields.isEligible ? "Eligible" : "Not Eligible"}
-                  </Badge>
-                );
-              })()
-            ) : null
-          }
-          size="xl"
-        >
-          <div className="p-6">
-            {resultData ? (
-              <MantysResultsDisplay
-                response={resultData}
-                onClose={handleCloseEligibilityResultsDrawer}
-                onCheckAnother={handleCloseEligibilityResultsDrawer}
-                screenshot={selectedEligibilityItem.interimResults?.screenshot || null}
-                patientMPI={selectedEligibilityItem.patientMPI}
-                patientId={
-                  selectedEligibilityItem.patientId
-                    ? parseInt(selectedEligibilityItem.patientId)
-                    : undefined
-                }
-                appointmentId={selectedEligibilityItem.appointmentId}
-                encounterId={selectedEligibilityItem.encounterId}
-              />
-            ) : (
-              <div className="text-center py-12 text-gray-500">
-                <p>No results available</p>
-              </div>
-            )}
-          </div>
-        </Drawer>
-      )}
+      {showEligibilityResultsDrawer && (() => {
+        // Use selectedEligibilityItem if loaded, otherwise use selectedSearchItem
+        const displayItem = selectedEligibilityItem || selectedSearchItem;
+        const isComplete = displayItem?.status === "complete";
+        const hasResult = !!resultData;
+
+        console.log('[TodaysAppointmentsList] Drawer render check:', {
+          showEligibilityResultsDrawer,
+          hasDisplayItem: !!displayItem,
+          displayItemStatus: displayItem?.status,
+          isComplete,
+          hasResult,
+          willRender: showEligibilityResultsDrawer && isComplete && hasResult,
+          usingSelectedItem: !!selectedEligibilityItem,
+          usingSearchItem: !!selectedSearchItem && !selectedEligibilityItem,
+        });
+
+        if (!showEligibilityResultsDrawer || !isComplete || !hasResult || !displayItem) {
+          return null;
+        }
+
+        return (
+          <Drawer
+            isOpen={showEligibilityResultsDrawer}
+            onClose={handleCloseEligibilityResultsDrawer}
+            title={`Eligibility Check Results - ${displayItem.patientName || displayItem.patientId}`}
+            headerRight={
+              resultData ? (
+                (() => {
+                  const keyFields = extractMantysKeyFields(resultData);
+                  return (
+                    <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                      {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+                    </Badge>
+                  );
+                })()
+              ) : null
+            }
+            size="xl"
+          >
+            <div className="p-6">
+              {resultData ? (
+                <MantysResultsDisplay
+                  response={resultData}
+                  onClose={handleCloseEligibilityResultsDrawer}
+                  onCheckAnother={handleCloseEligibilityResultsDrawer}
+                  screenshot={displayItem.interimResults?.screenshot || null}
+                  patientMPI={displayItem.patientMPI}
+                  patientId={
+                    displayItem.patientId
+                      ? parseInt(displayItem.patientId)
+                      : undefined
+                  }
+                  appointmentId={displayItem.appointmentId}
+                  encounterId={displayItem.encounterId}
+                />
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  <p>No results available</p>
+                </div>
+              )}
+            </div>
+          </Drawer>
+        );
+      })()}
 
       {showEligibilityModal && selectedTaskId && (
         <ExtractionProgressModal

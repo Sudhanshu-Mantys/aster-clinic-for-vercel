@@ -75,6 +75,21 @@ export const EligibilityHistorySection: React.FC<
 > = ({ todaySearches, olderSearches, onSearchClick }) => {
   const [isPreviousExpanded, setIsPreviousExpanded] = useState(false);
 
+  // Log when component renders
+  React.useEffect(() => {
+    console.log('[EligibilityHistorySection] Component rendered:', {
+      todaySearchesCount: todaySearches.length,
+      olderSearchesCount: olderSearches.length,
+      hasOnSearchClick: typeof onSearchClick === 'function',
+      todaySearches: todaySearches.map(s => ({
+        taskId: s.taskId,
+        id: s.id,
+        status: s.status,
+        hasTaskId: !!s.taskId,
+      })),
+    });
+  }, [todaySearches.length, olderSearches.length, onSearchClick]);
+
   if (todaySearches.length === 0 && olderSearches.length === 0) {
     return null;
   }
@@ -97,10 +112,10 @@ export const EligibilityHistorySection: React.FC<
               const timeString =
                 date && !isNaN(date.getTime())
                   ? date.toLocaleTimeString("en-US", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: true,
-                    })
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: true,
+                  })
                   : "";
 
               const colors = getSearchStatusColors(search);
@@ -110,11 +125,62 @@ export const EligibilityHistorySection: React.FC<
               return (
                 <div
                   key={search.taskId}
-                  onClick={() => onSearchClick(search)}
+                  onClick={(e) => {
+                    console.log('[EligibilityHistorySection] Card clicked:', {
+                      taskId: search.taskId,
+                      id: search.id,
+                      status: search.status,
+                      hasOnSearchClick: typeof onSearchClick === 'function',
+                      searchData: {
+                        taskId: search.taskId,
+                        id: search.id,
+                        status: search.status,
+                        createdAt: search.createdAt,
+                        insurancePayer: search.insurancePayer,
+                      },
+                      eventTarget: e.target,
+                      eventCurrentTarget: e.currentTarget,
+                    });
+
+                    if (typeof onSearchClick !== 'function') {
+                      console.error('[EligibilityHistorySection] onSearchClick is not a function!', {
+                        onSearchClick,
+                        type: typeof onSearchClick,
+                      });
+                      return;
+                    }
+
+                    if (!search.taskId) {
+                      console.error('[EligibilityHistorySection] search.taskId is missing!', {
+                        search,
+                      });
+                      return;
+                    }
+
+                    try {
+                      onSearchClick(search);
+                    } catch (error) {
+                      console.error('[EligibilityHistorySection] Error calling onSearchClick:', error, {
+                        search,
+                      });
+                    }
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      onSearchClick(search);
+                      console.log('[EligibilityHistorySection] Card keydown:', {
+                        key: e.key,
+                        taskId: search.taskId,
+                        hasOnSearchClick: typeof onSearchClick === 'function',
+                      });
+
+                      if (typeof onSearchClick === 'function' && search.taskId) {
+                        try {
+                          onSearchClick(search);
+                        } catch (error) {
+                          console.error('[EligibilityHistorySection] Error calling onSearchClick on keydown:', error);
+                        }
+                      }
                     }
                   }}
                   role="button"
@@ -213,11 +279,53 @@ export const EligibilityHistorySection: React.FC<
                 return (
                   <div
                     key={search.taskId}
-                    onClick={() => onSearchClick(search)}
+                    onClick={(e) => {
+                      console.log('[EligibilityHistorySection] Older search card clicked:', {
+                        taskId: search.taskId,
+                        id: search.id,
+                        status: search.status,
+                        hasOnSearchClick: typeof onSearchClick === 'function',
+                        searchData: {
+                          taskId: search.taskId,
+                          id: search.id,
+                          status: search.status,
+                          createdAt: search.createdAt,
+                        },
+                      });
+
+                      if (typeof onSearchClick !== 'function') {
+                        console.error('[EligibilityHistorySection] onSearchClick is not a function for older search!');
+                        return;
+                      }
+
+                      if (!search.taskId) {
+                        console.error('[EligibilityHistorySection] search.taskId is missing for older search!', {
+                          search,
+                        });
+                        return;
+                      }
+
+                      try {
+                        onSearchClick(search);
+                      } catch (error) {
+                        console.error('[EligibilityHistorySection] Error calling onSearchClick for older search:', error);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        onSearchClick(search);
+                        console.log('[EligibilityHistorySection] Older search card keydown:', {
+                          key: e.key,
+                          taskId: search.taskId,
+                        });
+
+                        if (typeof onSearchClick === 'function' && search.taskId) {
+                          try {
+                            onSearchClick(search);
+                          } catch (error) {
+                            console.error('[EligibilityHistorySection] Error calling onSearchClick on older search keydown:', error);
+                          }
+                        }
                       }
                     }}
                     role="button"
