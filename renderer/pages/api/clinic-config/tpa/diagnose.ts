@@ -71,7 +71,7 @@ function validateTPAConfigForMapping(config: TPAConfig): ValidationResult {
     }
 }
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse<DiagnosticResponse | { error: string }>) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse<DiagnosticResponse | { error: string; details?: string }>) {
     if (req.method !== 'GET') {
         return res.status(405).json({ error: 'Method not allowed' })
     }

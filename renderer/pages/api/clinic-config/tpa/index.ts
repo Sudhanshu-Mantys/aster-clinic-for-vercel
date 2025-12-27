@@ -29,11 +29,11 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
 
     // Return all TPA configs (includes both config and mapping data)
     const configs = await getTPAConfigs(clinicId)
-    
+
     // Add validation status to each config
     const configsWithValidation = configs.map(config => {
         const validation = validateTPAConfig(config, true)
-        
+
         // Log warnings for incomplete configs
         if (!validation.isValid) {
             console.warn(`TPA config ${config.ins_code || config.tpa_id || 'unknown'} is incomplete:`, {
@@ -41,7 +41,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
                 errors: validation.errors
             })
         }
-        
+
         return {
             ...config,
             validation_status: {
@@ -52,14 +52,14 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
             }
         }
     })
-    
+
     // Count incomplete configs
     const incompleteCount = configsWithValidation.filter(c => !c.validation_status.isValid).length
     if (incompleteCount > 0) {
         console.warn(`Found ${incompleteCount} incomplete TPA config(s) for clinic ${clinicId}`)
     }
-    
-    return res.status(200).json({ 
+
+    return res.status(200).json({
         configs: configsWithValidation,
         summary: {
             total: configsWithValidation.length,

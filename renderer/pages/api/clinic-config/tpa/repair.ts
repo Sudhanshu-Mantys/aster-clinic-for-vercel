@@ -32,7 +32,7 @@ interface RepairResponse {
  * POST /api/clinic-config/tpa/repair
  * Body: { clinic_id, ins_code, mapping_data? }
  */
-export default async function handler(req: NextApiRequest, res: NextApiResponse<RepairResponse | { error: string }>) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse<RepairResponse | { error: string; details?: string }>) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' })
     }
@@ -50,9 +50,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     try {
         // Get existing config
         const existingConfig = await getTPAConfigByCode(clinicId, ins_code)
-        
+
         if (!existingConfig) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 error: `TPA config not found for ins_code: ${ins_code} and clinic_id: ${clinicId}`
             })
         }
@@ -109,7 +109,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
         return res.status(200).json({
             success,
-            message: success 
+            message: success
                 ? `TPA config for ${ins_code} has been repaired successfully`
                 : `TPA config for ${ins_code} was updated but still has missing fields: ${validationAfter.missingFields.join(', ')}`,
             config: updatedConfig,
@@ -119,7 +119,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
         })
     } catch (error: any) {
         console.error('Error repairing TPA config:', error)
-        return res.status(500).json({ 
+        return res.status(500).json({
             error: 'Failed to repair TPA config',
             details: error.message || 'Unknown error occurred'
         })
