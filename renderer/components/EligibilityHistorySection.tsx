@@ -9,6 +9,7 @@ interface EligibilityHistorySectionProps {
 
 const TPA_NAME_MAP: Record<string, string> = {
   INS010: "AXA INSURANCE - GULF",
+  INS015: "SAICO",
   TPA001: "Neuron",
   TPA002: "NextCare",
   TPA003: "Al Madallah",
@@ -27,12 +28,80 @@ const getTPAName = (code: string): string => {
 
 const normalizeStatus = (status: string) => (status === "failed" ? "error" : status);
 
+// Helper to check if a search-all result has an eligible entry
+interface AggregatedResult {
+  tpa_name: string;
+  status: string;
+  data?: {
+    is_eligible?: boolean;
+    payer_id?: string;
+  } | null;
+}
+
+interface SearchAllResult {
+  is_search_all?: boolean;
+  search_all_status?: string;
+  found_results?: number;
+  aggregated_results?: AggregatedResult[];
+}
+
+const getEligibleResultFromSearchAll = (search: EligibilityHistoryItem): AggregatedResult | null => {
+  const result = search.result as SearchAllResult | undefined;
+  if (!result) return null;
+
+  // Check if it's a search-all complete with found results
+  const isSearchAllComplete =
+    result.is_search_all &&
+    (result.search_all_status === "SEARCH_ALL_COMPLETE" || search.status === "complete") &&
+    (result.found_results ?? 0) > 0;
+
+  if (!isSearchAllComplete || !result.aggregated_results) return null;
+
+  // Find the first eligible result
+  return result.aggregated_results.find(
+    (r) => r.status === "found" && r.data?.is_eligible === true
+  ) || null;
+};
+
+const isSearchAllWithEligibleResult = (search: EligibilityHistoryItem): boolean => {
+  return getEligibleResultFromSearchAll(search) !== null;
+};
+
+// Check if this is a search-all that completed but found no eligible results
+const isSearchAllWithNoResults = (search: EligibilityHistoryItem): boolean => {
+  const result = search.result as SearchAllResult | undefined;
+  const normalizedStatus = normalizeStatus(search.status);
+  const tpaCode = (search as any).tpaCode || search.insurancePayer || "";
+
+  // If we have the result, check for search-all with no results
+  if (result) {
+    const isSearchAllComplete =
+      result.is_search_all &&
+      (result.search_all_status === "SEARCH_ALL_COMPLETE" || normalizedStatus === "complete" || normalizedStatus === "error");
+
+    if (isSearchAllComplete) {
+      // Check if found_results is 0 or no eligible entry exists
+      return (result.found_results ?? 0) === 0;
+    }
+  }
+
+  // Fallback: If tpaCode is "BOTH" (search-all) and status is error, assume no results found
+  if (tpaCode === "BOTH" && normalizedStatus === "error") {
+    return true;
+  }
+
+  return false;
+};
+
 const getSearchStatusColors = (search: EligibilityHistoryItem) => {
   const normalizedStatus = normalizeStatus(search.status);
   const isComplete = normalizedStatus === "complete";
   const isError = normalizedStatus === "error";
+  const hasEligibleResult = isSearchAllWithEligibleResult(search);
+  const isSearchAllNoResults = isSearchAllWithNoResults(search);
 
-  if (isError) {
+  // Search-all with no results OR regular error - show red style
+  if (isSearchAllNoResults || (isError && !hasEligibleResult)) {
     return {
       bgColor: "bg-red-50",
       borderColor: "border-red-300",
@@ -42,7 +111,7 @@ const getSearchStatusColors = (search: EligibilityHistoryItem) => {
     };
   }
 
-  if (isComplete) {
+  if (isComplete || hasEligibleResult) {
     return {
       bgColor: "bg-green-50",
       borderColor: "border-green-300",
@@ -61,13 +130,41 @@ const getSearchStatusColors = (search: EligibilityHistoryItem) => {
   };
 };
 
-const getStatusDisplay = (status: string): string => {
-  const normalizedStatus = normalizeStatus(status);
+const getStatusDisplay = (search: EligibilityHistoryItem): string => {
+  // Check for search-all with eligible result first
+  const eligibleResult = getEligibleResultFromSearchAll(search);
+  if (eligibleResult) {
+    return "Eligible";
+  }
+
+  // Check for search-all with no results
+  if (isSearchAllWithNoResults(search)) {
+    return "Could not determine";
+  }
+
+  const normalizedStatus = normalizeStatus(search.status);
   if (normalizedStatus === "complete") return "Active";
   if (normalizedStatus === "error") return "Failed";
-  if (status === "complete") return "Active";
-  if (status === "error") return "Failed";
-  return status;
+  return search.status;
+};
+
+const getTPADisplayForSearch = (search: EligibilityHistoryItem): { tpaCode: string; tpaName: string } => {
+  // Check for search-all with eligible result - use the eligible TPA
+  const eligibleResult = getEligibleResultFromSearchAll(search);
+  if (eligibleResult) {
+    const tpaCode = eligibleResult.tpa_name || eligibleResult.data?.payer_id || "";
+    return {
+      tpaCode,
+      tpaName: getTPAName(tpaCode),
+    };
+  }
+
+  // Fallback to the search's own TPA info
+  const tpaCode = (search as any).tpaCode || search.insurancePayer || "";
+  return {
+    tpaCode,
+    tpaName: getTPAName(tpaCode),
+  };
 };
 
 export const EligibilityHistorySection: React.FC<
@@ -104,8 +201,7 @@ export const EligibilityHistorySection: React.FC<
                   : "";
 
               const colors = getSearchStatusColors(search);
-              const tpaCode =
-                (search as any).tpaCode || search.insurancePayer || "";
+              const { tpaCode, tpaName } = getTPADisplayForSearch(search);
 
               return (
                 <div
@@ -149,7 +245,7 @@ export const EligibilityHistorySection: React.FC<
                         </div>
                       )}
                       <div className="font-bold text-gray-900 text-sm sm:text-base mb-1 truncate">
-                        {getTPAName(tpaCode)}{" "}
+                        {tpaName}{" "}
                         {tpaCode && (
                           <span className="font-normal text-gray-600">
                             ({tpaCode})
@@ -157,7 +253,7 @@ export const EligibilityHistorySection: React.FC<
                         )}
                       </div>
                       <div className="text-sm text-gray-700">
-                        Status: {getStatusDisplay(search.status)}
+                        Status: {getStatusDisplay(search)}
                       </div>
                     </div>
                   </div>
@@ -197,8 +293,7 @@ export const EligibilityHistorySection: React.FC<
           {isPreviousExpanded && (
             <div className="bg-gray-50 border border-gray-200 border-t-0 rounded-b px-3 py-2 space-y-1">
               {olderSearches.map((search) => {
-                const tpaCode =
-                  (search as any).tpaCode || search.insurancePayer || "";
+                const { tpaCode, tpaName } = getTPADisplayForSearch(search);
                 let formattedDate = "";
                 if (search.createdAt) {
                   const date = new Date(search.createdAt);
@@ -226,11 +321,11 @@ export const EligibilityHistorySection: React.FC<
                   >
                     <span className="text-gray-900">
                       {formattedDate && `${formattedDate} - `}
-                      {getTPAName(tpaCode)}{" "}
+                      {tpaName}{" "}
                       {tpaCode && (
                         <span className="text-gray-600">({tpaCode})</span>
                       )}{" "}
-                      - Status: {getStatusDisplay(search.status)}
+                      - Status: {getStatusDisplay(search)}
                     </span>
                   </div>
                 );

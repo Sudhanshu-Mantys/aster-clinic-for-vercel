@@ -151,8 +151,11 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
       return "Starting search across all TPAs...";
     }
 
+    const rawStatus = (taskStatus as any)?.taskStatus || "";
+
     if (status === "complete") return "Eligibility check complete!";
     if (status === "error") return displayError || "An error occurred";
+    if (rawStatus === "NAVIGATING_WEBSITE") return "Navigating insurance portal...";
     if (status === "processing") return "Processing eligibility check...";
     return "Starting eligibility check...";
   }, [taskStatus, status, displayError]);
@@ -162,6 +165,8 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
   const errorMessage = displayError;
   const isSearchAll = (taskStatus as any)?.isSearchAll === true;
   const aggregatedResults = (taskStatus as any)?.aggregatedResults || [];
+  const rawTaskStatus = (taskStatus as any)?.taskStatus || "";
+  const isNavigating = rawTaskStatus === "NAVIGATING_WEBSITE";
 
   const getStatusColor = () => {
     switch (status) {
@@ -320,21 +325,16 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
             ></div>
           </div>
 
-          {pollingAttempts > 0 && status !== "complete" && status !== "error" && (
-            <div className="flex justify-between text-sm text-gray-600">
-              <span>Checking status... (Attempt {pollingAttempts})</span>
-            </div>
-          )}
 
           {isSearchAll && aggregatedResults.length > 0 && (
             <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
               <h4 className="text-sm font-semibold text-gray-700 mb-2">
                 Search All Progress ({aggregatedResults.length} TPAs checked)
               </h4>
-              <div className="space-y-2">
-                {aggregatedResults.slice(0, 5).map((result: any, index: number) => (
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+                {aggregatedResults.map((result: any, index: number) => (
                   <div key={index} className="text-xs text-gray-600">
-                    <span className="font-medium">{result.tpa_name}:</span>{" "}
+                    <span className="font-bold">{result.tpa_name}:</span>{" "}
                     <span
                       className={
                         result.status === "failed"
@@ -351,11 +351,6 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
                     )}
                   </div>
                 ))}
-                {aggregatedResults.length > 5 && (
-                  <div className="text-xs text-gray-500">
-                    + {aggregatedResults.length - 5} more TPAs...
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -432,7 +427,7 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
           </div>
         )}
 
-        {status === "processing" && !interimScreenshot && (
+        {(status === "processing" || isNavigating) && !interimScreenshot && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <div className="flex gap-3">
               <svg
@@ -459,7 +454,7 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
           </div>
         )}
 
-        {status === "pending" && (
+        {status === "pending" && !isNavigating && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
             <div className="flex gap-3">
               <svg
