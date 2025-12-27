@@ -67,13 +67,41 @@ const isSearchAllWithEligibleResult = (search: EligibilityHistoryItem): boolean 
   return getEligibleResultFromSearchAll(search) !== null;
 };
 
+// Check if this is a search-all that completed but found no eligible results
+const isSearchAllWithNoResults = (search: EligibilityHistoryItem): boolean => {
+  const result = search.result as SearchAllResult | undefined;
+  const normalizedStatus = normalizeStatus(search.status);
+  const tpaCode = (search as any).tpaCode || search.insurancePayer || "";
+
+  // If we have the result, check for search-all with no results
+  if (result) {
+    const isSearchAllComplete =
+      result.is_search_all &&
+      (result.search_all_status === "SEARCH_ALL_COMPLETE" || normalizedStatus === "complete" || normalizedStatus === "error");
+
+    if (isSearchAllComplete) {
+      // Check if found_results is 0 or no eligible entry exists
+      return (result.found_results ?? 0) === 0;
+    }
+  }
+
+  // Fallback: If tpaCode is "BOTH" (search-all) and status is error, assume no results found
+  if (tpaCode === "BOTH" && normalizedStatus === "error") {
+    return true;
+  }
+
+  return false;
+};
+
 const getSearchStatusColors = (search: EligibilityHistoryItem) => {
   const normalizedStatus = normalizeStatus(search.status);
   const isComplete = normalizedStatus === "complete";
   const isError = normalizedStatus === "error";
   const hasEligibleResult = isSearchAllWithEligibleResult(search);
+  const isSearchAllNoResults = isSearchAllWithNoResults(search);
 
-  if (isError && !hasEligibleResult) {
+  // Search-all with no results OR regular error - show red style
+  if (isSearchAllNoResults || (isError && !hasEligibleResult)) {
     return {
       bgColor: "bg-red-50",
       borderColor: "border-red-300",
@@ -107,6 +135,11 @@ const getStatusDisplay = (search: EligibilityHistoryItem): string => {
   const eligibleResult = getEligibleResultFromSearchAll(search);
   if (eligibleResult) {
     return "Eligible";
+  }
+
+  // Check for search-all with no results
+  if (isSearchAllWithNoResults(search)) {
+    return "Could not determine";
   }
 
   const normalizedStatus = normalizeStatus(search.status);
