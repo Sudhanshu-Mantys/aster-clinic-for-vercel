@@ -43,6 +43,40 @@ interface MantysEligibilityFormProps {
   isLoadingInsurance?: boolean;
 }
 
+// Helper function to transform search-all results to MantysEligibilityResponse format
+const transformResultForDisplay = (rawResult: any): MantysEligibilityResponse | null => {
+  if (!rawResult) return null;
+
+  // Check if this is a search-all result
+  if (
+    rawResult.is_search_all === true &&
+    rawResult.aggregated_results &&
+    Array.isArray(rawResult.aggregated_results)
+  ) {
+    // Find the eligible result from aggregated_results
+    const eligibleEntry = rawResult.aggregated_results.find(
+      (r: any) => r.status === "found" && r.data?.is_eligible === true
+    );
+
+    if (eligibleEntry && eligibleEntry.data) {
+      // Transform to MantysEligibilityResponse format
+      return {
+        tpa: eligibleEntry.tpa_name || eligibleEntry.data?.payer_id || "",
+        data: eligibleEntry.data,
+        status: "found" as const,
+        job_task_id: eligibleEntry.data?.job_task_id || rawResult.task_id || "",
+        task_id: rawResult.task_id,
+      } as MantysEligibilityResponse;
+    }
+
+    // No eligible result found in search-all
+    return null;
+  }
+
+  // Regular (non-search-all) result
+  return rawResult as MantysEligibilityResponse;
+};
+
 interface FormData {
   options: string;
   idType: string;
@@ -406,8 +440,11 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
     } else if (currentHistoryItem.status === "complete") {
       setStatusMessage("Eligibility check complete!");
       setCurrentStatus("complete");
-      setMantysResponse(currentHistoryItem.result as MantysEligibilityResponse);
-      setShowResults(true);
+      const transformedResult = transformResultForDisplay(currentHistoryItem.result);
+      if (transformedResult) {
+        setMantysResponse(transformedResult);
+        setShowResults(true);
+      }
     } else if (currentHistoryItem.status === "error") {
       setApiError(currentHistoryItem.error || "Eligibility check failed");
     }
@@ -524,7 +561,15 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
           taskId={taskId}
           viewMode="live"
           onMinimize={() => { setIsMinimized(true); }}
-          onComplete={(result) => { setMantysResponse(result); setShowResults(true); setIsSubmitting(false); setIsMinimized(false); }}
+          onComplete={(result) => {
+            const transformedResult = transformResultForDisplay(result);
+            if (transformedResult) {
+              setMantysResponse(transformedResult);
+              setShowResults(true);
+            }
+            setIsSubmitting(false);
+            setIsMinimized(false);
+          }}
         />
       )}
 

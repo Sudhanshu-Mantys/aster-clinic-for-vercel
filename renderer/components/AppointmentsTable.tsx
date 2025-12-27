@@ -37,7 +37,38 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
   const eligibilityResult = useMemo(() => {
     if (!actionTaskId) return undefined;
     const item = historyItems.find((i) => i.taskId === actionTaskId);
-    return item?.result as MantysEligibilityResponse | undefined;
+    const rawResult = item?.result;
+    if (!rawResult) return undefined;
+
+    // Check if this is a search-all result
+    const searchAllResult = rawResult as any;
+    if (
+      searchAllResult.is_search_all === true &&
+      searchAllResult.aggregated_results &&
+      Array.isArray(searchAllResult.aggregated_results)
+    ) {
+      // Find the eligible result from aggregated_results
+      const eligibleEntry = searchAllResult.aggregated_results.find(
+        (r: any) => r.status === "found" && r.data?.is_eligible === true
+      );
+
+      if (eligibleEntry && eligibleEntry.data) {
+        // Transform to MantysEligibilityResponse format
+        return {
+          tpa: eligibleEntry.tpa_name || eligibleEntry.data?.payer_id || "",
+          data: eligibleEntry.data,
+          status: "found" as const,
+          job_task_id: eligibleEntry.data?.job_task_id || searchAllResult.task_id || "",
+          task_id: searchAllResult.task_id,
+        } as MantysEligibilityResponse;
+      }
+
+      // No eligible result found in search-all
+      return undefined;
+    }
+
+    // Regular (non-search-all) result
+    return rawResult as MantysEligibilityResponse;
   }, [actionTaskId, historyItems]);
 
   const eligibilityStatusMap = useMemo(() => {
@@ -82,11 +113,31 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       ) {
         status = "processing";
       } else if (mostRecent.status === "complete") {
-        const resultData = (mostRecent.result as any)?.data;
-        if (resultData?.is_eligible === true) {
-          status = "success";
+        const result = mostRecent.result as any;
+
+        // Check if this is a search-all result
+        if (
+          result?.is_search_all === true &&
+          result?.aggregated_results &&
+          Array.isArray(result.aggregated_results)
+        ) {
+          // Find eligible result in aggregated_results
+          const eligibleEntry = result.aggregated_results.find(
+            (r: any) => r.status === "found" && r.data?.is_eligible === true
+          );
+          if (eligibleEntry) {
+            status = "success";
+          } else {
+            status = "error";
+          }
         } else {
-          status = "error";
+          // Regular (non-search-all) result
+          const resultData = result?.data;
+          if (resultData?.is_eligible === true) {
+            status = "success";
+          } else {
+            status = "error";
+          }
         }
       }
 

@@ -198,7 +198,40 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
     });
   };
 
-  const resultData = (freshResult?.result || selectedItem?.result) as MantysEligibilityResponse | undefined;
+  const resultData = useMemo(() => {
+    const rawResult = freshResult?.result || selectedItem?.result;
+    if (!rawResult) return undefined;
+
+    // Check if this is a search-all result
+    const searchAllResult = rawResult as any;
+    if (
+      searchAllResult.is_search_all === true &&
+      searchAllResult.aggregated_results &&
+      Array.isArray(searchAllResult.aggregated_results)
+    ) {
+      // Find the eligible result from aggregated_results
+      const eligibleEntry = searchAllResult.aggregated_results.find(
+        (r: any) => r.status === "found" && r.data?.is_eligible === true
+      );
+
+      if (eligibleEntry && eligibleEntry.data) {
+        // Transform to MantysEligibilityResponse format
+        return {
+          tpa: eligibleEntry.tpa_name || eligibleEntry.data?.payer_id || "",
+          data: eligibleEntry.data,
+          status: "found" as const,
+          job_task_id: eligibleEntry.data?.job_task_id || searchAllResult.task_id || "",
+          task_id: searchAllResult.task_id,
+        } as MantysEligibilityResponse;
+      }
+
+      // No eligible result found in search-all
+      return undefined;
+    }
+
+    // Regular (non-search-all) result
+    return rawResult as MantysEligibilityResponse;
+  }, [freshResult, selectedItem]);
 
   return (
     <div className="space-y-4">

@@ -79,18 +79,43 @@ export default async function handler(
     // For search_all tasks, check search_all_status instead of status
     if (isSearchAll) {
       if (searchAllStatus === "SEARCH_ALL_COMPLETE") {
-        // Search all is complete
+        // Check if any eligible results were found
+        const foundResults = resultData.found_results ?? 0;
+        const hasEligibleResult = foundResults > 0;
+        const finalStatus = hasEligibleResult ? "complete" : "error";
+
+        // Search all is complete - update Redis status based on found_results
+        try {
+          await eligibilityRedisService.updateEligibilityStatus(
+            task_id,
+            finalStatus,
+            new Date().toISOString(),
+          );
+          console.log(`Updated Redis status for search_all task ${task_id} to ${finalStatus} (found_results: ${foundResults})`);
+        } catch (redisError) {
+          console.error("Failed to update Redis status for search_all (non-fatal):", redisError);
+        }
+
         return res.status(200).json({
-          status: "complete",
+          status: finalStatus,
           taskStatus: resultData.status,
-          message: "Search all complete!",
+          message: hasEligibleResult ? "Search all complete!" : "No eligible insurance found",
           isSearchAll: true,
           searchAllStatus: searchAllStatus,
           aggregatedResults: aggregatedResults,
           result: resultData,
         });
       } else if (searchAllStatus === "SEARCH_ALL_PROCESSING" || resultData.status === "EXTRACTING_DATA" || resultData.status === "NAVIGATING_WEBSITE") {
-        // Search all is processing
+        // Search all is processing - update Redis status
+        try {
+          await eligibilityRedisService.updateEligibilityStatus(
+            task_id,
+            "processing",
+          );
+        } catch (redisError) {
+          console.error("Failed to update Redis status for search_all processing (non-fatal):", redisError);
+        }
+
         return res.status(200).json({
           status: "processing",
           taskStatus: resultData.status,
