@@ -267,11 +267,6 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
         return;
       }
 
-      const confirmed = confirm(
-        `Upload ${keyFields.referralDocuments.length} document(s) to Aster?`,
-      );
-      if (!confirmed) return;
-
       let uploadedCount = 0;
       let failedCount = 0;
 

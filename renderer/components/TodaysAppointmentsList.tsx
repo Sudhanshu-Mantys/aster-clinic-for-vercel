@@ -166,6 +166,16 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     refetchInterval: false,
   });
 
+  // Debug logging
+  React.useEffect(() => {
+    if (selectedTaskId) {
+      console.log("[TodaysAppointmentsList] selectedTaskId:", selectedTaskId);
+      console.log("[TodaysAppointmentsList] selectedEligibilityItem:", selectedEligibilityItem);
+      console.log("[TodaysAppointmentsList] freshTaskResult:", freshTaskResult);
+      console.log("[TodaysAppointmentsList] showEligibilityResultsDrawer:", showEligibilityResultsDrawer);
+    }
+  }, [selectedTaskId, selectedEligibilityItem, freshTaskResult, showEligibilityResultsDrawer]);
+
   const emiratesIdFromContext = patientContext?.nationality_id || null;
 
   const handleSearch = useCallback((filters: AppointmentFilters) => {
@@ -196,13 +206,25 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
   // Handler for previous search clicks (eligibility history)
   const handlePreviousSearchClick = useCallback((search: EligibilityHistoryItem) => {
+    console.log("[handlePreviousSearchClick] Clicked search item:", {
+      taskId: search.taskId,
+      status: search.status,
+      patientName: search.patientName,
+      patientMPI: search.patientMPI,
+      result: search.result,
+      createdAt: search.createdAt,
+    });
     const isErrorStatus = search.status === "error" || (search.status as string) === "failed";
+    console.log("[handlePreviousSearchClick] isErrorStatus:", isErrorStatus);
     setSelectedTaskId(search.taskId);
     if (isErrorStatus) {
+      console.log("[handlePreviousSearchClick] Opening eligibility modal (error status)");
       setShowEligibilityModal(true);
     } else if (search.status === "complete") {
+      console.log("[handlePreviousSearchClick] Opening eligibility results drawer (complete status)");
       setShowEligibilityResultsDrawer(true);
     } else {
+      console.log("[handlePreviousSearchClick] Opening eligibility modal (other status:", search.status, ")");
       setShowEligibilityModal(true);
     }
   }, []);
@@ -377,11 +399,11 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       </Drawer>
 
       {/* Eligibility Results Drawer */}
-      {showEligibilityResultsDrawer && selectedEligibilityItem?.status === "complete" && resultData && (
+      {showEligibilityResultsDrawer && (selectedEligibilityItem?.status === "complete" || freshTaskResult?.status === "complete") && resultData && (
         <Drawer
           isOpen={showEligibilityResultsDrawer}
           onClose={handleCloseEligibilityResultsDrawer}
-          title={`Eligibility Check Results - ${selectedEligibilityItem.patientName || selectedEligibilityItem.patientId}`}
+          title={`Eligibility Check Results - ${selectedEligibilityItem?.patientName || selectedEligibilityItem?.patientId || "Patient"}`}
           headerRight={
             resultData ? (
               (() => {
@@ -402,15 +424,15 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                 response={resultData}
                 onClose={handleCloseEligibilityResultsDrawer}
                 onCheckAnother={handleCloseEligibilityResultsDrawer}
-                screenshot={selectedEligibilityItem.interimResults?.screenshot || null}
-                patientMPI={selectedEligibilityItem.patientMPI}
+                screenshot={selectedEligibilityItem?.interimResults?.screenshot || null}
+                patientMPI={selectedEligibilityItem?.patientMPI}
                 patientId={
-                  selectedEligibilityItem.patientId
+                  selectedEligibilityItem?.patientId
                     ? parseInt(selectedEligibilityItem.patientId)
                     : undefined
                 }
-                appointmentId={selectedEligibilityItem.appointmentId}
-                encounterId={selectedEligibilityItem.encounterId}
+                appointmentId={selectedEligibilityItem?.appointmentId}
+                encounterId={selectedEligibilityItem?.encounterId}
               />
             ) : (
               <div className="text-center py-12 text-gray-500">
