@@ -278,35 +278,39 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   );
 
   const resultData = useMemo(() => {
-    if (freshTaskResult?.result) return freshTaskResult.result as MantysEligibilityResponse;
-    if (selectedEligibilityItem?.result)
-      return selectedEligibilityItem.result as MantysEligibilityResponse;
-    // Use result from clicked search item if available
-    if (selectedSearchItem?.result)
-      return selectedSearchItem.result as MantysEligibilityResponse;
-    return null;
-  }, [freshTaskResult, selectedEligibilityItem, selectedSearchItem]);
+    const rawResult = freshTaskResult?.result || selectedEligibilityItem?.result;
+    if (!rawResult) return null;
 
-  // Log drawer rendering conditions
-  React.useEffect(() => {
-    if (showEligibilityResultsDrawer) {
-      console.log('[TodaysAppointmentsList] Drawer rendering check:', {
-        showEligibilityResultsDrawer,
-        selectedTaskId,
-        selectedEligibilityItem: selectedEligibilityItem ? {
-          id: selectedEligibilityItem.id,
-          taskId: selectedEligibilityItem.taskId,
-          status: selectedEligibilityItem.status,
-          hasResult: !!selectedEligibilityItem.result,
-        } : null,
-        resultData: resultData ? 'exists' : null,
-        freshTaskResult: freshTaskResult ? {
-          hasResult: !!freshTaskResult.result,
-        } : null,
-        willRender: showEligibilityResultsDrawer && selectedEligibilityItem?.status === "complete" && resultData,
-      });
+    // Check if this is a search-all result
+    const searchAllResult = rawResult as any;
+    if (
+      searchAllResult.is_search_all === true &&
+      searchAllResult.aggregated_results &&
+      Array.isArray(searchAllResult.aggregated_results)
+    ) {
+      // Find the eligible result from aggregated_results
+      const eligibleEntry = searchAllResult.aggregated_results.find(
+        (r: any) => r.status === "found" && r.data?.is_eligible === true
+      );
+
+      if (eligibleEntry && eligibleEntry.data) {
+        // Transform to MantysEligibilityResponse format
+        return {
+          tpa: eligibleEntry.tpa_name || eligibleEntry.data?.payer_id || "",
+          data: eligibleEntry.data,
+          status: "found" as const,
+          job_task_id: eligibleEntry.data?.job_task_id || searchAllResult.task_id || "",
+          task_id: searchAllResult.task_id,
+        } as MantysEligibilityResponse;
+      }
+
+      // No eligible result found in search-all
+      return null;
     }
-  }, [showEligibilityResultsDrawer, selectedTaskId, selectedEligibilityItem, resultData, freshTaskResult]);
+
+    // Regular (non-search-all) result
+    return rawResult as MantysEligibilityResponse;
+  }, [freshTaskResult, selectedEligibilityItem]);
 
   return (
     <>

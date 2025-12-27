@@ -37,7 +37,38 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
   const eligibilityResult = useMemo(() => {
     if (!actionTaskId) return undefined;
     const item = historyItems.find((i) => i.taskId === actionTaskId);
-    return item?.result as MantysEligibilityResponse | undefined;
+    const rawResult = item?.result;
+    if (!rawResult) return undefined;
+
+    // Check if this is a search-all result
+    const searchAllResult = rawResult as any;
+    if (
+      searchAllResult.is_search_all === true &&
+      searchAllResult.aggregated_results &&
+      Array.isArray(searchAllResult.aggregated_results)
+    ) {
+      // Find the eligible result from aggregated_results
+      const eligibleEntry = searchAllResult.aggregated_results.find(
+        (r: any) => r.status === "found" && r.data?.is_eligible === true
+      );
+
+      if (eligibleEntry && eligibleEntry.data) {
+        // Transform to MantysEligibilityResponse format
+        return {
+          tpa: eligibleEntry.tpa_name || eligibleEntry.data?.payer_id || "",
+          data: eligibleEntry.data,
+          status: "found" as const,
+          job_task_id: eligibleEntry.data?.job_task_id || searchAllResult.task_id || "",
+          task_id: searchAllResult.task_id,
+        } as MantysEligibilityResponse;
+      }
+
+      // No eligible result found in search-all
+      return undefined;
+    }
+
+    // Regular (non-search-all) result
+    return rawResult as MantysEligibilityResponse;
   }, [actionTaskId, historyItems]);
 
   const eligibilityStatusMap = useMemo(() => {
@@ -74,6 +105,12 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       const mostRecent = checks[0].item;
 
       let status: EligibilityStatus = null;
+      const result = mostRecent.result as any;
+      const tpaCode = (mostRecent as any).tpaCode || (mostRecent as any).insurancePayer || "";
+
+      // Check if this is a search-all result (from result or tpaCode)
+      const isSearchAll = result?.is_search_all === true || tpaCode === "BOTH";
+
       if (mostRecent.status === "error") {
         status = "error";
       } else if (
@@ -82,11 +119,32 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       ) {
         status = "processing";
       } else if (mostRecent.status === "complete") {
-        const resultData = (mostRecent.result as any)?.data;
-        if (resultData?.is_eligible === true) {
-          status = "success";
-        } else {
+        if (
+          isSearchAll &&
+          result?.aggregated_results &&
+          Array.isArray(result.aggregated_results)
+        ) {
+          // Find eligible result in aggregated_results
+          const eligibleEntry = result.aggregated_results.find(
+            (r: any) => r.status === "found" && r.data?.is_eligible === true
+          );
+          if (eligibleEntry) {
+            status = "success";
+          } else {
+            // Search-all completed but no eligible results found
+            status = "error";
+          }
+        } else if (isSearchAll && !result) {
+          // Search-all but no result data available yet
           status = "error";
+        } else {
+          // Regular (non-search-all) result
+          const resultData = result?.data;
+          if (resultData?.is_eligible === true) {
+            status = "success";
+          } else {
+            status = "error";
+          }
         }
       }
 
@@ -507,50 +565,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                     </div>
                     {eligibilityStatusMap[appointment.mpi]?.status && (
                       <div className="flex-shrink-0 mt-1">
-                        {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
-                          <span
-                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600"
-                            title="Eligibility check successful"
-                          >
-                            <svg
-                              className="w-3 h-3"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={3}
-                                d="M5 13l4 4L19 7"
-                              />
-                            </svg>
-                          </span>
-                        ) : eligibilityStatusMap[appointment.mpi]?.status === "processing" ? (
-                          <span
-                            className="inline-block w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
-                            title="Eligibility check in progress"
-                          />
-                        ) : (
-                          <span
-                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600"
-                            title="Eligibility check failed"
-                          >
-                            <svg
-                              className="w-3 h-3"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={3}
-                                d="M6 18L18 6M6 6l12 12"
-                              />
-                            </svg>
-                          </span>
-                        )}
+                        {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status, "sm")}
                       </div>
                     )}
                   </div>
@@ -708,50 +723,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                     </p>
                     {eligibilityStatusMap[appointment.mpi]?.status && (
                       <div className="flex-shrink-0 mt-0.5">
-                        {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
-                          <span
-                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600"
-                            title="Eligibility check successful"
-                          >
-                            <svg
-                              className="w-3 h-3"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={3}
-                                d="M5 13l4 4L19 7"
-                              />
-                            </svg>
-                          </span>
-                        ) : eligibilityStatusMap[appointment.mpi]?.status === "processing" ? (
-                          <span
-                            className="inline-block w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
-                            title="Eligibility check in progress"
-                          />
-                        ) : (
-                          <span
-                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600"
-                            title="Eligibility check failed"
-                          >
-                            <svg
-                              className="w-3 h-3"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={3}
-                                d="M6 18L18 6M6 6l12 12"
-                              />
-                            </svg>
-                          </span>
-                        )}
+                        {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status, "sm")}
                       </div>
                     )}
                   </div>
