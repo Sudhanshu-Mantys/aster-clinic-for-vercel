@@ -76,6 +76,25 @@ export default async function handler(
       });
     }
 
+    // Fetch insurance details from separate key if available
+    try {
+      const insuranceDetails = await withTimeout(
+        patientContextRedisService.getInsuranceDetails(context.patientId),
+        REDIS_TIMEOUT
+      );
+
+      if (insuranceDetails) {
+        // Include insurance details in the response
+        return res.status(200).json({
+          ...context,
+          insuranceDetails,
+        });
+      }
+    } catch (error) {
+      // If insurance details fetch fails, just return context without it
+      console.warn('Failed to fetch insurance details:', error);
+    }
+
     return res.status(200).json(context);
   } catch (error) {
     console.error('Error fetching patient context:', error);

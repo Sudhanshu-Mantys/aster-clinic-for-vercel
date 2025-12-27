@@ -3,6 +3,7 @@
  * This should be called after uploading eligibility documents
  */
 import { NextApiRequest, NextApiResponse } from 'next';
+import { patientContextRedisService } from '../../../lib/redis-patient-context';
 
 const API_BASE_URL = 'https://aster-clinics-dev.mantys.org/SCMS/web/app.php';
 
@@ -60,6 +61,25 @@ export default async function handler(
             insuranceMappingId: requestData.insuranceMappingId,
         });
 
+        // Fetch physician ID from Redis appointment store if not provided
+        let physicianId = requestData.physicianId;
+        if (!physicianId && requestData.appointmentId) {
+            try {
+                const appointmentContext = await patientContextRedisService.getPatientContextByAppointmentId(
+                    requestData.appointmentId
+                );
+                if (appointmentContext?.physician_id) {
+                    physicianId = appointmentContext.physician_id;
+                    console.log(`✅ Fetched physician_id ${physicianId} from Redis for appointment ${requestData.appointmentId}`);
+                } else {
+                    console.warn(`⚠️ No physician_id found in Redis for appointment ${requestData.appointmentId}`);
+                }
+            } catch (error) {
+                console.error('❌ Error fetching physician ID from Redis:', error);
+                // Continue with null if Redis fetch fails
+            }
+        }
+
         // Prepare dates
         const today = new Date();
         const authDate = requestData.authDate || formatDateForAster(today);
@@ -105,7 +125,7 @@ export default async function handler(
                         insuranceMappingId: ordObjInsuranceMappingId, // Use insTpaPatId, not hospital_insurance_mapping_id
                         orderId: null,
                         authPayerPayable: null,
-                        reqPhyId: requestData.physicianId ?? null,
+                        reqPhyId: physicianId ?? null,
                         authQty: null
                     }
                 ],

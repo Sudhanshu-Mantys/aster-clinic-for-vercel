@@ -3,6 +3,30 @@ import { ApiError, asterApi, clinicConfigApi, patientApi } from "../lib/api-clie
 import type { MantysEligibilityResponse, MantysKeyFields } from "../types/mantys";
 import { extractMantysKeyFields } from "../lib/mantys-utils";
 
+/**
+ * Retry utility with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelay: number = 1000
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxRetries - 1) {
+        const delay = initialDelay * Math.pow(2, attempt);
+        console.warn(`Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms:`, error);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
 interface UseMantysActionsProps {
   clinicId?: string;
   patientMPI?: string;
@@ -119,8 +143,37 @@ export const useMantysActions = ({
       const config = configs.find(
         (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
       );
+
       if (config) {
+        // If config doesn't have hospital_insurance_mapping_id, try to fetch from mapping API with retry
+        if (!config.hospital_insurance_mapping_id && response.tpa) {
+          try {
+            const mapping = await retryWithBackoff(
+              () => clinicConfigApi.getTPAMapping(clinicId, response.tpa!),
+              3,
+              1000
+            );
+            if (mapping) {
+              // Merge mapping data into config
+              config.hospital_insurance_mapping_id = mapping.hospital_insurance_mapping_id;
+              config.insurance_id = mapping.insurance_id;
+              config.insurance_type = mapping.insurance_type;
+              config.insurance_name = mapping.insurance_name;
+              config.ins_payer = mapping.ins_payer;
+            }
+          } catch (mappingError) {
+            console.error("Failed to fetch TPA mapping after retries:", {
+              tpa: response.tpa,
+              clinicId,
+              error: mappingError instanceof Error ? mappingError.message : String(mappingError)
+            });
+            // Don't throw - allow config to be used without mapping ID for now
+            // The error will be caught later when trying to upload
+          }
+        }
+
         setTpaConfig(config);
+        setTpaConfigLoaded(true);
       }
     } catch (error) {
       console.error("Error fetching TPA config:", error);
@@ -193,21 +246,78 @@ export const useMantysActions = ({
     let savedStatusText: string | null = null;
 
     try {
-      const configMappingId = tpaConfig?.hospital_insurance_mapping_id;
+      // Get TPA config - use state if available, otherwise fetch directly
+      let currentTpaConfig = tpaConfig;
+      if (!currentTpaConfig?.hospital_insurance_mapping_id && response.tpa && clinicId) {
+        try {
+          const configs = await clinicConfigApi.getTPA(clinicId);
+          const foundConfig = configs.find(
+            (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
+          );
+          if (foundConfig) {
+            currentTpaConfig = foundConfig;
+            // If still missing mapping ID, try mapping API with retry
+            if (!currentTpaConfig.hospital_insurance_mapping_id) {
+              try {
+                const mapping = await retryWithBackoff(
+                  () => clinicConfigApi.getTPAMapping(clinicId, response.tpa!),
+                  3,
+                  1000
+                );
+                if (mapping) {
+                  currentTpaConfig.hospital_insurance_mapping_id = mapping.hospital_insurance_mapping_id;
+                }
+              } catch (mappingError) {
+                console.error("Failed to fetch TPA mapping after retries:", {
+                  tpa: response.tpa,
+                  clinicId,
+                  error: mappingError instanceof Error ? mappingError.message : String(mappingError)
+                });
+              }
+            }
+          }
+        } catch (fetchError) {
+          console.error("Failed to fetch TPA config directly:", fetchError);
+        }
+      }
+
+      const configMappingId = currentTpaConfig?.hospital_insurance_mapping_id;
       const fallbackMappingId = data.patient_info?.insurance_mapping_id
         ? parseInt(data.patient_info.insurance_mapping_id, 10)
         : null;
       const insuranceMappingId = configMappingId ?? fallbackMappingId;
 
       if (!insuranceMappingId) {
-        const message = `Missing insurance mapping ID for ${response.tpa || "unknown TPA"}.`;
-        console.error(message, {
+        const diagnosticInfo = {
           responseTpa: response.tpa,
           clinicId,
           configMappingId,
           fallbackMappingId: data.patient_info?.insurance_mapping_id || null,
-        });
-        throw new Error(message);
+          tpaConfigExists: !!currentTpaConfig,
+          tpaConfigHasMappingId: !!currentTpaConfig?.hospital_insurance_mapping_id,
+          tpaConfigHasInsuranceId: currentTpaConfig?.insurance_id !== undefined,
+          tpaConfigHasInsuranceName: !!currentTpaConfig?.insurance_name,
+        };
+
+        console.error("Missing insurance mapping ID:", diagnosticInfo);
+
+        // Create detailed error message with actionable steps
+        const errorMessage = `Missing insurance mapping ID for ${response.tpa || "unknown TPA"}.\n\n` +
+          `Diagnostic Information:\n` +
+          `- TPA Code: ${response.tpa}\n` +
+          `- Clinic ID: ${clinicId}\n` +
+          `- Config exists: ${diagnosticInfo.tpaConfigExists ? 'Yes' : 'No'}\n` +
+          `- Has mapping ID: ${diagnosticInfo.tpaConfigHasMappingId ? 'Yes' : 'No'}\n` +
+          `- Has insurance ID: ${diagnosticInfo.tpaConfigHasInsuranceId ? 'Yes' : 'No'}\n` +
+          `- Has insurance name: ${diagnosticInfo.tpaConfigHasInsuranceName ? 'Yes' : 'No'}\n\n` +
+          `To fix this issue:\n` +
+          `1. Go to Clinic Configuration page\n` +
+          `2. Navigate to TPA Config tab\n` +
+          `3. Find or add TPA config for ${response.tpa}\n` +
+          `4. Ensure it has hospital_insurance_mapping_id, insurance_id, insurance_type, and insurance_name\n` +
+          `5. Use the "Bulk Import Mappings" feature if you have mapping data from API`;
+
+        throw new Error(errorMessage);
       } else {
         console.log("Saving eligibility order:", {
           responseTpa: response.tpa,
@@ -281,7 +391,16 @@ export const useMantysActions = ({
       }
     } catch (error) {
       console.error("Upload error:", error);
-      const message = error instanceof Error ? error.message : "Failed to upload documents";
+      let message = "Failed to upload documents";
+
+      if (error instanceof Error) {
+        message = error.message;
+        // If it's a mapping ID error, provide more context
+        if (message.includes("Missing insurance mapping ID")) {
+          message = error.message; // Already has detailed info
+        }
+      }
+
       alert(message);
     } finally {
       setUploadingFiles(false);

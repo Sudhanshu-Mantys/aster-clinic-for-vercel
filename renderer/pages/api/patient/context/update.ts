@@ -22,44 +22,112 @@ export default async function handler(
       });
     }
 
+    // Extract insurance details if present
+    const { insuranceDetails, ...contextUpdates } = updates;
+    
+    // Determine patient ID for insurance details storage
+    let resolvedPatientId: number | null = null;
+
     // Try to update by appointment ID first (most reliable for adding insurance details)
     if (appointmentId) {
-      await patientContextRedisService.updatePatientContextByAppointmentId(
-        appointmentId,
-        updates
+      const context = await patientContextRedisService.getPatientContextByAppointmentId(
+        appointmentId
       );
-      return res.status(200).json({
-        success: true,
-        message: 'Patient context updated successfully',
-        updatedBy: 'appointmentId',
-        appointmentId,
-      });
+      if (context) {
+        resolvedPatientId = context.patientId;
+        
+        // Store insurance details separately if provided
+        if (insuranceDetails) {
+          await patientContextRedisService.storeInsuranceDetails(
+            context.patientId,
+            insuranceDetails
+          );
+        }
+        
+        // Update context with remaining updates (excluding insuranceDetails)
+        if (Object.keys(contextUpdates).length > 0) {
+          await patientContextRedisService.updatePatientContextByAppointmentId(
+            appointmentId,
+            contextUpdates
+          );
+        }
+        
+        return res.status(200).json({
+          success: true,
+          message: 'Patient context updated successfully',
+          updatedBy: 'appointmentId',
+          appointmentId,
+          insuranceDetailsStored: !!insuranceDetails,
+        });
+      }
     }
 
     // Fall back to MPI
     if (mpi) {
-      await patientContextRedisService.updatePatientContext(mpi, updates);
-      return res.status(200).json({
-        success: true,
-        message: 'Patient context updated successfully',
-        updatedBy: 'mpi',
-        mpi,
-      });
+      const context = await patientContextRedisService.getPatientContextByMPI(mpi);
+      if (context) {
+        resolvedPatientId = context.patientId;
+        
+        // Store insurance details separately if provided
+        if (insuranceDetails) {
+          await patientContextRedisService.storeInsuranceDetails(
+            context.patientId,
+            insuranceDetails
+          );
+        }
+        
+        // Update context with remaining updates (excluding insuranceDetails)
+        if (Object.keys(contextUpdates).length > 0) {
+          await patientContextRedisService.updatePatientContext(mpi, contextUpdates);
+        }
+        
+        return res.status(200).json({
+          success: true,
+          message: 'Patient context updated successfully',
+          updatedBy: 'mpi',
+          mpi,
+          insuranceDetailsStored: !!insuranceDetails,
+        });
+      }
     }
 
     // Fall back to patient ID
     if (patientId) {
+      resolvedPatientId = Number(patientId);
+      
+      // Store insurance details separately if provided
+      if (insuranceDetails) {
+        await patientContextRedisService.storeInsuranceDetails(
+          resolvedPatientId,
+          insuranceDetails
+        );
+      }
+      
       // Get context by patient ID first, then update by MPI
       const context = await patientContextRedisService.getPatientContextByPatientId(
-        Number(patientId)
+        resolvedPatientId
       );
       if (context && context.mpi) {
-        await patientContextRedisService.updatePatientContext(context.mpi, updates);
+        // Update context with remaining updates (excluding insuranceDetails)
+        if (Object.keys(contextUpdates).length > 0) {
+          await patientContextRedisService.updatePatientContext(context.mpi, contextUpdates);
+        }
+        
         return res.status(200).json({
           success: true,
           message: 'Patient context updated successfully',
           updatedBy: 'patientId',
           patientId,
+          insuranceDetailsStored: !!insuranceDetails,
+        });
+      } else if (insuranceDetails) {
+        // If only insurance details were provided and context doesn't exist, that's okay
+        return res.status(200).json({
+          success: true,
+          message: 'Insurance details stored successfully',
+          updatedBy: 'patientId',
+          patientId,
+          insuranceDetailsStored: true,
         });
       }
     }

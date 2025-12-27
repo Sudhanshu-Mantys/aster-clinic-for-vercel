@@ -43,6 +43,7 @@ export interface EligibilityCheckMetadata {
   tpaCode: string;
   idType: string;
   visitType: string;
+  appointmentId?: number;
   status: "pending" | "processing" | "complete" | "error";
   createdAt: string;
   completedAt?: string;
@@ -53,6 +54,7 @@ export interface EligibilityCheckMetadata {
  * - eligibility:mpi:{mpi} → Set of taskIds for this MPI
  * - eligibility:task:{taskId} → Metadata for this eligibility check
  * - eligibility:patient:{patientId} → Set of taskIds for this patient
+ * - eligibility:appointment:{appointmentId} → Set of taskIds for this appointment
  * - eligibility:emirates:{emiratesId} → Set of taskIds for this Emirates ID
  * - eligibility:member:{memberId} → Set of taskIds for this member ID (card number)
  */
@@ -87,6 +89,13 @@ export class EligibilityRedisService {
       const patientKey = `eligibility:patient:${metadata.patientId}`;
       pipeline.sadd(patientKey, metadata.taskId);
       pipeline.expire(patientKey, this.TTL);
+    }
+
+    // Add to appointment ID set
+    if (metadata.appointmentId) {
+      const appointmentKey = `eligibility:appointment:${metadata.appointmentId}`;
+      pipeline.sadd(appointmentKey, metadata.taskId);
+      pipeline.expire(appointmentKey, this.TTL);
     }
 
     // Add to Emirates ID set
@@ -173,6 +182,43 @@ export class EligibilityRedisService {
   ): Promise<EligibilityCheckMetadata[]> {
     const patientKey = `eligibility:patient:${patientId}`;
     const taskIds = await this.redis.smembers(patientKey);
+
+    if (taskIds.length === 0) {
+      return [];
+    }
+
+    const pipeline = this.redis.pipeline();
+    taskIds.forEach((taskId) => {
+      pipeline.get(`eligibility:task:${taskId}`);
+    });
+
+    const results = await pipeline.exec();
+    const eligibilityChecks: EligibilityCheckMetadata[] = [];
+
+    results?.forEach((result) => {
+      if (result && result[1]) {
+        try {
+          eligibilityChecks.push(JSON.parse(result[1] as string));
+        } catch (err) {
+          console.error("Error parsing eligibility check metadata:", err);
+        }
+      }
+    });
+
+    return eligibilityChecks.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }
+
+  /**
+   * Get all eligibility checks for a given appointment ID
+   */
+  async getEligibilityChecksByAppointmentId(
+    appointmentId: number,
+  ): Promise<EligibilityCheckMetadata[]> {
+    const appointmentKey = `eligibility:appointment:${appointmentId}`;
+    const taskIds = await this.redis.smembers(appointmentKey);
 
     if (taskIds.length === 0) {
       return [];
@@ -331,6 +377,9 @@ export class EligibilityRedisService {
       }
       if (metadata.patientId) {
         pipeline.srem(`eligibility:patient:${metadata.patientId}`, taskId);
+      }
+      if (metadata.appointmentId) {
+        pipeline.srem(`eligibility:appointment:${metadata.appointmentId}`, taskId);
       }
       if (metadata.emiratesId) {
         pipeline.srem(`eligibility:emirates:${metadata.emiratesId}`, taskId);
