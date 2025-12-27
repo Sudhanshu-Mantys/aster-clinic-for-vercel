@@ -5,7 +5,6 @@ This script runs once per cron execution, fetches appointments,
 and creates Mantys eligibility checks for new appointments.
 """
 import sys
-import time
 import logging
 from typing import Dict, Any, List
 from config import config
@@ -23,9 +22,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-# Interval between runs in seconds
-INTERVAL = 30
 
 
 class EligibilityCheckerService:
@@ -242,29 +238,11 @@ class EligibilityCheckerService:
         logger.info("=" * 60)
 
 
-def run_once() -> int:
-    """Run a single iteration of the eligibility checker."""
+def main() -> int:
+    """Main entry point."""
     service = EligibilityCheckerService()
-    return service.run()
-
-
-def main() -> None:
-    """Main entry point with internal loop."""
-    logger.info(f"Starting eligibility checker service (interval: {INTERVAL}s)")
-    
-    while True:
-        try:
-            exit_code = run_once()
-            if exit_code != 0:
-                logger.warning(f"Run completed with exit code {exit_code}")
-        except KeyboardInterrupt:
-            logger.info("Received interrupt signal, shutting down...")
-            break
-        except Exception as e:
-            logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
-        
-        logger.debug(f"Sleeping for {INTERVAL} seconds...")
-        time.sleep(INTERVAL)
+    exit_code = service.run()
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

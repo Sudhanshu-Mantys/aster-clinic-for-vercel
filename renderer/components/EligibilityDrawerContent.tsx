@@ -115,20 +115,6 @@ export const EligibilityDrawerContent: React.FC<
 
     const hasTodaySearches = todaySearches.length > 0;
 
-    // Log when component renders with searches
-    useEffect(() => {
-      console.log('[EligibilityDrawerContent] Component rendered with searches:', {
-        todaySearchesCount: todaySearches.length,
-        olderSearchesCount: olderSearches.length,
-        hasOnPreviousSearchClick: typeof onPreviousSearchClick === 'function',
-        todaySearches: todaySearches.map(s => ({
-          taskId: s.taskId,
-          id: s.id,
-          status: s.status,
-        })),
-      });
-    }, [todaySearches.length, olderSearches.length, onPreviousSearchClick]);
-
     return (
       <div className="flex flex-col h-full min-h-0 overflow-y-auto">
         {hasTodaySearches && (
