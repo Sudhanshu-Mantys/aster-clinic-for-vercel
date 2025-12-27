@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import {
   eligibilityHistoryApi,
   mantysApi,
@@ -197,14 +197,18 @@ export function useEligibilityPolling(
   const lastUpdateRef = useRef<{ status?: string; interimKey?: string; resultKey?: string; error?: string } | null>(null);
   const hasCompletedRef = useRef(false);
   const hasErroredRef = useRef(false);
+  const [isQueryEnabled, setIsQueryEnabled] = useState(true);
 
   const { data } = useQuery({
     queryKey: eligibilityKeys.taskStatus(taskId),
     queryFn: () => mantysApi.checkStatus(taskId),
-    enabled: options?.enabled !== false && !!taskId,
+    enabled: (options?.enabled !== false && !!taskId && isQueryEnabled),
     refetchInterval: (query) => {
       const data = query.state.data;
+      // Stop polling if task is complete or error
       if (data?.status === 'complete' || data?.status === 'error') {
+        // Disable the query entirely to prevent any further requests
+        setIsQueryEnabled(false);
         return false;
       }
       return 10000;
@@ -241,6 +245,8 @@ export function useEligibilityPolling(
 
     if (data.status === 'complete' && !hasCompletedRef.current) {
       const resultKey = JSON.stringify(data.result ?? null);
+      // Disable query immediately to stop polling
+      setIsQueryEnabled(false);
       updateHistory.mutate({
         taskId,
         updates: {
@@ -251,6 +257,8 @@ export function useEligibilityPolling(
       });
       lastUpdateRef.current = { status: 'complete', resultKey };
       hasCompletedRef.current = true;
+      // Invalidate active checks query so it removes this task from the active list
+      queryClient.invalidateQueries({ queryKey: eligibilityKeys.active(clinicId) });
       queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
       if (patientId) {
         queryClient.invalidateQueries({ queryKey: eligibilityKeys.byPatient(patientId) });
@@ -262,6 +270,8 @@ export function useEligibilityPolling(
     }
 
     if (data.status === 'error' && !hasErroredRef.current) {
+      // Disable query immediately to stop polling
+      setIsQueryEnabled(false);
       updateHistory.mutate({
         taskId,
         updates: {
@@ -272,6 +282,8 @@ export function useEligibilityPolling(
       });
       lastUpdateRef.current = { status: 'error', error: data.error };
       hasErroredRef.current = true;
+      // Invalidate active checks query so it removes this task from the active list
+      queryClient.invalidateQueries({ queryKey: eligibilityKeys.active(clinicId) });
       queryClient.invalidateQueries({ queryKey: eligibilityKeys.history(clinicId) });
       if (patientId) {
         queryClient.invalidateQueries({ queryKey: eligibilityKeys.byPatient(patientId) });

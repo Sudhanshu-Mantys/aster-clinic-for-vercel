@@ -221,6 +221,7 @@ export const patientApi = {
         isDiscard: params.isDiscard ?? 0,
         hasTopUpCard: params.hasTopUpCard ?? 0,
       },
+      timeout: 60000, // 60 seconds - insurance API can be slow
     }),
 
   getContext: (params: { patientId?: string; mpi?: string; appointmentId?: string }) =>
@@ -723,6 +724,7 @@ export const asterApi = {
     fetchJson<unknown>('/api/aster/save-eligibility-order', {
       method: 'POST',
       body: payload,
+      timeout: 60000, // 60 seconds - Aster API can be slow
     }),
 
   uploadAttachment: (payload: {
@@ -737,6 +739,7 @@ export const asterApi = {
     expiryDate?: string;
     reportDate?: string;
     createdBy?: number;
+    reqId?: string | number;
   }) =>
     fetchJson<unknown>('/api/aster/upload-attachment', {
       method: 'POST',

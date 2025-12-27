@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getLifeTrenzAuthorizationHeader } from "../../../lib/liftrenz-auth-token";
+import { patientContextRedisService } from "../../../lib/redis-patient-context";
 import FormData from "form-data";
 import https from "https";
 
@@ -48,6 +49,7 @@ interface UploadRequest {
   expiryDate?: string; // Optional, defaults to 2 months from uploadDate
   reportDate?: string; // Optional, defaults to today
   createdBy?: number; // Optional, defaults to 13295
+  reqId?: string | number; // Optional, reqid from save-eligibility-order response
 }
 
 /**
@@ -236,9 +238,35 @@ export default async function handler(
       fileName: uploadRequest.fileName,
     });
 
+    // Fetch encounter ID from Redis appointment store (same logic as save-eligibility-order)
+    let encounterId = uploadRequest.encounterId;
+    if (uploadRequest.appointmentId) {
+      try {
+        const appointmentContext = await patientContextRedisService.getPatientContextByAppointmentId(
+          uploadRequest.appointmentId
+        );
+
+        // Fetch encounter_id (check both snake_case and camelCase) - same as save-eligibility-order
+        if (true) {
+          const redisEncounterId = appointmentContext?.encounter_id || appointmentContext?.encounterId || undefined;
+          if (redisEncounterId) {
+            encounterId = redisEncounterId;
+            console.log(`✅ Fetched encounter_id ${encounterId} from Redis appointment key for appointment ${uploadRequest.appointmentId}`);
+          } else {
+            console.warn(`⚠️ No encounter_id found in Redis appointment key for appointment ${uploadRequest.appointmentId}`);
+            // Keep the original value if Redis doesn't have it
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error fetching appointment context from Redis:', error);
+        // Continue with existing value if Redis fetch fails
+      }
+    }
+
     // Get the JWT token
     console.log("🔑 Fetching JWT token...");
-    const authHeader = await getLifeTrenzAuthorizationHeader();
+    // const authHeader = await getLifeTrenzAuthorizationHeader();
+    const authHeader = "Bearer ";
 
     // Get file buffer
     let fileBuffer: Buffer;
@@ -267,7 +295,7 @@ export default async function handler(
       recType: null,
       isActive: 1,
       patientId: uploadRequest.patientId,
-      encounterId: uploadRequest.encounterId ?? null, // Can be null for document uploads
+      encounterId: encounterId ?? null, // Use encounterId from request or Redis (same as save-eligibility-order)
       fbType: 3, // File type - 3 seems to be for eligibility/insurance docs
       siteId: 31, // Default site ID from your curl example
       uploadDate,
@@ -279,7 +307,7 @@ export default async function handler(
       createdBy: uploadRequest.createdBy || 13295, // Default user ID
       customerId: 1, // Default customer ID
       type: 1, // Document type
-      reqId: String(uploadRequest.appointmentId), // Use appointment ID as request ID
+      reqId: uploadRequest.reqId ? String(uploadRequest.reqId) : String(uploadRequest.patientId), // Use reqid from order creation if provided, otherwise patient ID
       appointmentId: uploadRequest.appointmentId,
       fileId: 0, // 0 for new uploads
     };

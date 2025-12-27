@@ -69,6 +69,7 @@ async function getRedisClient(): Promise<Redis> {
         },
         maxRetriesPerRequest: 3,
         connectTimeout: 5000, // 5 second connection timeout
+        commandTimeout: 5000, // 5 second timeout for individual commands
         lazyConnect: false, // Connect immediately
       });
 
@@ -176,7 +177,7 @@ export interface PatientContext {
  * - patient:id:{patientId} → Full patient context (JSON)
  * - patient:id:{patientId}:insurance-details → Insurance details (JSON)
  * - patient:mpi:{mpi} → Mapping to patient ID: {patientId: <ID>}
- * - patient:appointment:{appointmentId} → Mapping to patient ID: {patientId: <ID>}
+ * - patient:appointment1:{appointmentId} → Full patient context with appointment details (JSON)
  */
 
 export class PatientContextRedisService {
@@ -191,7 +192,7 @@ export class PatientContextRedisService {
 
   /**
    * Store patient context
-   * Stores full context once by patient ID, and lightweight mappings for MPI and appointment ID
+   * Stores full context by patient ID and appointment ID (if present), and lightweight mapping for MPI
    */
   async storePatientContext(context: PatientContext): Promise<void> {
     const redis = await this.getRedis();
@@ -208,12 +209,11 @@ export class PatientContextRedisService {
     pipeline.setex(mpiKey, this.TTL, mpiMapping);
     console.log(`✅ Storing MPI mapping in: ${mpiKey} → {patientId: ${context.patientId}}`);
 
-    // If appointment ID exists, store lightweight mapping: appointment ID → patient ID
+    // If appointment ID exists, store full context by appointment ID
     if (context.appointmentId) {
-      const appointmentKey = `patient:appointment:${context.appointmentId}`;
-      const appointmentMapping = JSON.stringify({ patientId: context.patientId });
-      pipeline.setex(appointmentKey, this.TTL, appointmentMapping);
-      console.log(`✅ Storing appointment mapping in: ${appointmentKey} → {patientId: ${context.patientId}}`);
+      const appointmentKey = `patient:appointment1:${context.appointmentId}`;
+      pipeline.setex(appointmentKey, this.TTL, JSON.stringify(context));
+      console.log(`✅ Storing full appointment context in: ${appointmentKey}`);
     }
 
     const results = await pipeline.exec();
@@ -229,7 +229,7 @@ export class PatientContextRedisService {
 
   /**
    * Store multiple patient contexts in bulk using a single pipeline
-   * Uses optimized storage: full context once, lightweight mappings for lookups
+   * Stores full context by patient ID and appointment ID (if present), and lightweight mapping for MPI
    */
   async storeBulkPatientContexts(contexts: PatientContext[]): Promise<void> {
     if (contexts.length === 0) {
@@ -277,13 +277,12 @@ export class PatientContextRedisService {
           pipeline.setex(mpiKey, this.TTL, mpiMapping);
           keysToStore++;
 
-          // If appointment ID exists, store lightweight mapping: appointment ID → patient ID
+          // If appointment ID exists, store full context by appointment ID
           if (context.appointmentId) {
-            const appointmentKey = `patient:appointment:${context.appointmentId}`;
-            const appointmentMapping = JSON.stringify({ patientId: context.patientId });
-            pipeline.setex(appointmentKey, this.TTL, appointmentMapping);
+            const appointmentKey = `patient:appointment1:${context.appointmentId}`;
+            pipeline.setex(appointmentKey, this.TTL, JSON.stringify(context));
             keysToStore++;
-            console.log(`  📝 Queued keys: patient:id:${context.patientId}, patient:mpi:${context.mpi}, patient:appointment:${context.appointmentId}`);
+            console.log(`  📝 Queued keys: patient:id:${context.patientId}, patient:mpi:${context.mpi}, patient:appointment1:${context.appointmentId}`);
           } else {
             console.warn(`  ⚠️ Context missing appointmentId for MPI: ${context.mpi}, PatientId: ${context.patientId}`);
             console.log(`  📝 Queued keys: patient:id:${context.patientId}, patient:mpi:${context.mpi}`);
@@ -325,7 +324,7 @@ export class PatientContextRedisService {
           console.log(`   - ${contexts.length} MPI mappings in patient:mpi:* keys`);
           const appointmentCount = contexts.filter(c => c.appointmentId).length;
           if (appointmentCount > 0) {
-            console.log(`   - ${appointmentCount} appointment mappings in patient:appointment:* keys`);
+            console.log(`   - ${appointmentCount} full appointment contexts in patient:appointment1:* keys`);
           }
 
           // Log sample keys that were created
@@ -335,7 +334,7 @@ export class PatientContextRedisService {
             console.log(`   - patient:id:${sample.patientId}`);
             console.log(`   - patient:mpi:${sample.mpi}`);
             if (sample.appointmentId) {
-              console.log(`   - patient:appointment:${sample.appointmentId}`);
+              console.log(`   - patient:appointment1:${sample.appointmentId}`);
             }
           }
         } else {
@@ -405,33 +404,25 @@ export class PatientContextRedisService {
 
   /**
    * Get patient context by appointment ID
-   * Two-step lookup: appointment ID mapping → patient ID → full context
+   * Direct lookup: appointment ID → full context
    */
   async getPatientContextByAppointmentId(
     appointmentId: number
   ): Promise<PatientContext | null> {
     const redis = await this.getRedis();
 
-    // Step 1: Get patient ID from appointment ID mapping
-    const appointmentKey = `patient:appointment:${appointmentId}`;
-    const mappingData = await redis.get(appointmentKey);
+    // Get full context directly from appointment key
+    const appointmentKey = `patient:appointment1:${appointmentId}`;
+    const data = await redis.get(appointmentKey);
 
-    if (!mappingData) {
+    if (!data) {
       return null;
     }
 
     try {
-      const mapping = JSON.parse(mappingData);
-      const patientId = mapping.patientId;
-
-      if (!patientId) {
-        return null;
-      }
-
-      // Step 2: Get full context by patient ID
-      return await this.getPatientContextByPatientId(patientId);
+      return JSON.parse(data);
     } catch (error) {
-      console.error("Error parsing appointment mapping:", error);
+      console.error("Error parsing appointment context:", error);
       return null;
     }
   }
@@ -550,7 +541,7 @@ export class PatientContextRedisService {
 
       // Delete appointment ID mapping if exists
       if (context.appointmentId) {
-        pipeline.del(`patient:appointment:${context.appointmentId}`);
+        pipeline.del(`patient:appointment1:${context.appointmentId}`);
       }
 
       await pipeline.exec();
