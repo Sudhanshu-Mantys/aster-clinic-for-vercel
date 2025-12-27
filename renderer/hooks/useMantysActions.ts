@@ -1,6 +1,14 @@
 import { useState, useCallback } from "react";
-import { ApiError, asterApi, clinicConfigApi, patientApi } from "../lib/api-client";
-import type { MantysEligibilityResponse, MantysKeyFields } from "../types/mantys";
+import {
+  ApiError,
+  asterApi,
+  clinicConfigApi,
+  patientApi,
+} from "../lib/api-client";
+import type {
+  MantysEligibilityResponse,
+  MantysKeyFields,
+} from "../types/mantys";
 import { extractMantysKeyFields } from "../lib/mantys-utils";
 
 /**
@@ -9,7 +17,7 @@ import { extractMantysKeyFields } from "../lib/mantys-utils";
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
-  initialDelay: number = 1000
+  initialDelay: number = 1000,
 ): Promise<T> {
   let lastError: any;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -19,8 +27,11 @@ async function retryWithBackoff<T>(
       lastError = error;
       if (attempt < maxRetries - 1) {
         const delay = initialDelay * Math.pow(2, attempt);
-        console.warn(`Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms:`, error);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        console.warn(
+          `Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms:`,
+          error,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
@@ -49,16 +60,72 @@ export const useMantysActions = ({
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [policySaved, setPolicySaved] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
+  const [uploadProgress, setUploadProgress] = useState<{
+    [key: string]: number;
+  }>({});
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+
+  // Status Dialog state
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogStatus, setDialogStatus] = useState<
+    "success" | "error" | "partial"
+  >("success");
+  const [dialogTitle, setDialogTitle] = useState<string | undefined>(undefined);
+  const [dialogMessage, setDialogMessage] = useState<string | undefined>(
+    undefined,
+  );
+  const [dialogReqId, setDialogReqId] = useState<string | null>(null);
+  const [dialogDocumentCount, setDialogDocumentCount] = useState<
+    number | undefined
+  >(undefined);
+  const [dialogFailedCount, setDialogFailedCount] = useState<
+    number | undefined
+  >(undefined);
+  const [dialogErrorDetails, setDialogErrorDetails] = useState<
+    string | undefined
+  >(undefined);
+
+  const showDialog = useCallback(
+    (params: {
+      status: "success" | "error" | "partial";
+      title?: string;
+      message?: string;
+      reqId?: string | null;
+      documentCount?: number;
+      failedCount?: number;
+      errorDetails?: string;
+    }) => {
+      setDialogStatus(params.status);
+      setDialogTitle(params.title);
+      setDialogMessage(params.message);
+      setDialogReqId(params.reqId || null);
+      setDialogDocumentCount(params.documentCount);
+      setDialogFailedCount(params.failedCount);
+      setDialogErrorDetails(params.errorDetails);
+      setDialogOpen(true);
+    },
+    [],
+  );
+
+  const closeDialog = useCallback(() => {
+    setDialogOpen(false);
+  }, []);
 
   const keyFields: MantysKeyFields = extractMantysKeyFields(response);
   const data = (response as any).data || response;
 
-  const [enrichedPatientId, setEnrichedPatientId] = useState<number | undefined>(propPatientId);
-  const [enrichedAppointmentId, setEnrichedAppointmentId] = useState<number | undefined>(propAppointmentId);
-  const [enrichedEncounterId, setEnrichedEncounterId] = useState<number | undefined>(propEncounterId);
-  const [enrichedPhysicianId, setEnrichedPhysicianId] = useState<number | undefined>(propPhysicianId);
+  const [enrichedPatientId, setEnrichedPatientId] = useState<
+    number | undefined
+  >(propPatientId);
+  const [enrichedAppointmentId, setEnrichedAppointmentId] = useState<
+    number | undefined
+  >(propAppointmentId);
+  const [enrichedEncounterId, setEnrichedEncounterId] = useState<
+    number | undefined
+  >(propEncounterId);
+  const [enrichedPhysicianId, setEnrichedPhysicianId] = useState<
+    number | undefined
+  >(propPhysicianId);
   const [insTpaPatId, setInsTpaPatId] = useState<number | undefined>(undefined);
   const [tpaConfig, setTpaConfig] = useState<any>(null);
   const [tpaConfigLoaded, setTpaConfigLoaded] = useState(false);
@@ -78,7 +145,9 @@ export const useMantysActions = ({
     if (patientMPI || finalAppointmentId || finalPatientId) {
       try {
         const context = await patientApi.getContext({
-          appointmentId: finalAppointmentId ? String(finalAppointmentId) : undefined,
+          appointmentId: finalAppointmentId
+            ? String(finalAppointmentId)
+            : undefined,
           patientId: finalPatientId ? String(finalPatientId) : undefined,
           mpi: patientMPI,
         });
@@ -96,7 +165,15 @@ export const useMantysActions = ({
         console.error("Error fetching patient context:", error);
       }
     }
-  }, [patientMPI, propPatientId, propAppointmentId, propEncounterId, enrichedPatientId, enrichedAppointmentId, enrichedEncounterId]);
+  }, [
+    patientMPI,
+    propPatientId,
+    propAppointmentId,
+    propEncounterId,
+    enrichedPatientId,
+    enrichedAppointmentId,
+    enrichedEncounterId,
+  ]);
 
   const enrichInsuranceData = useCallback(async () => {
     const finalPatientId = enrichedPatientId || propPatientId;
@@ -117,10 +194,17 @@ export const useMantysActions = ({
         hasTopUpCard: 0,
       });
 
-      if (insuranceResponse?.body?.Data && Array.isArray(insuranceResponse.body.Data)) {
-        const selectedInsurance = insuranceResponse.body.Data.find((record: any) => record.is_current === 1);
+      if (
+        insuranceResponse?.body?.Data &&
+        Array.isArray(insuranceResponse.body.Data)
+      ) {
+        const selectedInsurance = insuranceResponse.body.Data.find(
+          (record: any) => record.is_current === 1,
+        );
         if (selectedInsurance) {
-          const insTpaPatIdValue = selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id;
+          const insTpaPatIdValue =
+            selectedInsurance?.patient_insurance_tpa_policy_id_sites ||
+            selectedInsurance?.patient_insurance_tpa_policy_id;
           if (insTpaPatIdValue) {
             setInsTpaPatId(Number(insTpaPatIdValue));
           }
@@ -129,7 +213,14 @@ export const useMantysActions = ({
     } catch (error) {
       console.error("Error fetching insurance details:", error);
     }
-  }, [enrichedPatientId, enrichedAppointmentId, enrichedEncounterId, propPatientId, propAppointmentId, propEncounterId]);
+  }, [
+    enrichedPatientId,
+    enrichedAppointmentId,
+    enrichedEncounterId,
+    propPatientId,
+    propAppointmentId,
+    propEncounterId,
+  ]);
 
   const enrichTPAConfig = useCallback(async () => {
     if (!response.tpa) return;
@@ -141,7 +232,10 @@ export const useMantysActions = ({
     try {
       const configs = await clinicConfigApi.getTPA(clinicId);
       const config = configs.find(
-        (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
+        (c: any) =>
+          c.ins_code === response.tpa ||
+          c.tpa_id === response.tpa ||
+          c.payer_code === response.tpa,
       );
 
       if (config) {
@@ -151,11 +245,12 @@ export const useMantysActions = ({
             const mapping = await retryWithBackoff(
               () => clinicConfigApi.getTPAMapping(clinicId, response.tpa!),
               3,
-              1000
+              1000,
             );
             if (mapping) {
               // Merge mapping data into config
-              config.hospital_insurance_mapping_id = mapping.hospital_insurance_mapping_id;
+              config.hospital_insurance_mapping_id =
+                mapping.hospital_insurance_mapping_id;
               config.insurance_id = mapping.insurance_id;
               config.insurance_type = mapping.insurance_type;
               config.insurance_name = mapping.insurance_name;
@@ -165,7 +260,10 @@ export const useMantysActions = ({
             console.error("Failed to fetch TPA mapping after retries:", {
               tpa: response.tpa,
               clinicId,
-              error: mappingError instanceof Error ? mappingError.message : String(mappingError)
+              error:
+                mappingError instanceof Error
+                  ? mappingError.message
+                  : String(mappingError),
             });
             // Don't throw - allow config to be used without mapping ID for now
             // The error will be caught later when trying to upload
@@ -187,8 +285,15 @@ export const useMantysActions = ({
   }, [enrichPatientContext, enrichInsuranceData, enrichTPAConfig]);
 
   const handleUploadScreenshots = useCallback(async () => {
-    if (!keyFields.referralDocuments || keyFields.referralDocuments.length === 0) {
-      alert("No referral documents to upload");
+    if (
+      !keyFields.referralDocuments ||
+      keyFields.referralDocuments.length === 0
+    ) {
+      showDialog({
+        status: "error",
+        title: "No Documents",
+        message: "No referral documents to upload",
+      });
       return;
     }
 
@@ -199,7 +304,11 @@ export const useMantysActions = ({
     const finalEncounterId = enrichedEncounterId || propEncounterId;
 
     if (!finalPatientId || !finalAppointmentId) {
-      alert("Missing required patient information");
+      showDialog({
+        status: "error",
+        title: "Missing Information",
+        message: "Missing required patient information",
+      });
       return;
     }
 
@@ -218,23 +327,48 @@ export const useMantysActions = ({
           hasTopUpCard: 0,
         });
 
-        if (insuranceResponse?.body?.Data && Array.isArray(insuranceResponse.body.Data)) {
-          const selectedInsurance = insuranceResponse.body.Data.find((record: any) => record.is_current === 1);
+        if (
+          insuranceResponse?.body?.Data &&
+          Array.isArray(insuranceResponse.body.Data)
+        ) {
+          const selectedInsurance = insuranceResponse.body.Data.find(
+            (record: any) => record.is_current === 1,
+          );
           if (!selectedInsurance) {
-            alert("There is no active Insurance policy for this user");
+            showDialog({
+              status: "error",
+              title: "No Active Insurance",
+              message: "There is no active Insurance policy for this user",
+            });
             return;
           }
-          insTpaPatIdForUpload = Number(selectedInsurance?.patient_insurance_tpa_policy_id_sites || selectedInsurance?.patient_insurance_tpa_policy_id) || null;
+          insTpaPatIdForUpload =
+            Number(
+              selectedInsurance?.patient_insurance_tpa_policy_id_sites ||
+                selectedInsurance?.patient_insurance_tpa_policy_id,
+            ) || null;
           if (!insTpaPatIdForUpload) {
-            alert("There is no active Insurance policy for this user");
+            showDialog({
+              status: "error",
+              title: "No Active Insurance",
+              message: "There is no active Insurance policy for this user",
+            });
             return;
           }
         } else {
-          alert("There is no active Insurance policy for this user");
+          showDialog({
+            status: "error",
+            title: "No Active Insurance",
+            message: "There is no active Insurance policy for this user",
+          });
           return;
         }
       } catch (error) {
-        alert("There is no active Insurance policy for this user");
+        showDialog({
+          status: "error",
+          title: "No Active Insurance",
+          message: "There is no active Insurance policy for this user",
+        });
         return;
       }
     }
@@ -248,11 +382,18 @@ export const useMantysActions = ({
     try {
       // Get TPA config - use state if available, otherwise fetch directly
       let currentTpaConfig = tpaConfig;
-      if (!currentTpaConfig?.hospital_insurance_mapping_id && response.tpa && clinicId) {
+      if (
+        !currentTpaConfig?.hospital_insurance_mapping_id &&
+        response.tpa &&
+        clinicId
+      ) {
         try {
           const configs = await clinicConfigApi.getTPA(clinicId);
           const foundConfig = configs.find(
-            (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
+            (c: any) =>
+              c.ins_code === response.tpa ||
+              c.tpa_id === response.tpa ||
+              c.payer_code === response.tpa,
           );
           if (foundConfig) {
             currentTpaConfig = foundConfig;
@@ -262,16 +403,20 @@ export const useMantysActions = ({
                 const mapping = await retryWithBackoff(
                   () => clinicConfigApi.getTPAMapping(clinicId, response.tpa!),
                   3,
-                  1000
+                  1000,
                 );
                 if (mapping) {
-                  currentTpaConfig.hospital_insurance_mapping_id = mapping.hospital_insurance_mapping_id;
+                  currentTpaConfig.hospital_insurance_mapping_id =
+                    mapping.hospital_insurance_mapping_id;
                 }
               } catch (mappingError) {
                 console.error("Failed to fetch TPA mapping after retries:", {
                   tpa: response.tpa,
                   clinicId,
-                  error: mappingError instanceof Error ? mappingError.message : String(mappingError)
+                  error:
+                    mappingError instanceof Error
+                      ? mappingError.message
+                      : String(mappingError),
                 });
               }
             }
@@ -294,7 +439,8 @@ export const useMantysActions = ({
           configMappingId,
           fallbackMappingId: data.patient_info?.insurance_mapping_id || null,
           tpaConfigExists: !!currentTpaConfig,
-          tpaConfigHasMappingId: !!currentTpaConfig?.hospital_insurance_mapping_id,
+          tpaConfigHasMappingId:
+            !!currentTpaConfig?.hospital_insurance_mapping_id,
           tpaConfigHasInsuranceId: currentTpaConfig?.insurance_id !== undefined,
           tpaConfigHasInsuranceName: !!currentTpaConfig?.insurance_name,
         };
@@ -302,14 +448,15 @@ export const useMantysActions = ({
         console.error("Missing insurance mapping ID:", diagnosticInfo);
 
         // Create detailed error message with actionable steps
-        const errorMessage = `Missing insurance mapping ID for ${response.tpa || "unknown TPA"}.\n\n` +
+        const errorMessage =
+          `Missing insurance mapping ID for ${response.tpa || "unknown TPA"}.\n\n` +
           `Diagnostic Information:\n` +
           `- TPA Code: ${response.tpa}\n` +
           `- Clinic ID: ${clinicId}\n` +
-          `- Config exists: ${diagnosticInfo.tpaConfigExists ? 'Yes' : 'No'}\n` +
-          `- Has mapping ID: ${diagnosticInfo.tpaConfigHasMappingId ? 'Yes' : 'No'}\n` +
-          `- Has insurance ID: ${diagnosticInfo.tpaConfigHasInsuranceId ? 'Yes' : 'No'}\n` +
-          `- Has insurance name: ${diagnosticInfo.tpaConfigHasInsuranceName ? 'Yes' : 'No'}\n\n` +
+          `- Config exists: ${diagnosticInfo.tpaConfigExists ? "Yes" : "No"}\n` +
+          `- Has mapping ID: ${diagnosticInfo.tpaConfigHasMappingId ? "Yes" : "No"}\n` +
+          `- Has insurance ID: ${diagnosticInfo.tpaConfigHasInsuranceId ? "Yes" : "No"}\n` +
+          `- Has insurance name: ${diagnosticInfo.tpaConfigHasInsuranceName ? "Yes" : "No"}\n\n` +
           `To fix this issue:\n` +
           `1. Go to Clinic Configuration page\n` +
           `2. Navigate to TPA Config tab\n` +
@@ -329,7 +476,7 @@ export const useMantysActions = ({
           encounterId: finalEncounterId || 0,
         });
         try {
-          const orderResult = await asterApi.saveEligibilityOrder({
+          const orderResult = (await asterApi.saveEligibilityOrder({
             patientId: finalPatientId,
             appointmentId: finalAppointmentId,
             encounterId: finalEncounterId || 0,
@@ -341,16 +488,34 @@ export const useMantysActions = ({
             createdBy: 13295,
             vendorId: 24,
             siteId: 31,
-          }) as any;
+          })) as any;
 
           console.log("Order Result:", orderResult);
 
-          savedReqId = orderResult?.data?.body?.Data?.[0]?.reqid ||
-            orderResult?.body?.Data?.[0]?.reqid || null;
-          savedStatusText = orderResult?.data?.body?.Data?.[0]?.status_text ||
-            orderResult?.body?.Data?.[0]?.status_text || "Eligibility Details Captured Successfully";
+          savedReqId =
+            orderResult?.data?.body?.Data?.[0]?.reqid ||
+            orderResult?.body?.Data?.[0]?.reqid ||
+            null;
+          savedStatusText =
+            orderResult?.data?.body?.Data?.[0]?.status_text ||
+            orderResult?.body?.Data?.[0]?.status_text ||
+            "Eligibility Details Captured Successfully";
         } catch (orderError) {
           console.error("Error saving eligibility order:", orderError);
+
+          // If eligibility order creation fails, the entire operation should fail
+          let errorMessage = "Failed to create eligibility order";
+          let errorDetails: string | undefined;
+
+          if (orderError instanceof Error) {
+            errorMessage = orderError.message;
+            errorDetails = orderError.stack;
+          } else if (orderError instanceof ApiError) {
+            errorMessage = orderError.message;
+            errorDetails = orderError.toString();
+          }
+
+          throw new Error(`Eligibility order creation failed: ${errorMessage}`);
         }
       }
 
@@ -383,30 +548,60 @@ export const useMantysActions = ({
       setUploadedFiles(newUploadedFiles);
 
       if (newUploadedFiles.length === keyFields.referralDocuments.length) {
-        const successMessage = savedReqId
-          ? `SUCCESS!\n\nEligibility order saved (Req ID: ${savedReqId})\n\nAll ${newUploadedFiles.length} documents uploaded successfully!`
-          : `SUCCESS!\n\nAll ${newUploadedFiles.length} documents uploaded successfully!`;
-        alert(successMessage);
+        showDialog({
+          status: "success",
+          title: savedReqId ? "Eligibility order saved" : undefined,
+          reqId: savedReqId,
+          documentCount: newUploadedFiles.length,
+        });
       } else {
-        alert(`Uploaded ${newUploadedFiles.length} out of ${keyFields.referralDocuments.length} documents`);
+        showDialog({
+          status: "partial",
+          documentCount: newUploadedFiles.length,
+          failedCount:
+            keyFields.referralDocuments.length - newUploadedFiles.length,
+        });
       }
     } catch (error) {
       console.error("Upload error:", error);
       let message = "Failed to upload documents";
+      let errorDetails: string | undefined;
 
       if (error instanceof Error) {
         message = error.message;
         // If it's a mapping ID error, provide more context
         if (message.includes("Missing insurance mapping ID")) {
-          message = error.message; // Already has detailed info
+          errorDetails = error.message;
+          message = "Missing insurance mapping ID";
         }
       }
 
-      alert(message);
+      showDialog({
+        status: "error",
+        title: "Upload Failed",
+        message,
+        errorDetails,
+      });
     } finally {
       setUploadingFiles(false);
     }
-  }, [keyFields.referralDocuments, enrichedPatientId, enrichedAppointmentId, enrichedEncounterId, enrichedPhysicianId, insTpaPatId, tpaConfig, clinicId, data, response.tpa, propPatientId, propAppointmentId, propEncounterId, propPhysicianId, ensureDataLoaded]);
+  }, [
+    keyFields.referralDocuments,
+    enrichedPatientId,
+    enrichedAppointmentId,
+    enrichedEncounterId,
+    enrichedPhysicianId,
+    insTpaPatId,
+    tpaConfig,
+    clinicId,
+    data,
+    response.tpa,
+    propPatientId,
+    propAppointmentId,
+    propEncounterId,
+    propPhysicianId,
+    ensureDataLoaded,
+  ]);
 
   const handleSavePolicy = useCallback(async () => {
     await ensureDataLoaded();
@@ -416,30 +611,40 @@ export const useMantysActions = ({
     const finalEncounterId = enrichedEncounterId || propEncounterId;
 
     if (!finalPatientId || !finalAppointmentId) {
-      alert("Missing required patient information");
+      showDialog({
+        status: "error",
+        title: "Missing Information",
+        message: "Missing required patient information",
+      });
       return;
     }
 
     setSavingPolicy(true);
 
     try {
-      const siteId = tpaConfig?.lt_site_id ? parseInt(tpaConfig.lt_site_id, 10) : 31;
-      const customerId = tpaConfig?.lt_customer_id ? parseInt(tpaConfig.lt_customer_id, 10) : 1;
+      const siteId = tpaConfig?.lt_site_id
+        ? parseInt(tpaConfig.lt_site_id, 10)
+        : 31;
+      const customerId = tpaConfig?.lt_customer_id
+        ? parseInt(tpaConfig.lt_customer_id, 10)
+        : 1;
       const createdBy = 13295;
 
       const insuranceMappingId = tpaConfig?.hospital_insurance_mapping_id
         ? tpaConfig.hospital_insurance_mapping_id
-        : (data.patient_info?.insurance_mapping_id ? parseInt(data.patient_info.insurance_mapping_id, 10) : null);
+        : data.patient_info?.insurance_mapping_id
+          ? parseInt(data.patient_info.insurance_mapping_id, 10)
+          : null;
 
       const payerIdToUse = data.patient_info?.payerId
-        ? (typeof data.patient_info.payerId === "string"
+        ? typeof data.patient_info.payerId === "string"
           ? parseInt(data.patient_info.payerId, 10)
-          : data.patient_info.payerId)
-        : (data.patient_info?.payer_id
-          ? (typeof data.patient_info.payer_id === "string"
+          : data.patient_info.payerId
+        : data.patient_info?.payer_id
+          ? typeof data.patient_info.payer_id === "string"
             ? parseInt(data.patient_info.payer_id, 10)
-            : data.patient_info.payer_id)
-          : null);
+            : data.patient_info.payer_id
+          : null;
 
       const policyData = {
         policyId: data.patient_info?.policy_id || null,
@@ -494,16 +699,36 @@ export const useMantysActions = ({
       });
 
       setPolicySaved(true);
-      alert("Policy details saved successfully!");
+      showDialog({
+        status: "success",
+        title: "Policy Saved",
+        message: "Policy details saved successfully!",
+      });
       console.log("Policy saved:", result);
     } catch (error) {
-      const message = error instanceof ApiError ? error.message : "An error occurred";
+      const message =
+        error instanceof ApiError ? error.message : "An error occurred";
       console.error("Error saving policy:", error);
-      alert(`Failed to save policy details: ${message}`);
+      showDialog({
+        status: "error",
+        title: "Failed to Save Policy",
+        message: "Failed to save policy details",
+        errorDetails: message,
+      });
     } finally {
       setSavingPolicy(false);
     }
-  }, [enrichedPatientId, enrichedAppointmentId, enrichedEncounterId, tpaConfig, data, propPatientId, propAppointmentId, propEncounterId, ensureDataLoaded]);
+  }, [
+    enrichedPatientId,
+    enrichedAppointmentId,
+    enrichedEncounterId,
+    tpaConfig,
+    data,
+    propPatientId,
+    propAppointmentId,
+    propEncounterId,
+    ensureDataLoaded,
+  ]);
 
   return {
     uploadingFiles,
@@ -513,5 +738,15 @@ export const useMantysActions = ({
     uploadedFiles,
     handleUploadScreenshots,
     handleSavePolicy,
+    // Dialog state
+    dialogOpen,
+    dialogStatus,
+    dialogTitle,
+    dialogMessage,
+    dialogReqId,
+    dialogDocumentCount,
+    dialogFailedCount,
+    dialogErrorDetails,
+    closeDialog,
   };
 };

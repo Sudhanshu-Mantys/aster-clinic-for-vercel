@@ -3,7 +3,10 @@ import { Drawer } from "./ui/drawer";
 import { Badge } from "./ui/badge";
 import { EligibilityDrawerContent } from "./EligibilityDrawerContent";
 import { MantysEligibilityForm } from "./MantysEligibilityForm";
-import { AppointmentsFilterForm, AppointmentFilters } from "./AppointmentsFilterForm";
+import {
+  AppointmentsFilterForm,
+  AppointmentFilters,
+} from "./AppointmentsFilterForm";
 import { AppointmentsTable } from "./AppointmentsTable";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import { ExtractionProgressModal } from "./ExtractionProgressModal";
@@ -17,6 +20,7 @@ import { useInsuranceDetails, usePatientContext } from "../hooks/usePatient";
 import {
   useEligibilityByPatient,
   useEligibilityByMPI,
+  useEligibilityByAppointment,
   useEligibilityHistoryByTaskId,
   useEligibilityTaskStatus,
   type EligibilityHistoryItem,
@@ -35,13 +39,16 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const { user } = useAuth();
   const selectedClinicId = user?.selected_team_id || "";
 
-  const [currentFilters, setCurrentFilters] = useState<AppointmentFilters | null>(null);
-  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentData | null>(null);
+  const [currentFilters, setCurrentFilters] =
+    useState<AppointmentFilters | null>(null);
+  const [selectedAppointment, setSelectedAppointment] =
+    useState<AppointmentData | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
 
   // Eligibility results drawer/modal state
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [showEligibilityResultsDrawer, setShowEligibilityResultsDrawer] = useState(false);
+  const [showEligibilityResultsDrawer, setShowEligibilityResultsDrawer] =
+    useState(false);
   const [showEligibilityModal, setShowEligibilityModal] = useState(false);
   const [hasAutoOpened, setHasAutoOpened] = useState(false);
 
@@ -62,7 +69,8 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       patientName: currentFilters?.patientName || undefined,
       mpi: currentFilters?.mpi || undefined,
       phoneNumber: currentFilters?.phoneNumber || undefined,
-      displayEncounterNumber: currentFilters?.displayEncounterNumber || undefined,
+      displayEncounterNumber:
+        currentFilters?.displayEncounterNumber || undefined,
       physicianId: currentFilters?.physicianId || undefined,
       visitTypeId: currentFilters?.visitTypeId || undefined,
       specialisationId: currentFilters?.specialisationId || undefined,
@@ -76,7 +84,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       recPerPage: currentFilters?.recPerPage || 200,
       isFilterDate: currentFilters?.isFilterDate,
     },
-    { enabled: true }
+    { enabled: true },
   );
 
   const { data: patientContext } = usePatientContext(
@@ -84,7 +92,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       appointmentId: selectedAppointment?.appointment_id?.toString(),
       mpi: selectedAppointment?.mpi,
     },
-    { enabled: !!selectedAppointment }
+    { enabled: !!selectedAppointment },
   );
 
   const {
@@ -102,23 +110,31 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       isDiscard: 0,
       hasTopUpCard: 0,
     },
-    { enabled: !!selectedAppointment?.patient_id }
+    { enabled: !!selectedAppointment?.patient_id },
+  );
+
+  const { data: eligibilityByAppointment = [] } = useEligibilityByAppointment(
+    selectedAppointment?.appointment_id?.toString() || "",
+    !!selectedAppointment?.appointment_id,
   );
 
   const { data: eligibilityByPatient = [] } = useEligibilityByPatient(
     selectedAppointment?.patient_id?.toString() || "",
-    !!selectedAppointment?.patient_id
+    !!selectedAppointment?.patient_id && eligibilityByAppointment.length === 0,
   );
 
   const { data: eligibilityByMPI = [] } = useEligibilityByMPI(
     selectedAppointment?.mpi || "",
-    !!selectedAppointment?.mpi && eligibilityByPatient.length === 0
+    !!selectedAppointment?.mpi &&
+      eligibilityByAppointment.length === 0 &&
+      eligibilityByPatient.length === 0,
   );
 
   const previousSearches = useMemo(() => {
+    if (eligibilityByAppointment.length > 0) return eligibilityByAppointment;
     if (eligibilityByPatient.length > 0) return eligibilityByPatient;
     return eligibilityByMPI;
-  }, [eligibilityByPatient, eligibilityByMPI]);
+  }, [eligibilityByAppointment, eligibilityByPatient, eligibilityByMPI]);
 
   // Auto-open results drawer if there's exactly one completed eligibility check today
   const { todaySearches } = useMemo(() => {
@@ -154,27 +170,47 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       setShowEligibilityResultsDrawer(true);
       setHasAutoOpened(true);
     }
-  }, [showDrawer, todaySearches, showEligibilityResultsDrawer, showEligibilityModal, hasAutoOpened]);
+  }, [
+    showDrawer,
+    todaySearches,
+    showEligibilityResultsDrawer,
+    showEligibilityModal,
+    hasAutoOpened,
+  ]);
 
   const { data: selectedEligibilityItem } = useEligibilityHistoryByTaskId(
     selectedTaskId || "",
-    !!selectedTaskId
+    !!selectedTaskId,
   );
 
-  const { data: freshTaskResult } = useEligibilityTaskStatus(selectedTaskId || "", {
-    enabled: !!selectedTaskId && showEligibilityResultsDrawer,
-    refetchInterval: false,
-  });
+  const { data: freshTaskResult } = useEligibilityTaskStatus(
+    selectedTaskId || "",
+    {
+      enabled: !!selectedTaskId && showEligibilityResultsDrawer,
+      refetchInterval: false,
+    },
+  );
 
   // Debug logging
   React.useEffect(() => {
     if (selectedTaskId) {
       console.log("[TodaysAppointmentsList] selectedTaskId:", selectedTaskId);
-      console.log("[TodaysAppointmentsList] selectedEligibilityItem:", selectedEligibilityItem);
+      console.log(
+        "[TodaysAppointmentsList] selectedEligibilityItem:",
+        selectedEligibilityItem,
+      );
       console.log("[TodaysAppointmentsList] freshTaskResult:", freshTaskResult);
-      console.log("[TodaysAppointmentsList] showEligibilityResultsDrawer:", showEligibilityResultsDrawer);
+      console.log(
+        "[TodaysAppointmentsList] showEligibilityResultsDrawer:",
+        showEligibilityResultsDrawer,
+      );
     }
-  }, [selectedTaskId, selectedEligibilityItem, freshTaskResult, showEligibilityResultsDrawer]);
+  }, [
+    selectedTaskId,
+    selectedEligibilityItem,
+    freshTaskResult,
+    showEligibilityResultsDrawer,
+  ]);
 
   const emiratesIdFromContext = patientContext?.nationality_id || null;
 
@@ -205,29 +241,41 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   }, []);
 
   // Handler for previous search clicks (eligibility history)
-  const handlePreviousSearchClick = useCallback((search: EligibilityHistoryItem) => {
-    console.log("[handlePreviousSearchClick] Clicked search item:", {
-      taskId: search.taskId,
-      status: search.status,
-      patientName: search.patientName,
-      patientMPI: search.patientMPI,
-      result: search.result,
-      createdAt: search.createdAt,
-    });
-    const isErrorStatus = search.status === "error" || (search.status as string) === "failed";
-    console.log("[handlePreviousSearchClick] isErrorStatus:", isErrorStatus);
-    setSelectedTaskId(search.taskId);
-    if (isErrorStatus) {
-      console.log("[handlePreviousSearchClick] Opening eligibility modal (error status)");
-      setShowEligibilityModal(true);
-    } else if (search.status === "complete") {
-      console.log("[handlePreviousSearchClick] Opening eligibility results drawer (complete status)");
-      setShowEligibilityResultsDrawer(true);
-    } else {
-      console.log("[handlePreviousSearchClick] Opening eligibility modal (other status:", search.status, ")");
-      setShowEligibilityModal(true);
-    }
-  }, []);
+  const handlePreviousSearchClick = useCallback(
+    (search: EligibilityHistoryItem) => {
+      console.log("[handlePreviousSearchClick] Clicked search item:", {
+        taskId: search.taskId,
+        status: search.status,
+        patientName: search.patientName,
+        patientMPI: search.patientMPI,
+        result: search.result,
+        createdAt: search.createdAt,
+      });
+      const isErrorStatus =
+        search.status === "error" || (search.status as string) === "failed";
+      console.log("[handlePreviousSearchClick] isErrorStatus:", isErrorStatus);
+      setSelectedTaskId(search.taskId);
+      if (isErrorStatus) {
+        console.log(
+          "[handlePreviousSearchClick] Opening eligibility modal (error status)",
+        );
+        setShowEligibilityModal(true);
+      } else if (search.status === "complete") {
+        console.log(
+          "[handlePreviousSearchClick] Opening eligibility results drawer (complete status)",
+        );
+        setShowEligibilityResultsDrawer(true);
+      } else {
+        console.log(
+          "[handlePreviousSearchClick] Opening eligibility modal (other status:",
+          search.status,
+          ")",
+        );
+        setShowEligibilityModal(true);
+      }
+    },
+    [],
+  );
 
   const handleCloseEligibilityResultsDrawer = useCallback(() => {
     setShowEligibilityResultsDrawer(false);
@@ -264,11 +312,12 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         uid_value: emiratesId || undefined,
       } as PatientData;
     },
-    [emiratesIdFromContext]
+    [emiratesIdFromContext],
   );
 
   const resultData = useMemo(() => {
-    const rawResult = freshTaskResult?.result || selectedEligibilityItem?.result;
+    const rawResult =
+      freshTaskResult?.result || selectedEligibilityItem?.result;
     if (!rawResult) return null;
 
     // Check if this is a search-all result
@@ -280,7 +329,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     ) {
       // Find the eligible result from aggregated_results
       const eligibleEntry = searchAllResult.aggregated_results.find(
-        (r: any) => r.status === "found" && r.data?.is_eligible === true
+        (r: any) => r.status === "found" && r.data?.is_eligible === true,
       );
 
       if (eligibleEntry && eligibleEntry.data) {
@@ -289,7 +338,8 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           tpa: eligibleEntry.tpa_name || eligibleEntry.data?.payer_id || "",
           data: eligibleEntry.data,
           status: "found" as const,
-          job_task_id: eligibleEntry.data?.job_task_id || searchAllResult.task_id || "",
+          job_task_id:
+            eligibleEntry.data?.job_task_id || searchAllResult.task_id || "",
           task_id: searchAllResult.task_id,
         } as MantysEligibilityResponse;
       }
@@ -329,7 +379,9 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                 />
               </svg>
               <div className="flex-1">
-                <h4 className="text-sm font-medium text-red-900">Error Loading Appointments</h4>
+                <h4 className="text-sm font-medium text-red-900">
+                  Error Loading Appointments
+                </h4>
                 <p className="text-sm text-red-700 mt-1">
                   {error instanceof Error ? error.message : "An error occurred"}
                 </p>
@@ -348,18 +400,23 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
             <div className="flex items-center gap-2">
               <span className="text-gray-600">Total Appointments</span>
-              <span className="font-semibold text-gray-900 text-lg">{appointments.length}</span>
+              <span className="font-semibold text-gray-900 text-lg">
+                {appointments.length}
+              </span>
             </div>
             <div className="hidden sm:block h-6 w-px bg-gray-300"></div>
             <div className="flex items-center gap-2">
               <span className="text-gray-600">Last Updated</span>
-              <span className="font-medium text-gray-900">{new Date().toLocaleTimeString()}</span>
+              <span className="font-medium text-gray-900">
+                {new Date().toLocaleTimeString()}
+              </span>
             </div>
             <div className="hidden sm:block h-6 w-px bg-gray-300"></div>
             <div className="flex items-center gap-2">
               <span className="text-gray-600">Date Range</span>
               <span className="font-medium text-gray-900">
-                {currentFilters?.fromDate || "Today"} - {currentFilters?.toDate || "Today"}
+                {currentFilters?.fromDate || "Today"} -{" "}
+                {currentFilters?.toDate || "Today"}
               </span>
             </div>
           </div>
@@ -390,7 +447,9 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           <EligibilityDrawerContent
             insuranceDetails={insuranceDetails}
             isLoadingInsurance={isLoadingInsurance}
-            insuranceError={insuranceError instanceof Error ? insuranceError.message : null}
+            insuranceError={
+              insuranceError instanceof Error ? insuranceError.message : null
+            }
             previousSearches={previousSearches}
             patientData={getPatientDataFromAppointment(selectedAppointment)}
             onPreviousSearchClick={handlePreviousSearchClick}
@@ -399,49 +458,60 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       </Drawer>
 
       {/* Eligibility Results Drawer */}
-      {showEligibilityResultsDrawer && (selectedEligibilityItem?.status === "complete" || freshTaskResult?.status === "complete") && resultData && (
-        <Drawer
-          isOpen={showEligibilityResultsDrawer}
-          onClose={handleCloseEligibilityResultsDrawer}
-          title={`Eligibility Check Results - ${selectedEligibilityItem?.patientName || selectedEligibilityItem?.patientId || "Patient"}`}
-          headerRight={
-            resultData ? (
-              (() => {
-                const keyFields = extractMantysKeyFields(resultData);
-                return (
-                  <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
-                    {keyFields.isEligible ? "Eligible" : "Not Eligible"}
-                  </Badge>
-                );
-              })()
-            ) : null
-          }
-          size="xl"
-        >
-          <div className="p-6">
-            {resultData ? (
-              <MantysResultsDisplay
-                response={resultData}
-                onClose={handleCloseEligibilityResultsDrawer}
-                onCheckAnother={handleCloseEligibilityResultsDrawer}
-                screenshot={selectedEligibilityItem?.interimResults?.screenshot || null}
-                patientMPI={selectedEligibilityItem?.patientMPI}
-                patientId={
-                  selectedEligibilityItem?.patientId
-                    ? parseInt(selectedEligibilityItem.patientId)
-                    : undefined
-                }
-                appointmentId={selectedEligibilityItem?.appointmentId}
-                encounterId={selectedEligibilityItem?.encounterId}
-              />
-            ) : (
-              <div className="text-center py-12 text-gray-500">
-                <p>No results available</p>
-              </div>
-            )}
-          </div>
-        </Drawer>
-      )}
+      {showEligibilityResultsDrawer &&
+        (selectedEligibilityItem?.status === "complete" ||
+          freshTaskResult?.status === "complete") &&
+        resultData && (
+          <Drawer
+            isOpen={showEligibilityResultsDrawer}
+            onClose={handleCloseEligibilityResultsDrawer}
+            title={`Eligibility Check Results - ${selectedEligibilityItem?.patientName || selectedEligibilityItem?.patientId || "Patient"}`}
+            headerRight={
+              resultData
+                ? (() => {
+                    const keyFields = extractMantysKeyFields(resultData);
+                    return (
+                      <Badge
+                        className={
+                          keyFields.isEligible
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                        }
+                      >
+                        {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+                      </Badge>
+                    );
+                  })()
+                : null
+            }
+            size="xl"
+          >
+            <div className="p-6">
+              {resultData ? (
+                <MantysResultsDisplay
+                  response={resultData}
+                  onClose={handleCloseEligibilityResultsDrawer}
+                  onCheckAnother={handleCloseEligibilityResultsDrawer}
+                  screenshot={
+                    selectedEligibilityItem?.interimResults?.screenshot || null
+                  }
+                  patientMPI={selectedEligibilityItem?.patientMPI}
+                  patientId={
+                    selectedEligibilityItem?.patientId
+                      ? parseInt(selectedEligibilityItem.patientId)
+                      : undefined
+                  }
+                  appointmentId={selectedEligibilityItem?.appointmentId}
+                  encounterId={selectedEligibilityItem?.encounterId}
+                />
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  <p>No results available</p>
+                </div>
+              )}
+            </div>
+          </Drawer>
+        )}
 
       {showEligibilityModal && selectedTaskId && (
         <ExtractionProgressModal

@@ -7,14 +7,14 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public data?: unknown
+    public data?: unknown,
   ) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 }
 
-export interface FetchOptions extends Omit<RequestInit, 'body'> {
+export interface FetchOptions extends Omit<RequestInit, "body"> {
   timeout?: number;
   body?: unknown;
 }
@@ -22,16 +22,18 @@ export interface FetchOptions extends Omit<RequestInit, 'body'> {
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 
 // Stack Auth API configuration
-const STACK_API_URL = process.env.NEXT_PUBLIC_STACK_API_URL || 'https://api.stack-auth.com/api/v1';
+const STACK_API_URL =
+  process.env.NEXT_PUBLIC_STACK_API_URL || "https://api.stack-auth.com/api/v1";
 const STACK_PROJECT_ID = process.env.NEXT_PUBLIC_STACK_PROJECT_ID;
-const STACK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY;
+const STACK_PUBLISHABLE_KEY =
+  process.env.NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY;
 
 /**
  * Core fetch function with timeout, error handling, and JSON parsing
  */
 export async function fetchJson<T>(
   url: string,
-  options: FetchOptions = {}
+  options: FetchOptions = {},
 ): Promise<T> {
   const { timeout = DEFAULT_TIMEOUT, body, ...fetchOptions } = options;
 
@@ -43,7 +45,7 @@ export async function fetchJson<T>(
       ...fetchOptions,
       signal: controller.signal,
       headers: {
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(body ? { "Content-Type": "application/json" } : {}),
         ...fetchOptions.headers,
       },
       body: body ? JSON.stringify(body) : undefined,
@@ -53,8 +55,8 @@ export async function fetchJson<T>(
 
     // Parse response body
     let data: unknown;
-    const contentType = response.headers.get('content-type');
-    if (contentType?.includes('application/json')) {
+    const contentType = response.headers.get("content-type");
+    if (contentType?.includes("application/json")) {
       data = await response.json();
     } else {
       data = await response.text();
@@ -62,7 +64,7 @@ export async function fetchJson<T>(
 
     if (!response.ok) {
       const errorMessage =
-        typeof data === 'object' && data !== null && 'error' in data
+        typeof data === "object" && data !== null && "error" in data
           ? String((data as { error: unknown }).error)
           : `Request failed with status ${response.status}`;
 
@@ -78,26 +80,26 @@ export async function fetchJson<T>(
     }
 
     if (error instanceof Error) {
-      if (error.name === 'AbortError') {
+      if (error.name === "AbortError") {
         throw new ApiError(`Request timeout after ${timeout}ms`, 408);
       }
       throw new ApiError(error.message, 0);
     }
 
-    throw new ApiError('Unknown error occurred', 0);
+    throw new ApiError("Unknown error occurred", 0);
   }
 }
 
 function stackAuthHeaders(accessToken?: string): Record<string, string> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Stack-Access-Type': 'client',
-    'X-Stack-Project-Id': STACK_PROJECT_ID || '',
-    'X-Stack-Publishable-Client-Key': STACK_PUBLISHABLE_KEY || '',
+    "Content-Type": "application/json",
+    "X-Stack-Access-Type": "client",
+    "X-Stack-Project-Id": STACK_PROJECT_ID || "",
+    "X-Stack-Publishable-Client-Key": STACK_PUBLISHABLE_KEY || "",
   };
 
   if (accessToken) {
-    headers['X-Stack-Access-Token'] = accessToken;
+    headers["X-Stack-Access-Token"] = accessToken;
   }
 
   return headers;
@@ -106,11 +108,11 @@ function stackAuthHeaders(accessToken?: string): Record<string, string> {
 function stackAuthFetch<T>(
   endpoint: string,
   options: FetchOptions = {},
-  accessToken?: string
+  accessToken?: string,
 ): Promise<T> {
   const headers = stackAuthHeaders(accessToken);
   if (!options.body) {
-    delete headers['Content-Type'];
+    delete headers["Content-Type"];
   }
   return fetchJson<T>(`${STACK_API_URL}${endpoint}`, {
     ...options,
@@ -123,53 +125,53 @@ function stackAuthFetch<T>(
 
 export const stackAuthApi = {
   getCurrentUser: (accessToken: string) =>
-    stackAuthFetch<unknown>('/users/me', {}, accessToken),
+    stackAuthFetch<unknown>("/users/me", {}, accessToken),
 
   refreshSession: (refreshToken: string) =>
     stackAuthFetch<{ access_token: string; refresh_token?: string }>(
-      '/auth/sessions/refresh',
+      "/auth/sessions/refresh",
       {
-        method: 'POST',
+        method: "POST",
         body: { refresh_token: refreshToken },
-      }
+      },
     ),
 
   signInWithPassword: (email: string, password: string) =>
     stackAuthFetch<{ access_token: string; refresh_token?: string }>(
-      '/auth/password/sign-in',
+      "/auth/password/sign-in",
       {
-        method: 'POST',
+        method: "POST",
         body: { email, password },
-      }
+      },
     ),
 
   signUpWithPassword: (email: string, password: string) =>
     stackAuthFetch<{ access_token: string; refresh_token?: string }>(
-      '/auth/password/sign-up',
+      "/auth/password/sign-up",
       {
-        method: 'POST',
+        method: "POST",
         body: { email, password },
-      }
+      },
     ),
 
   updateUser: (updates: Record<string, unknown>, accessToken: string) =>
     stackAuthFetch<unknown>(
-      '/users/me',
+      "/users/me",
       {
-        method: 'PATCH',
+        method: "PATCH",
         body: updates,
       },
-      accessToken
+      accessToken,
     ),
 
   getTeams: (accessToken: string) =>
-    stackAuthFetch<{ items?: unknown[] }>('/teams?user_id=me', {}, accessToken),
+    stackAuthFetch<{ items?: unknown[] }>("/teams?user_id=me", {}, accessToken),
 
   signOut: (accessToken: string) =>
     stackAuthFetch<void>(
-      '/auth/sessions/current',
-      { method: 'DELETE' },
-      accessToken
+      "/auth/sessions/current",
+      { method: "DELETE" },
+      accessToken,
     ),
 };
 
@@ -185,32 +187,33 @@ export const patientApi = {
     siteId?: number;
     encounterId?: number;
     appointmentId?: number;
-  }) => fetchJson<PatientDetailsResponse>('/api/patient/details', {
-    method: 'POST',
-    body: {
-      patientId: params.patientId,
-      customerId: params.customerId ?? 1,
-      siteId: params.siteId ?? 1,
-      encounterId: params.encounterId ?? 0,
-      appointmentId: params.appointmentId ?? 0,
-    },
-  }),
+  }) =>
+    fetchJson<PatientDetailsResponse>("/api/patient/details", {
+      method: "POST",
+      body: {
+        patientId: params.patientId,
+        customerId: params.customerId ?? 1,
+        siteId: params.siteId ?? 1,
+        encounterId: params.encounterId ?? 0,
+        appointmentId: params.appointmentId ?? 0,
+      },
+    }),
 
   searchByMPI: (mpi: string, customerSiteId = 31) =>
-    fetchJson<PatientDetailsResponse>('/api/patient/search-mpi', {
-      method: 'POST',
+    fetchJson<PatientDetailsResponse>("/api/patient/search-mpi", {
+      method: "POST",
       body: { mpi, customerSiteId },
     }),
 
   searchByPhone: (phoneNumber: string, customerSiteId = 1) =>
-    fetchJson<PatientDetailsResponse>('/api/patient/search-phone', {
-      method: 'POST',
+    fetchJson<PatientDetailsResponse>("/api/patient/search-phone", {
+      method: "POST",
       body: { phoneNumber, customerSiteId },
     }),
 
   getInsuranceDetails: (params: InsuranceDetailsParams) =>
-    fetchJson<InsuranceDetailsResponse>('/api/patient/insurance-details', {
-      method: 'POST',
+    fetchJson<InsuranceDetailsResponse>("/api/patient/insurance-details", {
+      method: "POST",
       body: {
         patientId: params.patientId,
         apntId: params.apntId ?? null,
@@ -224,9 +227,13 @@ export const patientApi = {
       timeout: 60000, // 60 seconds - insurance API can be slow
     }),
 
-  getContext: (params: { patientId?: string; mpi?: string; appointmentId?: string }) =>
-    fetchJson<PatientContext>('/api/patient/context', {
-      method: 'POST',
+  getContext: (params: {
+    patientId?: string;
+    mpi?: string;
+    appointmentId?: string;
+  }) =>
+    fetchJson<PatientContext>("/api/patient/context", {
+      method: "POST",
       body: params,
       timeout: 5000,
     }),
@@ -237,29 +244,37 @@ export const patientApi = {
     mpi?: string;
     updates: Record<string, unknown>;
   }) =>
-    fetchJson<{ success: boolean; message?: string }>('/api/patient/context/update', {
-      method: 'POST',
-      body: {
-        appointmentId: params.appointmentId,
-        patientId: params.patientId,
-        mpi: params.mpi,
-        updates: params.updates,
+    fetchJson<{ success: boolean; message?: string }>(
+      "/api/patient/context/update",
+      {
+        method: "POST",
+        body: {
+          appointmentId: params.appointmentId,
+          patientId: params.patientId,
+          mpi: params.mpi,
+          updates: params.updates,
+        },
       },
-    }),
+    ),
 };
 
 // Appointment APIs
 export const appointmentApi = {
   search: (params: AppointmentSearchParams) =>
-    fetchJson<AppointmentSearchResponse>('/api/patient/search-appointments', {
-      method: 'POST',
+    fetchJson<AppointmentSearchResponse>("/api/patient/search-appointments", {
+      method: "POST",
       body: params,
     }),
 
-  getToday: (params: { fromDate: string; toDate: string; customerSiteId?: number }) =>
+  getToday: (params: {
+    fromDate: string;
+    toDate: string;
+    customerSiteId?: number;
+  }) =>
     fetchJson<AppointmentSearchResponse>(
-      `/api/appointments/today?fromDate=${params.fromDate}&toDate=${params.toDate}${params.customerSiteId ? `&customerSiteId=${params.customerSiteId}` : ''
-      }`
+      `/api/appointments/today?fromDate=${params.fromDate}&toDate=${params.toDate}${
+        params.customerSiteId ? `&customerSiteId=${params.customerSiteId}` : ""
+      }`,
     ),
 };
 
@@ -269,32 +284,35 @@ export const eligibilityHistoryApi = {
     fetchJson<EligibilityHistoryItem[]>(
       clinicId
         ? `/api/eligibility-history?clinic_id=${encodeURIComponent(clinicId)}`
-        : '/api/eligibility-history'
+        : "/api/eligibility-history",
     ),
 
   getById: (id: string) =>
     fetchJson<EligibilityHistoryItem>(`/api/eligibility-history?id=${id}`),
 
   getByTaskId: (taskId: string) =>
-    fetchJson<EligibilityHistoryItem>(`/api/eligibility-history?taskId=${taskId}`),
+    fetchJson<EligibilityHistoryItem>(
+      `/api/eligibility-history?taskId=${taskId}`,
+    ),
 
   getActive: (clinicId?: string) =>
     fetchJson<EligibilityHistoryItem[]>(
       clinicId
         ? `/api/eligibility-history?status=active&clinic_id=${encodeURIComponent(clinicId)}`
-        : '/api/eligibility-history?status=active'
+        : "/api/eligibility-history?status=active",
     ),
 
   getCompleted: (clinicId?: string) =>
     fetchJson<EligibilityHistoryItem[]>(
       clinicId
         ? `/api/eligibility-history?status=completed&clinic_id=${encodeURIComponent(clinicId)}`
-        : '/api/eligibility-history?status=completed'
+        : "/api/eligibility-history?status=completed",
     ),
 
   getByPatientId: async (patientId: string) => {
     const response = await fetchJson<
-      EligibilityHistoryItem[] | { success: boolean; data?: EligibilityHistoryItem[] }
+      | EligibilityHistoryItem[]
+      | { success: boolean; data?: EligibilityHistoryItem[] }
     >(`/api/eligibility/get-by-patient-id?patientId=${patientId}`);
 
     if (Array.isArray(response)) {
@@ -306,7 +324,8 @@ export const eligibilityHistoryApi = {
 
   getByMPI: async (mpi: string) => {
     const response = await fetchJson<
-      EligibilityHistoryItem[] | { success: boolean; data?: EligibilityHistoryItem[] }
+      | EligibilityHistoryItem[]
+      | { success: boolean; data?: EligibilityHistoryItem[] }
     >(`/api/eligibility/get-by-mpi?mpi=${mpi}`);
 
     if (Array.isArray(response)) {
@@ -316,46 +335,59 @@ export const eligibilityHistoryApi = {
     return response.data ?? [];
   },
 
-  create: (item: Omit<EligibilityHistoryItem, 'id' | 'createdAt'>) =>
-    fetchJson<EligibilityHistoryItem>('/api/eligibility-history', {
-      method: 'POST',
+  getByAppointmentId: async (appointmentId: string | number) => {
+    const response = await fetchJson<
+      | EligibilityHistoryItem[]
+      | { success: boolean; data?: EligibilityHistoryItem[] }
+    >(`/api/eligibility/get-by-appointment-id?appointmentId=${appointmentId}`);
+
+    if (Array.isArray(response)) {
+      return response;
+    }
+
+    return response.data ?? [];
+  },
+
+  create: (item: Omit<EligibilityHistoryItem, "id" | "createdAt">) =>
+    fetchJson<EligibilityHistoryItem>("/api/eligibility-history", {
+      method: "POST",
       body: item,
     }),
 
   update: (id: string, updates: Partial<EligibilityHistoryItem>) =>
-    fetchJson<void>('/api/eligibility-history', {
-      method: 'PUT',
+    fetchJson<void>("/api/eligibility-history", {
+      method: "PUT",
       body: { id, updates },
     }),
 
   updateByTaskId: (taskId: string, updates: Partial<EligibilityHistoryItem>) =>
-    fetchJson<void>('/api/eligibility-history', {
-      method: 'PUT',
+    fetchJson<void>("/api/eligibility-history", {
+      method: "PUT",
       body: { taskId, updates },
     }),
 
   delete: (id: string) =>
     fetchJson<void>(`/api/eligibility-history?id=${id}`, {
-      method: 'DELETE',
+      method: "DELETE",
     }),
 
   clearAll: () =>
-    fetchJson<void>('/api/eligibility-history?clearAll=true', {
-      method: 'DELETE',
+    fetchJson<void>("/api/eligibility-history?clearAll=true", {
+      method: "DELETE",
     }),
 };
 
 // Mantys API
 export const mantysApi = {
   checkStatus: (taskId: string) =>
-    fetchJson<MantysStatusResponse>('/api/mantys/check-status', {
-      method: 'POST',
+    fetchJson<MantysStatusResponse>("/api/mantys/check-status", {
+      method: "POST",
       body: { task_id: taskId },
     }),
 
   createEligibilityCheck: (payload: MantysEligibilityRequest) =>
-    fetchJson<MantysEligibilityResponse>('/api/mantys/eligibility-check', {
-      method: 'POST',
+    fetchJson<MantysEligibilityResponse>("/api/mantys/eligibility-check", {
+      method: "POST",
       body: payload,
     }),
 };
@@ -364,14 +396,14 @@ function extractConfigList<T>(data: unknown): T[] {
   if (Array.isArray(data)) {
     return data as T[];
   }
-  if (data && typeof data === 'object' && 'configs' in data) {
-    return ((data as { configs?: T[] }).configs) ?? [];
+  if (data && typeof data === "object" && "configs" in data) {
+    return (data as { configs?: T[] }).configs ?? [];
   }
   return [];
 }
 
 function extractSingleConfig<T>(data: unknown): T | null {
-  if (data && typeof data === 'object' && 'config' in data) {
+  if (data && typeof data === "object" && "config" in data) {
     return (data as { config?: T }).config ?? null;
   }
   return (data as T) ?? null;
@@ -379,12 +411,13 @@ function extractSingleConfig<T>(data: unknown): T | null {
 
 function extractPlans(data: unknown, tpaInsCode?: string): Plan[] {
   if (Array.isArray(data)) return data as Plan[];
-  if (data && typeof data === 'object') {
-    if ('plans' in data && Array.isArray((data as { plans?: Plan[] }).plans)) {
+  if (data && typeof data === "object") {
+    if ("plans" in data && Array.isArray((data as { plans?: Plan[] }).plans)) {
       return (data as { plans?: Plan[] }).plans || [];
     }
-    if ('plans_by_tpa' in data) {
-      const byTpa = (data as { plans_by_tpa?: Record<string, Plan[]> }).plans_by_tpa || {};
+    if ("plans_by_tpa" in data) {
+      const byTpa =
+        (data as { plans_by_tpa?: Record<string, Plan[]> }).plans_by_tpa || {};
       if (tpaInsCode && byTpa[tpaInsCode]) {
         return byTpa[tpaInsCode];
       }
@@ -395,10 +428,17 @@ function extractPlans(data: unknown, tpaInsCode?: string): Plan[] {
 }
 
 function extractPlansByTPA(data: unknown): Record<string, Plan[]> {
-  if (data && typeof data === 'object' && 'plans_by_tpa' in data) {
-    return (data as { plans_by_tpa?: Record<string, Plan[]> }).plans_by_tpa || {};
+  if (data && typeof data === "object" && "plans_by_tpa" in data) {
+    return (
+      (data as { plans_by_tpa?: Record<string, Plan[]> }).plans_by_tpa || {}
+    );
   }
-  if (data && typeof data === 'object' && 'plans' in data && 'tpa_ins_code' in data) {
+  if (
+    data &&
+    typeof data === "object" &&
+    "plans" in data &&
+    "tpa_ins_code" in data
+  ) {
     const plans = (data as { plans?: Plan[] }).plans || [];
     const tpaInsCode = (data as { tpa_ins_code?: string }).tpa_ins_code;
     if (tpaInsCode) {
@@ -410,12 +450,17 @@ function extractPlansByTPA(data: unknown): Record<string, Plan[]> {
 
 function extractPayers(data: unknown, tpaInsCode?: string): Payer[] {
   if (Array.isArray(data)) return data as Payer[];
-  if (data && typeof data === 'object') {
-    if ('payers' in data && Array.isArray((data as { payers?: Payer[] }).payers)) {
+  if (data && typeof data === "object") {
+    if (
+      "payers" in data &&
+      Array.isArray((data as { payers?: Payer[] }).payers)
+    ) {
       return (data as { payers?: Payer[] }).payers || [];
     }
-    if ('payers_by_tpa' in data) {
-      const byTpa = (data as { payers_by_tpa?: Record<string, Payer[]> }).payers_by_tpa || {};
+    if ("payers_by_tpa" in data) {
+      const byTpa =
+        (data as { payers_by_tpa?: Record<string, Payer[]> }).payers_by_tpa ||
+        {};
       if (tpaInsCode && byTpa[tpaInsCode]) {
         return byTpa[tpaInsCode];
       }
@@ -426,10 +471,17 @@ function extractPayers(data: unknown, tpaInsCode?: string): Payer[] {
 }
 
 function extractPayersByTPA(data: unknown): Record<string, Payer[]> {
-  if (data && typeof data === 'object' && 'payers_by_tpa' in data) {
-    return (data as { payers_by_tpa?: Record<string, Payer[]> }).payers_by_tpa || {};
+  if (data && typeof data === "object" && "payers_by_tpa" in data) {
+    return (
+      (data as { payers_by_tpa?: Record<string, Payer[]> }).payers_by_tpa || {}
+    );
   }
-  if (data && typeof data === 'object' && 'payers' in data && 'tpa_ins_code' in data) {
+  if (
+    data &&
+    typeof data === "object" &&
+    "payers" in data &&
+    "tpa_ins_code" in data
+  ) {
     const payers = (data as { payers?: Payer[] }).payers || [];
     const tpaInsCode = (data as { tpa_ins_code?: string }).tpa_ins_code;
     if (tpaInsCode) {
@@ -439,14 +491,22 @@ function extractPayersByTPA(data: unknown): Record<string, Payer[]> {
   return {};
 }
 
-function extractMantysNetworks(data: unknown, tpaInsCode?: string): MantysNetwork[] {
+function extractMantysNetworks(
+  data: unknown,
+  tpaInsCode?: string,
+): MantysNetwork[] {
   if (Array.isArray(data)) return data as MantysNetwork[];
-  if (data && typeof data === 'object') {
-    if ('networks' in data && Array.isArray((data as { networks?: MantysNetwork[] }).networks)) {
+  if (data && typeof data === "object") {
+    if (
+      "networks" in data &&
+      Array.isArray((data as { networks?: MantysNetwork[] }).networks)
+    ) {
       return (data as { networks?: MantysNetwork[] }).networks || [];
     }
-    if ('networks_by_tpa' in data) {
-      const byTpa = (data as { networks_by_tpa?: Record<string, MantysNetwork[]> }).networks_by_tpa || {};
+    if ("networks_by_tpa" in data) {
+      const byTpa =
+        (data as { networks_by_tpa?: Record<string, MantysNetwork[]> })
+          .networks_by_tpa || {};
       if (tpaInsCode && byTpa[tpaInsCode]) {
         return byTpa[tpaInsCode];
       }
@@ -456,11 +516,21 @@ function extractMantysNetworks(data: unknown, tpaInsCode?: string): MantysNetwor
   return [];
 }
 
-function extractMantysNetworksByTPA(data: unknown): Record<string, MantysNetwork[]> {
-  if (data && typeof data === 'object' && 'networks_by_tpa' in data) {
-    return (data as { networks_by_tpa?: Record<string, MantysNetwork[]> }).networks_by_tpa || {};
+function extractMantysNetworksByTPA(
+  data: unknown,
+): Record<string, MantysNetwork[]> {
+  if (data && typeof data === "object" && "networks_by_tpa" in data) {
+    return (
+      (data as { networks_by_tpa?: Record<string, MantysNetwork[]> })
+        .networks_by_tpa || {}
+    );
   }
-  if (data && typeof data === 'object' && 'networks' in data && 'tpa_ins_code' in data) {
+  if (
+    data &&
+    typeof data === "object" &&
+    "networks" in data &&
+    "tpa_ins_code" in data
+  ) {
     const networks = (data as { networks?: MantysNetwork[] }).networks || [];
     const tpaInsCode = (data as { tpa_ins_code?: string }).tpa_ins_code;
     if (tpaInsCode) {
@@ -472,16 +542,18 @@ function extractMantysNetworksByTPA(data: unknown): Record<string, MantysNetwork
 
 function extractPlanMappings(data: unknown): PlanNetworkMapping[] {
   if (Array.isArray(data)) return data as PlanNetworkMapping[];
-  if (data && typeof data === 'object' && 'mappings' in data) {
-    return ((data as { mappings?: PlanNetworkMapping[] }).mappings) ?? [];
+  if (data && typeof data === "object" && "mappings" in data) {
+    return (data as { mappings?: PlanNetworkMapping[] }).mappings ?? [];
   }
   return [];
 }
 
 function extractSpecialisations(data: unknown): Specialisation[] {
   if (Array.isArray(data)) return data as Specialisation[];
-  if (data && typeof data === 'object' && 'specialisations' in data) {
-    return ((data as { specialisations?: Specialisation[] }).specialisations) ?? [];
+  if (data && typeof data === "object" && "specialisations" in data) {
+    return (
+      (data as { specialisations?: Specialisation[] }).specialisations ?? []
+    );
   }
   return [];
 }
@@ -489,26 +561,28 @@ function extractSpecialisations(data: unknown): Specialisation[] {
 // Clinic Config APIs
 export const clinicConfigApi = {
   getSettings: async (clinicId: string) => {
-    const response = await fetchJson<ClinicConfigSettings | { config?: ClinicConfigSettings }>(
-      `/api/clinic-config/clinic?clinic_id=${clinicId}`
-    );
+    const response = await fetchJson<
+      ClinicConfigSettings | { config?: ClinicConfigSettings }
+    >(`/api/clinic-config/clinic?clinic_id=${clinicId}`);
     return extractSingleConfig<ClinicConfigSettings>(response);
   },
 
-  updateSettings: async (clinicId: string, settings: Partial<ClinicConfigSettings>) => {
-    const response = await fetchJson<ClinicConfigSettings | { config?: ClinicConfigSettings }>(
-      '/api/clinic-config/clinic',
-      {
-        method: 'POST',
-        body: { clinic_id: clinicId, ...settings },
-      }
-    );
+  updateSettings: async (
+    clinicId: string,
+    settings: Partial<ClinicConfigSettings>,
+  ) => {
+    const response = await fetchJson<
+      ClinicConfigSettings | { config?: ClinicConfigSettings }
+    >("/api/clinic-config/clinic", {
+      method: "POST",
+      body: { clinic_id: clinicId, ...settings },
+    });
     return extractSingleConfig<ClinicConfigSettings>(response);
   },
 
   getTPA: async (clinicId: string) => {
     const response = await fetchJson<TPAConfig[] | { configs?: TPAConfig[] }>(
-      `/api/clinic-config/tpa?clinic_id=${clinicId}`
+      `/api/clinic-config/tpa?clinic_id=${clinicId}`,
     );
     return extractConfigList<TPAConfig>(response);
   },
@@ -519,38 +593,62 @@ export const clinicConfigApi = {
   },
 
   getTPAMapping: async (clinicId: string, insCode: string) => {
-    const response = await fetchJson<{ mapping?: { hospital_insurance_mapping_id: number; insurance_id: number; insurance_type: number; insurance_name: string; ins_payer: string | null; ins_code: string; clinic_id?: string; created_at?: string; updated_at?: string } }>(
-      `/api/clinic-config/tpa/mapping?clinic_id=${clinicId}&ins_code=${encodeURIComponent(insCode)}`
+    const response = await fetchJson<{
+      mapping?: {
+        hospital_insurance_mapping_id: number;
+        insurance_id: number;
+        insurance_type: number;
+        insurance_name: string;
+        ins_payer: string | null;
+        ins_code: string;
+        clinic_id?: string;
+        created_at?: string;
+        updated_at?: string;
+      };
+    }>(
+      `/api/clinic-config/tpa/mapping?clinic_id=${clinicId}&ins_code=${encodeURIComponent(insCode)}`,
     );
     return response.mapping || null;
   },
 
-  createTPA: (clinicId: string, config: Partial<TPAConfig> & { tpa_id?: string; ins_code?: string }) =>
-    fetchJson<{ config?: TPAConfig }>('/api/clinic-config/tpa', {
-      method: 'POST',
+  createTPA: (
+    clinicId: string,
+    config: Partial<TPAConfig> & { tpa_id?: string; ins_code?: string },
+  ) =>
+    fetchJson<{ config?: TPAConfig }>("/api/clinic-config/tpa", {
+      method: "POST",
       body: { clinic_id: clinicId, ...config },
     }),
 
   bulkImportTPAMappings: (clinicId: string, mappings: unknown[]) =>
-    fetchJson<{ imported?: number; errors?: number }>('/api/clinic-config/tpa', {
-      method: 'POST',
-      body: { clinic_id: clinicId, bulk_import: true, mappings },
-    }),
+    fetchJson<{ imported?: number; errors?: number }>(
+      "/api/clinic-config/tpa",
+      {
+        method: "POST",
+        body: { clinic_id: clinicId, bulk_import: true, mappings },
+      },
+    ),
 
   updateTPA: (clinicId: string, tpaId: string, config: Partial<TPAConfig>) =>
-    fetchJson<{ config?: TPAConfig }>(`/api/clinic-config/tpa/${encodeURIComponent(tpaId)}`, {
-      method: 'PUT',
-      body: { clinic_id: clinicId, ...config },
-    }),
+    fetchJson<{ config?: TPAConfig }>(
+      `/api/clinic-config/tpa/${encodeURIComponent(tpaId)}`,
+      {
+        method: "PUT",
+        body: { clinic_id: clinicId, ...config },
+      },
+    ),
 
   deleteTPA: (clinicId: string, tpaId: string) =>
-    fetchJson<void>(`/api/clinic-config/tpa/${encodeURIComponent(tpaId)}?clinic_id=${clinicId}`, {
-      method: 'DELETE',
-    }),
+    fetchJson<void>(
+      `/api/clinic-config/tpa/${encodeURIComponent(tpaId)}?clinic_id=${clinicId}`,
+      {
+        method: "DELETE",
+      },
+    ),
 
   getDoctors: async (clinicId: string) => {
     const response = await fetchJson<Doctor[] | { configs?: Doctor[] }>(
-      `/api/clinic-config/doctors?clinic_id=${clinicId}`
+      `/api/clinic-config/doctors?clinic_id=${clinicId}`,
     );
     return extractConfigList<Doctor>(response);
   },
@@ -564,18 +662,20 @@ export const clinicConfigApi = {
   },
 
   getPlansByTPA: async (clinicId: string) => {
-    const response = await fetchJson<unknown>(`/api/clinic-config/plans?clinic_id=${clinicId}`);
+    const response = await fetchJson<unknown>(
+      `/api/clinic-config/plans?clinic_id=${clinicId}`,
+    );
     return extractPlansByTPA(response);
   },
 
   fetchPlansFromApi: async (clinicId: string, tpaInsCode: string) =>
     fetchJson<{ plans?: Plan[]; record_count?: number }>(
-      `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&fetch_from_api=true`
+      `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&fetch_from_api=true`,
     ),
 
   exportPlansTemplate: async (clinicId: string, tpaInsCode: string) =>
     fetchJson<unknown>(
-      `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=mapping_template`
+      `/api/clinic-config/plans?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&export_format=mapping_template`,
     ),
 
   getMantysNetworks: async (clinicId: string, tpaInsCode?: string) => {
@@ -587,18 +687,20 @@ export const clinicConfigApi = {
   },
 
   getMantysNetworksByTPA: async (clinicId: string) => {
-    const response = await fetchJson<unknown>(`/api/clinic-config/mantys-networks?clinic_id=${clinicId}`);
+    const response = await fetchJson<unknown>(
+      `/api/clinic-config/mantys-networks?clinic_id=${clinicId}`,
+    );
     return extractMantysNetworksByTPA(response);
   },
 
   importMantysNetworks: async (clinicId: string, tpaInsCode: string) =>
     fetchJson<{ networks?: MantysNetwork[]; record_count?: number }>(
-      `/api/clinic-config/mantys-networks?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&import_from_mapping=true`
+      `/api/clinic-config/mantys-networks?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&import_from_mapping=true`,
     ),
 
   getNetworks: async (clinicId: string) => {
     const response = await fetchJson<Network[] | { configs?: Network[] }>(
-      `/api/clinic-config/networks?clinic_id=${clinicId}`
+      `/api/clinic-config/networks?clinic_id=${clinicId}`,
     );
     return extractConfigList<Network>(response);
   },
@@ -613,41 +715,56 @@ export const clinicConfigApi = {
 
   createPlanMapping: (
     clinicId: string,
-    mapping: Omit<PlanNetworkMapping, 'id' | 'clinic_id'>
+    mapping: Omit<PlanNetworkMapping, "id" | "clinic_id">,
   ) =>
-    fetchJson<{ mapping?: PlanNetworkMapping }>(`/api/clinic-config/plan-mappings?clinic_id=${clinicId}`, {
-      method: 'POST',
-      body: mapping,
-    }),
+    fetchJson<{ mapping?: PlanNetworkMapping }>(
+      `/api/clinic-config/plan-mappings?clinic_id=${clinicId}`,
+      {
+        method: "POST",
+        body: mapping,
+      },
+    ),
 
   bulkImportPlanMappings: (
     clinicId: string,
-    mappings: Array<Omit<PlanNetworkMapping, 'id' | 'clinic_id'>>
+    mappings: Array<Omit<PlanNetworkMapping, "id" | "clinic_id">>,
   ) =>
     fetchJson<{ imported?: number; errors?: number; defaults_fixed?: number }>(
       `/api/clinic-config/plan-mappings?clinic_id=${clinicId}`,
       {
-        method: 'POST',
+        method: "POST",
         body: { bulk_import: true, mappings },
-      }
+      },
     ),
 
-  setDefaultPlanMapping: (clinicId: string, tpaInsCode: string, mappingId: string) =>
+  setDefaultPlanMapping: (
+    clinicId: string,
+    tpaInsCode: string,
+    mappingId: string,
+  ) =>
     fetchJson<void>(
       `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}&set_default=true`,
-      { method: 'PUT' }
+      { method: "PUT" },
     ),
 
-  unsetDefaultPlanMapping: (clinicId: string, tpaInsCode: string, mappingId: string) =>
+  unsetDefaultPlanMapping: (
+    clinicId: string,
+    tpaInsCode: string,
+    mappingId: string,
+  ) =>
     fetchJson<void>(
       `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}&unset_default=true`,
-      { method: 'PUT' }
+      { method: "PUT" },
     ),
 
-  deletePlanMapping: (clinicId: string, tpaInsCode: string, mappingId: string) =>
+  deletePlanMapping: (
+    clinicId: string,
+    tpaInsCode: string,
+    mappingId: string,
+  ) =>
     fetchJson<void>(
       `/api/clinic-config/plan-mappings?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&mapping_id=${mappingId}`,
-      { method: 'DELETE' }
+      { method: "DELETE" },
     ),
 
   getPayers: async (clinicId: string, tpaInsCode?: string) => {
@@ -659,52 +776,70 @@ export const clinicConfigApi = {
   },
 
   getPayersByTPA: async (clinicId: string) => {
-    const response = await fetchJson<unknown>(`/api/clinic-config/payers?clinic_id=${clinicId}`);
+    const response = await fetchJson<unknown>(
+      `/api/clinic-config/payers?clinic_id=${clinicId}`,
+    );
     return extractPayersByTPA(response);
   },
 
   fetchPayersFromApi: async (clinicId: string, tpaInsCode: string) =>
     fetchJson<{ payers?: Payer[]; record_count?: number }>(
-      `/api/clinic-config/payers?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&fetch_from_api=true`
+      `/api/clinic-config/payers?clinic_id=${clinicId}&tpa_ins_code=${tpaInsCode}&fetch_from_api=true`,
     ),
 
   deletePayersByTPA: (clinicId: string, tpaInsCode: string) =>
-    fetchJson<void>(`/api/clinic-config/payers/${encodeURIComponent(tpaInsCode)}?clinic_id=${clinicId}`, {
-      method: 'DELETE',
-    }),
+    fetchJson<void>(
+      `/api/clinic-config/payers/${encodeURIComponent(tpaInsCode)}?clinic_id=${clinicId}`,
+      {
+        method: "DELETE",
+      },
+    ),
 
   getSpecialisations: async () => {
-    const response = await fetchJson<unknown>('/api/clinic-config/specialisations');
+    const response = await fetchJson<unknown>(
+      "/api/clinic-config/specialisations",
+    );
     return extractSpecialisations(response);
   },
 
   getSpecialisationsMapping: async () => {
-    const response = await fetchJson<{ mapping?: Record<string, string> }>('/api/clinic-config/specialisations');
+    const response = await fetchJson<{ mapping?: Record<string, string> }>(
+      "/api/clinic-config/specialisations",
+    );
     return response.mapping || {};
   },
 
   updateSpecialisations: (payload: unknown) =>
-    fetchJson<{ mapping?: Record<string, string> }>('/api/clinic-config/specialisations', {
-      method: 'POST',
-      body: payload,
-    }),
+    fetchJson<{ mapping?: Record<string, string> }>(
+      "/api/clinic-config/specialisations",
+      {
+        method: "POST",
+        body: payload,
+      },
+    ),
 
   createDoctor: (clinicId: string, doctor: Partial<Doctor>) =>
-    fetchJson<{ config?: Doctor }>('/api/clinic-config/doctors', {
-      method: 'POST',
+    fetchJson<{ config?: Doctor }>("/api/clinic-config/doctors", {
+      method: "POST",
       body: { clinic_id: clinicId, ...doctor },
     }),
 
   updateDoctor: (clinicId: string, doctorId: string, doctor: Partial<Doctor>) =>
-    fetchJson<{ config?: Doctor }>(`/api/clinic-config/doctors/${encodeURIComponent(doctorId)}`, {
-      method: 'PUT',
-      body: { clinic_id: clinicId, ...doctor },
-    }),
+    fetchJson<{ config?: Doctor }>(
+      `/api/clinic-config/doctors/${encodeURIComponent(doctorId)}`,
+      {
+        method: "PUT",
+        body: { clinic_id: clinicId, ...doctor },
+      },
+    ),
 
   deleteDoctor: (clinicId: string, doctorId: string) =>
-    fetchJson<void>(`/api/clinic-config/doctors/${encodeURIComponent(doctorId)}?clinic_id=${clinicId}`, {
-      method: 'DELETE',
-    }),
+    fetchJson<void>(
+      `/api/clinic-config/doctors/${encodeURIComponent(doctorId)}?clinic_id=${clinicId}`,
+      {
+        method: "DELETE",
+      },
+    ),
 };
 
 export const asterApi = {
@@ -715,14 +850,14 @@ export const asterApi = {
     encounterId?: number;
     payerId?: number;
   }) =>
-    fetchJson<unknown>('/api/aster/save-policy', {
-      method: 'POST',
+    fetchJson<unknown>("/api/aster/save-policy", {
+      method: "POST",
       body: payload,
     }),
 
   saveEligibilityOrder: (payload: Record<string, unknown>) =>
-    fetchJson<unknown>('/api/aster/save-eligibility-order', {
-      method: 'POST',
+    fetchJson<unknown>("/api/aster/save-eligibility-order", {
+      method: "POST",
       body: payload,
       timeout: 60000, // 60 seconds - Aster API can be slow
     }),
@@ -741,8 +876,8 @@ export const asterApi = {
     createdBy?: number;
     reqId?: string | number;
   }) =>
-    fetchJson<unknown>('/api/aster/upload-attachment', {
-      method: 'POST',
+    fetchJson<unknown>("/api/aster/upload-attachment", {
+      method: "POST",
       body: payload,
     }),
 };
@@ -1047,7 +1182,7 @@ export interface EligibilityHistoryItem {
   patientMPI?: string;
   appointmentId?: number;
   encounterId?: number;
-  status: 'pending' | 'processing' | 'complete' | 'error';
+  status: "pending" | "processing" | "complete" | "error";
   createdAt: string;
   completedAt?: string;
   result?: unknown;
@@ -1090,7 +1225,7 @@ export interface MantysEligibilityResponse {
 
 export interface MantysStatusResponse {
   task_id: string;
-  status: 'pending' | 'processing' | 'complete' | 'error';
+  status: "pending" | "processing" | "complete" | "error";
   result?: unknown;
   error?: string;
   message?: string;

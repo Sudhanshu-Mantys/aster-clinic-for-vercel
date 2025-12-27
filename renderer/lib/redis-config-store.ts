@@ -166,26 +166,51 @@ export async function getTPAConfigs(clinicId: string): Promise<TPAConfig[]> {
     try {
         const redis = await getRedisClient()
         const pattern = `${REDIS_KEYS.TPA_CONFIG}:${clinicId}:*`
+
+        // Test connection first
+        try {
+            await redis.ping()
+        } catch (pingError) {
+            console.error('Redis ping failed in getTPAConfigs:', pingError)
+            throw new Error(`Redis connection failed: ${pingError instanceof Error ? pingError.message : String(pingError)}`)
+        }
+
         const keys = await redis.keys(pattern)
 
         // Filter out index keys
         const configKeys = keys.filter(key => !key.endsWith(':index'))
 
         if (configKeys.length === 0) {
+            console.warn(`No TPA config keys found for clinic ${clinicId} with pattern ${pattern}`)
             return []
         }
 
         const configs = await Promise.all(
             configKeys.map(async (key) => {
-                const data = await redis.get(key)
-                return data ? JSON.parse(data) : null
+                try {
+                    const data = await redis.get(key)
+                    return data ? JSON.parse(data) : null
+                } catch (parseError) {
+                    console.error(`Error parsing config from key ${key}:`, parseError)
+                    return null
+                }
             })
         )
 
-        return configs.filter(Boolean)
+        const validConfigs = configs.filter(Boolean)
+        if (validConfigs.length === 0 && configKeys.length > 0) {
+            console.warn(`Found ${configKeys.length} keys but all failed to parse for clinic ${clinicId}`)
+        }
+
+        return validConfigs
     } catch (error) {
         console.error('Error getting TPA configs from Redis:', error)
-        return []
+        console.error('Error details:', {
+            clinicId,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            errorStack: error instanceof Error ? error.stack : undefined
+        })
+        throw error // Re-throw to surface connection issues
     }
 }
 
@@ -196,11 +221,38 @@ export async function getTPAConfigByCode(clinicId: string, insCode: string): Pro
     try {
         const redis = await getRedisClient()
         const key = `${REDIS_KEYS.TPA_CONFIG}:${clinicId}:${insCode}`
+
+        // Test connection first
+        try {
+            await redis.ping()
+        } catch (pingError) {
+            console.error('Redis ping failed in getTPAConfigByCode:', pingError)
+            throw new Error(`Redis connection failed: ${pingError instanceof Error ? pingError.message : String(pingError)}`)
+        }
+
         const data = await redis.get(key)
-        return data ? JSON.parse(data) : null
+
+        if (!data) {
+            console.warn(`No TPA config found for key: ${key} (clinicId: ${clinicId}, insCode: ${insCode})`)
+            return null
+        }
+
+        try {
+            return JSON.parse(data)
+        } catch (parseError) {
+            console.error(`Error parsing TPA config from key ${key}:`, parseError)
+            return null
+        }
     } catch (error) {
         console.error('Error getting TPA config by code from Redis:', error)
-        return null
+        console.error('Error details:', {
+            clinicId,
+            insCode,
+            key: `${REDIS_KEYS.TPA_CONFIG}:${clinicId}:${insCode}`,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            errorStack: error instanceof Error ? error.stack : undefined
+        })
+        throw error // Re-throw to surface connection issues
     }
 }
 
