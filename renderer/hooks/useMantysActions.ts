@@ -368,6 +368,7 @@ export const useMantysActions = ({
             insTpaPatId: insTpaPatIdForUpload as number,
             fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,
             fileUrl: doc.s3_url,
+            reqId: savedReqId, // Use reqid from order creation response
           });
           newUploadProgress[progressKey] = 100;
           newUploadedFiles.push(doc.tag);
