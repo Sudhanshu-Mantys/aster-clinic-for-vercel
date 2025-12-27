@@ -207,7 +207,7 @@ export function useEligibilityPolling(
       if (data?.status === 'complete' || data?.status === 'error') {
         return false;
       }
-      return 3000;
+      return 10000;
     },
   });
 
