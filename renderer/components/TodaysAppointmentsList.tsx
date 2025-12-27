@@ -167,6 +167,16 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     refetchInterval: false,
   });
 
+  // Debug logging
+  React.useEffect(() => {
+    if (selectedTaskId) {
+      console.log("[TodaysAppointmentsList] selectedTaskId:", selectedTaskId);
+      console.log("[TodaysAppointmentsList] selectedEligibilityItem:", selectedEligibilityItem);
+      console.log("[TodaysAppointmentsList] freshTaskResult:", freshTaskResult);
+      console.log("[TodaysAppointmentsList] showEligibilityResultsDrawer:", showEligibilityResultsDrawer);
+    }
+  }, [selectedTaskId, selectedEligibilityItem, freshTaskResult, showEligibilityResultsDrawer]);
+
   const emiratesIdFromContext = patientContext?.nationality_id || null;
 
   const handleSearch = useCallback((filters: AppointmentFilters) => {
@@ -409,71 +419,49 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       </Drawer>
 
       {/* Eligibility Results Drawer */}
-      {showEligibilityResultsDrawer && (() => {
-        // Use selectedEligibilityItem if loaded, otherwise use selectedSearchItem
-        const displayItem = selectedEligibilityItem || selectedSearchItem;
-        const isComplete = displayItem?.status === "complete";
-        const hasResult = !!resultData;
-
-        console.log('[TodaysAppointmentsList] Drawer render check:', {
-          showEligibilityResultsDrawer,
-          hasDisplayItem: !!displayItem,
-          displayItemStatus: displayItem?.status,
-          isComplete,
-          hasResult,
-          willRender: showEligibilityResultsDrawer && isComplete && hasResult,
-          usingSelectedItem: !!selectedEligibilityItem,
-          usingSearchItem: !!selectedSearchItem && !selectedEligibilityItem,
-        });
-
-        if (!showEligibilityResultsDrawer || !isComplete || !hasResult || !displayItem) {
-          return null;
-        }
-
-        return (
-          <Drawer
-            isOpen={showEligibilityResultsDrawer}
-            onClose={handleCloseEligibilityResultsDrawer}
-            title={`Eligibility Check Results - ${displayItem.patientName || displayItem.patientId}`}
-            headerRight={
-              resultData ? (
-                (() => {
-                  const keyFields = extractMantysKeyFields(resultData);
-                  return (
-                    <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
-                      {keyFields.isEligible ? "Eligible" : "Not Eligible"}
-                    </Badge>
-                  );
-                })()
-              ) : null
-            }
-            size="xl"
-          >
-            <div className="p-6">
-              {resultData ? (
-                <MantysResultsDisplay
-                  response={resultData}
-                  onClose={handleCloseEligibilityResultsDrawer}
-                  onCheckAnother={handleCloseEligibilityResultsDrawer}
-                  screenshot={displayItem.interimResults?.screenshot || null}
-                  patientMPI={displayItem.patientMPI}
-                  patientId={
-                    displayItem.patientId
-                      ? parseInt(displayItem.patientId)
-                      : undefined
-                  }
-                  appointmentId={displayItem.appointmentId}
-                  encounterId={displayItem.encounterId}
-                />
-              ) : (
-                <div className="text-center py-12 text-gray-500">
-                  <p>No results available</p>
-                </div>
-              )}
-            </div>
-          </Drawer>
-        );
-      })()}
+      {showEligibilityResultsDrawer && (selectedEligibilityItem?.status === "complete" || freshTaskResult?.status === "complete") && resultData && (
+        <Drawer
+          isOpen={showEligibilityResultsDrawer}
+          onClose={handleCloseEligibilityResultsDrawer}
+          title={`Eligibility Check Results - ${selectedEligibilityItem?.patientName || selectedEligibilityItem?.patientId || "Patient"}`}
+          headerRight={
+            resultData ? (
+              (() => {
+                const keyFields = extractMantysKeyFields(resultData);
+                return (
+                  <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                    {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+                  </Badge>
+                );
+              })()
+            ) : null
+          }
+          size="xl"
+        >
+          <div className="p-6">
+            {resultData ? (
+              <MantysResultsDisplay
+                response={resultData}
+                onClose={handleCloseEligibilityResultsDrawer}
+                onCheckAnother={handleCloseEligibilityResultsDrawer}
+                screenshot={selectedEligibilityItem?.interimResults?.screenshot || null}
+                patientMPI={selectedEligibilityItem?.patientMPI}
+                patientId={
+                  selectedEligibilityItem?.patientId
+                    ? parseInt(selectedEligibilityItem.patientId)
+                    : undefined
+                }
+                appointmentId={selectedEligibilityItem?.appointmentId}
+                encounterId={selectedEligibilityItem?.encounterId}
+              />
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                <p>No results available</p>
+              </div>
+            )}
+          </div>
+        </Drawer>
+      )}
 
       {showEligibilityModal && selectedTaskId && (
         <ExtractionProgressModal
