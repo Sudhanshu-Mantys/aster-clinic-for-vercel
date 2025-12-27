@@ -28,6 +28,9 @@ export async function getRedisClient(): Promise<Redis> {
         const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
         redisClient = new Redis(redisUrl, {
+            tls: {
+                rejectUnauthorized: false,
+            },
             maxRetriesPerRequest: 3,
             retryStrategy: (times) => {
                 if (times > 10) {
@@ -43,7 +46,9 @@ export async function getRedisClient(): Promise<Redis> {
                     return true
                 }
                 return false
-            }
+            },
+            connectTimeout: 5000, // 5 second connection timeout
+            commandTimeout: 5000, // 5 second timeout for individual commands
         })
 
         redisClient.on('error', (err) => {

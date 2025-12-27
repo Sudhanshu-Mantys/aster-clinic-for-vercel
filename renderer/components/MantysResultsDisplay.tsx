@@ -4,10 +4,7 @@
  */
 
 import React, { useEffect, useState } from "react";
-import {
-  MantysEligibilityResponse,
-  MantysKeyFields,
-} from "../types/mantys";
+import { MantysEligibilityResponse, MantysKeyFields } from "../types/mantys";
 import { extractMantysKeyFields } from "../lib/mantys-utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -16,10 +13,9 @@ import { Sidebar } from "./ui/sidebar";
 import { LifetrenzEligibilityPreview } from "./LifetrenzEligibilityPreview";
 import { useAuth } from "../contexts/AuthContext";
 import { Modal } from "./ui/modal";
-import {
-  asterApi,
-} from "../lib/api-client";
+import { asterApi } from "../lib/api-client";
 import { useMantysActions } from "../hooks/useMantysActions";
+import { StatusDialog } from "./StatusDialog";
 import {
   CheckCircle2,
   XCircle,
@@ -75,9 +71,32 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [startDate, setStartDate] = useState<string>("");
   const [expiryDate, setExpiryDate] = useState<string>("");
 
+  // Local dialog state for Save Policy modal
+  const [localDialogOpen, setLocalDialogOpen] = useState(false);
+  const [localDialogStatus, setLocalDialogStatus] = useState<
+    "success" | "error" | "partial"
+  >("success");
+  const [localDialogTitle, setLocalDialogTitle] = useState<string>("");
+  const [localDialogMessage, setLocalDialogMessage] = useState<string>("");
+  const [localDialogErrorDetails, setLocalDialogErrorDetails] = useState<
+    string | undefined
+  >(undefined);
+
   const { user } = useAuth();
 
-  const { handleUploadScreenshots, uploadingFiles } = useMantysActions({
+  const {
+    handleUploadScreenshots,
+    uploadingFiles,
+    dialogOpen,
+    dialogStatus,
+    dialogTitle,
+    dialogMessage,
+    dialogReqId,
+    dialogDocumentCount,
+    dialogFailedCount,
+    dialogErrorDetails,
+    closeDialog,
+  } = useMantysActions({
     clinicId: user?.selected_team_id,
     response,
     patientMPI,
@@ -96,7 +115,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   }, [screenshotSrc]);
 
   useEffect(() => {
-    const isFinalStatus = ["found", "not_found", "error"].includes(response.status);
+    const isFinalStatus = ["found", "not_found", "error"].includes(
+      response.status,
+    );
     if (!isFinalStatus) {
       setV3Result(null);
       return;
@@ -112,7 +133,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           `/api/mantys/eligibility-result-v3?task_id=${encodeURIComponent(taskId)}`,
         );
         if (!resultResponse.ok) {
-          throw new Error(`Failed to fetch v3 result: ${resultResponse.status}`);
+          throw new Error(
+            `Failed to fetch v3 result: ${resultResponse.status}`,
+          );
         }
         const resultData = await resultResponse.json();
         if (isMounted) {
@@ -137,7 +160,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
   const toggleSection = (section: string) => {
     setExpandedSections((prev) =>
-      prev.includes(section) ? prev.filter((s) => s !== section) : [...prev, section]
+      prev.includes(section)
+        ? prev.filter((s) => s !== section)
+        : [...prev, section],
     );
   };
 
@@ -157,9 +182,19 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         appointmentId: appointmentId || 0,
         encounterId: encounterId || 0,
       });
-      alert("Policy saved successfully!");
+      setLocalDialogStatus("success");
+      setLocalDialogTitle("Policy Saved");
+      setLocalDialogMessage("Policy saved successfully!");
+      setLocalDialogErrorDetails(undefined);
+      setLocalDialogOpen(true);
     } catch (error) {
-      alert("Failed to save policy");
+      setLocalDialogStatus("error");
+      setLocalDialogTitle("Save Failed");
+      setLocalDialogMessage("Failed to save policy");
+      setLocalDialogErrorDetails(
+        error instanceof Error ? error.message : "Unknown error",
+      );
+      setLocalDialogOpen(true);
     } finally {
       setSavingPolicy(false);
     }
@@ -170,42 +205,74 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
         <h2 className="text-lg font-semibold text-red-900">Error</h2>
         <p className="text-red-700">Invalid response</p>
-        {onClose && <button onClick={onClose} className="mt-4 px-4 py-2 bg-red-600 text-white rounded">Close</button>}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded"
+          >
+            Close
+          </button>
+        )}
       </div>
     );
   }
 
-  const benefitCategories = keyFields.copayDetails?.map((cat) => ({
-    id: cat.name.toLowerCase(),
-    label: cat.name,
-    network: cat.primary_network.network,
-    services: Object.entries(cat.values_to_fill).map(([type, values]) => ({
-      type,
-      copay: `${values.copay}%`,
-      deductible: values.deductible,
-      setCopay: values.should_set_copay,
-    })),
-  })) || [];
+  const benefitCategories =
+    keyFields.copayDetails?.map((cat) => ({
+      id: cat.name.toLowerCase(),
+      label: cat.name,
+      network: cat.primary_network.network,
+      services: Object.entries(cat.values_to_fill).map(([type, values]) => ({
+        type,
+        copay: `${values.copay}%`,
+        deductible: values.deductible,
+        setCopay: values.should_set_copay,
+      })),
+    })) || [];
 
   const hasBenefits = benefitCategories.some((cat) => cat.services.length > 0);
 
   const tabs: { value: TabValue; label: string; icon: React.ReactNode }[] = [
-    { value: "documents", label: "Documents", icon: <FileText className="h-4 w-4" /> },
-    { value: "overview", label: "Overview", icon: <User className="h-4 w-4" /> },
-    { value: "policy", label: "Policy Details", icon: <CreditCard className="h-4 w-4" /> },
-    { value: "benefits", label: "Copay Details", icon: <Hospital className="h-4 w-4" /> },
+    {
+      value: "documents",
+      label: "Documents",
+      icon: <FileText className="h-4 w-4" />,
+    },
+    {
+      value: "overview",
+      label: "Overview",
+      icon: <User className="h-4 w-4" />,
+    },
+    {
+      value: "policy",
+      label: "Policy Details",
+      icon: <CreditCard className="h-4 w-4" />,
+    },
+    {
+      value: "benefits",
+      label: "Copay Details",
+      icon: <Hospital className="h-4 w-4" />,
+    },
   ];
 
   return (
     <div className="space-y-4">
       {/* Action Buttons - 2x2 Grid on Mobile */}
       <div className="grid grid-cols-2 gap-2">
-        <Button onClick={handleSavePolicy} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
+        <Button
+          onClick={handleSavePolicy}
+          className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+        >
           <Download className="h-4 w-4" /> Save Policy
         </Button>
         {keyFields.referralDocuments?.length > 0 && (
-          <Button onClick={handleUploadScreenshots} disabled={uploadingFiles} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
-            <Upload className="h-4 w-4" /> {uploadingFiles ? "Uploading..." : "Upload Documents"}
+          <Button
+            onClick={handleUploadScreenshots}
+            disabled={uploadingFiles}
+            className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            <Upload className="h-4 w-4" />{" "}
+            {uploadingFiles ? "Uploading..." : "Upload Documents"}
           </Button>
         )}
       </div>
@@ -245,40 +312,58 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                 </div>
                 <div>
                   <p className="text-gray-500">Patient ID:</p>
-                  <p className="font-mono font-medium">{patientId?.toString() || "N/A"}</p>
+                  <p className="font-mono font-medium">
+                    {patientId?.toString() || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500">Appointment ID:</p>
-                  <p className="font-mono font-medium">{appointmentId?.toString() || "N/A"}</p>
+                  <p className="font-mono font-medium">
+                    {appointmentId?.toString() || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500">Encounter ID:</p>
-                  <p className="font-mono font-medium">{encounterId?.toString() || "N/A"}</p>
+                  <p className="font-mono font-medium">
+                    {encounterId?.toString() || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500">Policy Holder:</p>
-                  <p className="font-medium">{data.policy_holder_name || "N/A"}</p>
+                  <p className="font-medium">
+                    {data.policy_holder_name || "N/A"}
+                  </p>
                 </div>
                 {/* Right Column - 5 items */}
                 <div>
                   <p className="text-gray-500">Date of Birth:</p>
-                  <p className="font-medium">{data.policy_holder_dob || "N/A"}</p>
+                  <p className="font-medium">
+                    {data.policy_holder_dob || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500">Gender:</p>
-                  <p className="font-medium">{data.patient_info?.policy_holder_gender || "N/A"}</p>
+                  <p className="font-medium">
+                    {data.patient_info?.policy_holder_gender || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500">Member ID:</p>
-                  <p className="font-mono font-medium">{keyFields.memberId || "N/A"}</p>
+                  <p className="font-mono font-medium">
+                    {keyFields.memberId || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500">Emirates ID:</p>
-                  <p className="font-mono font-medium">{data.policy_holder_emirates_id || "N/A"}</p>
+                  <p className="font-mono font-medium">
+                    {data.policy_holder_emirates_id || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500">DHA Member ID:</p>
-                  <p className="font-mono font-medium">{data.patient_info?.policy_primary_dha_member_id || "N/A"}</p>
+                  <p className="font-mono font-medium">
+                    {data.patient_info?.policy_primary_dha_member_id || "N/A"}
+                  </p>
                 </div>
               </div>
             </Card>
@@ -287,7 +372,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                 <div className="flex gap-3">
                   <AlertTriangle className="h-5 w-5 text-orange-600 shrink-0" />
                   <div>
-                    <p className="font-semibold text-orange-900">Important Remarks</p>
+                    <p className="font-semibold text-orange-900">
+                      Important Remarks
+                    </p>
                     <ul className="mt-1 text-sm text-orange-800 space-y-1">
                       {keyFields.specialRemarks.map((remark, idx) => (
                         <li key={idx}>• {remark}</li>
@@ -306,14 +393,22 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             {hasBenefits ? (
               benefitCategories.map((benefit) => (
                 <Card key={benefit.id} className="overflow-hidden">
-                  <button onClick={() => toggleSection(benefit.id)} className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50 transition gap-3">
+                  <button
+                    onClick={() => toggleSection(benefit.id)}
+                    className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50 transition gap-3"
+                  >
                     <div className="flex items-center gap-3 min-w-0">
-                      <Badge className={
-                        benefit.id === "outpatient" ? "bg-green-100 text-green-800" :
-                        benefit.id === "inpatient" ? "bg-blue-100 text-blue-800" :
-                        benefit.id === "maternity" ? "bg-pink-100 text-pink-800" :
-                        "bg-purple-100 text-purple-800"
-                      }>
+                      <Badge
+                        className={
+                          benefit.id === "outpatient"
+                            ? "bg-green-100 text-green-800"
+                            : benefit.id === "inpatient"
+                              ? "bg-blue-100 text-blue-800"
+                              : benefit.id === "maternity"
+                                ? "bg-pink-100 text-pink-800"
+                                : "bg-purple-100 text-purple-800"
+                        }
+                      >
                         {benefit.label}
                       </Badge>
                       <span className="text-sm text-gray-600 truncate">
@@ -327,32 +422,49 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                       <ChevronDown className="h-4 w-4 text-gray-500 shrink-0" />
                     )}
                   </button>
-                  {expandedSections.includes(benefit.id) && benefit.services.length > 0 && (
-                    <div className="border-t overflow-x-auto">
-                      <table className="w-full text-xs sm:text-sm">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Service</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Copay</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Deductible</th>
-                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">Set</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {benefit.services.map((service, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50">
-                              <td className="px-3 py-2 font-medium">{service.type}</td>
-                              <td className="px-3 py-2 text-right">{service.copay}</td>
-                              <td className="px-3 py-2 text-right">{service.deductible}</td>
-                              <td className="px-3 py-2 text-center">
-                                {service.setCopay && <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto" />}
-                              </td>
+                  {expandedSections.includes(benefit.id) &&
+                    benefit.services.length > 0 && (
+                      <div className="border-t overflow-x-auto">
+                        <table className="w-full text-xs sm:text-sm">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">
+                                Service
+                              </th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">
+                                Copay
+                              </th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">
+                                Deductible
+                              </th>
+                              <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">
+                                Set
+                              </th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                          </thead>
+                          <tbody className="divide-y">
+                            {benefit.services.map((service, idx) => (
+                              <tr key={idx} className="hover:bg-gray-50">
+                                <td className="px-3 py-2 font-medium">
+                                  {service.type}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  {service.copay}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  {service.deductible}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  {service.setCopay && (
+                                    <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto" />
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                 </Card>
               ))
             ) : (
@@ -374,36 +486,54 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-xs text-gray-500">Payer</p>
-                  <p className="font-medium mt-1">{keyFields.payerName || "N/A"}</p>
+                  <p className="font-medium mt-1">
+                    {keyFields.payerName || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Policy Authority</p>
-                  <p className="font-medium mt-1">{data.policy_network?.policy_authority || "N/A"}</p>
+                  <p className="font-medium mt-1">
+                    {data.policy_network?.policy_authority || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Start Date</p>
-                  <p className="font-medium mt-1">{keyFields.policyStartDate || "N/A"}</p>
+                  <p className="font-medium mt-1">
+                    {keyFields.policyStartDate || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">End Date</p>
-                  <p className="font-medium mt-1">{keyFields.policyEndDate || "N/A"}</p>
+                  <p className="font-medium mt-1">
+                    {keyFields.policyEndDate || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Member ID</p>
-                  <p className="font-mono mt-1">{keyFields.memberId || "N/A"}</p>
+                  <p className="font-mono mt-1">
+                    {keyFields.memberId || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Policy Number</p>
-                  <p className="font-mono mt-1">{data.patient_info?.patient_id_info?.policy_number || "N/A"}</p>
+                  <p className="font-mono mt-1">
+                    {data.patient_info?.patient_id_info?.policy_number || "N/A"}
+                  </p>
                 </div>
               </div>
               {data.policy_network?.all_networks?.length > 0 && (
                 <div className="mt-4 pt-4 border-t">
-                  <p className="text-xs text-gray-500 mb-2">Available Networks</p>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Available Networks
+                  </p>
                   <div className="flex flex-wrap gap-2">
-                    {data.policy_network.all_networks.map((n: any, i: number) => (
-                      <Badge key={i} className="bg-blue-100 text-blue-800">{n.network_value}</Badge>
-                    ))}
+                    {data.policy_network.all_networks.map(
+                      (n: any, i: number) => (
+                        <Badge key={i} className="bg-blue-100 text-blue-800">
+                          {n.network_value}
+                        </Badge>
+                      ),
+                    )}
                   </div>
                 </div>
               )}
@@ -421,16 +551,26 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
               <div className="space-y-2">
                 {keyFields.referralDocuments?.length > 0 ? (
                   keyFields.referralDocuments.map((doc, idx) => (
-                    <a key={idx} href={doc.s3_url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition gap-3">
+                    <a
+                      key={idx}
+                      href={doc.s3_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition gap-3"
+                    >
                       <div className="flex items-center gap-3 min-w-0">
                         <FileText className="h-5 w-5 text-blue-600 shrink-0" />
-                        <span className="text-sm font-medium truncate">{doc.tag}</span>
+                        <span className="text-sm font-medium truncate">
+                          {doc.tag}
+                        </span>
                       </div>
                       <Download className="h-4 w-4 text-gray-500 shrink-0" />
                     </a>
                   ))
                 ) : (
-                  <p className="text-center py-6 text-gray-500">No documents available</p>
+                  <p className="text-center py-6 text-gray-500">
+                    No documents available
+                  </p>
                 )}
               </div>
               {screenshotSrc && showScreenshot && (
@@ -459,13 +599,24 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       </div>
 
       {/* Raw JSON Toggle */}
-      <button onClick={() => setShowRawJson(!showRawJson)} className="w-full flex items-center justify-between p-2 text-sm text-gray-500 hover:text-gray-700">
+      <button
+        onClick={() => setShowRawJson(!showRawJson)}
+        className="w-full flex items-center justify-between p-2 text-sm text-gray-500 hover:text-gray-700"
+      >
         <span>View Raw JSON</span>
-        {showRawJson ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        {showRawJson ? (
+          <ChevronUp className="h-4 w-4" />
+        ) : (
+          <ChevronDown className="h-4 w-4" />
+        )}
       </button>
       {showRawJson && (
         <pre className="p-3 bg-gray-900 text-green-400 rounded text-xs max-h-32 overflow-auto">
-          {JSON.stringify(v3Result ? { response, v3Result } : response, null, 2)}
+          {JSON.stringify(
+            v3Result ? { response, v3Result } : response,
+            null,
+            2,
+          )}
         </pre>
       )}
 
@@ -484,40 +635,105 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       </div>
 
       {/* Modals */}
-      <Sidebar isOpen={showLifetrenzPreview} onClose={() => setShowLifetrenzPreview(false)} title="Send to Lifetrenz" width="500px">
-        <LifetrenzEligibilityPreview response={response} onClose={() => setShowLifetrenzPreview(false)} />
+      <Sidebar
+        isOpen={showLifetrenzPreview}
+        onClose={() => setShowLifetrenzPreview(false)}
+        title="Send to Lifetrenz"
+        width="500px"
+      >
+        <LifetrenzEligibilityPreview
+          response={response}
+          onClose={() => setShowLifetrenzPreview(false)}
+        />
       </Sidebar>
 
-      <Modal isOpen={showSavePolicyModal} onClose={() => setShowSavePolicyModal(false)} title="Save Policy">
+      <Modal
+        isOpen={showSavePolicyModal}
+        onClose={() => setShowSavePolicyModal(false)}
+        title="Save Policy"
+      >
         <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-600">Member ID</label>
-              <input type="text" value={memberId} onChange={(e) => setMemberId(e.target.value)} className="w-full border rounded p-2 text-sm mt-1" />
+              <input
+                type="text"
+                value={memberId}
+                onChange={(e) => setMemberId(e.target.value)}
+                className="w-full border rounded p-2 text-sm mt-1"
+              />
             </div>
             <div>
               <label className="text-xs text-gray-600">Receiver ID</label>
-              <input type="text" value={receiverId} onChange={(e) => setReceiverId(e.target.value)} className="w-full border rounded p-2 text-sm mt-1" />
+              <input
+                type="text"
+                value={receiverId}
+                onChange={(e) => setReceiverId(e.target.value)}
+                className="w-full border rounded p-2 text-sm mt-1"
+              />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-600">Start Date</label>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full border rounded p-2 text-sm mt-1" />
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full border rounded p-2 text-sm mt-1"
+              />
             </div>
             <div>
               <label className="text-xs text-gray-600">End Date</label>
-              <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} className="w-full border rounded p-2 text-sm mt-1" />
+              <input
+                type="date"
+                value={expiryDate}
+                onChange={(e) => setExpiryDate(e.target.value)}
+                className="w-full border rounded p-2 text-sm mt-1"
+              />
             </div>
           </div>
         </div>
         <div className="flex gap-2 p-4 border-t">
-          <Button variant="outline" onClick={() => setShowSavePolicyModal(false)} className="flex-1">Cancel</Button>
-          <Button onClick={handleConfirmSavePolicy} disabled={savingPolicy} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white">
+          <Button
+            variant="outline"
+            onClick={() => setShowSavePolicyModal(false)}
+            className="flex-1"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmSavePolicy}
+            disabled={savingPolicy}
+            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+          >
             {savingPolicy ? "Saving..." : "Save"}
           </Button>
         </div>
       </Modal>
+
+      {/* Status Dialog for success/error messages from useMantysActions */}
+      <StatusDialog
+        isOpen={dialogOpen}
+        onClose={closeDialog}
+        status={dialogStatus}
+        title={dialogTitle}
+        message={dialogMessage}
+        reqId={dialogReqId}
+        documentCount={dialogDocumentCount}
+        failedCount={dialogFailedCount}
+        errorDetails={dialogErrorDetails}
+      />
+
+      {/* Status Dialog for local Save Policy action */}
+      <StatusDialog
+        isOpen={localDialogOpen}
+        onClose={() => setLocalDialogOpen(false)}
+        status={localDialogStatus}
+        title={localDialogTitle}
+        message={localDialogMessage}
+        errorDetails={localDialogErrorDetails}
+      />
     </div>
   );
 };
