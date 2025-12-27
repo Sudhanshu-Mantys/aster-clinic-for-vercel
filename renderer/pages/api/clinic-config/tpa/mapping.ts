@@ -40,7 +40,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
         const config = await Promise.race([configPromise, timeoutPromise])
 
         if (!config) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 error: 'TPA mapping not found',
                 details: `No TPA config found for ins_code: ${ins_code} and clinic_id: ${clinicId}`,
                 suggestion: 'Please ensure the TPA config exists in Redis with the required mapping fields'
@@ -48,7 +48,7 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
         }
 
         if (!config.insurance_id) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 error: 'TPA mapping incomplete',
                 details: `TPA config exists for ${ins_code} but is missing required mapping fields`,
                 missingFields: {
@@ -78,13 +78,13 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     } catch (error: any) {
         console.error('Error fetching TPA mapping:', error)
         if (error.message?.includes('timeout')) {
-            return res.status(504).json({ 
+            return res.status(504).json({
                 error: 'Request timeout',
                 details: 'The request took longer than 10 seconds to complete',
                 suggestion: 'Please check Redis connection and try again'
             })
         }
-        return res.status(500).json({ 
+        return res.status(500).json({
             error: 'Failed to fetch TPA mapping',
             details: error.message || 'Unknown error occurred'
         })
@@ -101,7 +101,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         return res.status(400).json({ error: 'ins_code is required' })
     }
     if (hospital_insurance_mapping_id === undefined || insurance_id === undefined || insurance_type === undefined) {
-        return res.status(400).json({ 
+        return res.status(400).json({
             error: 'hospital_insurance_mapping_id, insurance_id, and insurance_type are required',
             received: {
                 hospital_insurance_mapping_id: hospital_insurance_mapping_id !== undefined,
@@ -139,7 +139,7 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
         return res.status(201).json({ mapping })
     } catch (error: any) {
         console.error('Error setting TPA mapping:', error)
-        return res.status(500).json({ 
+        return res.status(500).json({
             error: 'Failed to save TPA mapping',
             details: error.message || 'Unknown error occurred'
         })
