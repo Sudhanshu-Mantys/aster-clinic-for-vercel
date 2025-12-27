@@ -17,7 +17,7 @@ export default async function handler(
     switch (req.method) {
       case 'GET': {
         // Get all history or filter by status
-        const { status, taskId, id, clinic_id } = req.query;
+        const { status, taskId, id, appointmentId, clinic_id } = req.query;
 
         // Get clinicId from query or use default
         const clinicId = clinic_id && typeof clinic_id === 'string' 
@@ -34,6 +34,20 @@ export default async function handler(
         if (id && typeof id === 'string') {
           const item = await eligibilityHistoryRedisService.getHistoryItem(id);
           return res.status(200).json(item || null);
+        }
+
+        // Filter by appointmentId
+        if (appointmentId) {
+          const appointmentIdNum = typeof appointmentId === 'string' 
+            ? parseInt(appointmentId, 10) 
+            : typeof appointmentId === 'number' 
+            ? appointmentId 
+            : null;
+          
+          if (appointmentIdNum && !isNaN(appointmentIdNum)) {
+            const items = await eligibilityHistoryRedisService.getHistoryByAppointmentId(appointmentIdNum);
+            return res.status(200).json(items);
+          }
         }
 
         // Get all items for clinic

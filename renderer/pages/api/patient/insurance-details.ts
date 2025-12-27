@@ -1,8 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { patientContextRedisService } from '../../../lib/redis-patient-context'
 
 /**
  * Next.js API Route - Patient Insurance Details Proxy
  * This route acts as a proxy to avoid CORS issues when calling the Aster Clinics API
+ * Automatically stores insurance details in Redis after successful fetch
  */
 
 // Use tunnel by default (safer, works from any network)
@@ -138,6 +140,23 @@ export default async function handler(
                 error: data.head.StatusText || 'Failed to fetch insurance details',
                 details: data,
             })
+        }
+
+        // Automatically store insurance details in Redis after successful fetch
+        try {
+            const parsedPatientId = parseInt(patientId, 10);
+            if (parsedPatientId && !isNaN(parsedPatientId)) {
+                await patientContextRedisService.storeInsuranceDetails(
+                    parsedPatientId,
+                    data
+                );
+                console.log(`✅ Auto-stored insurance details for patient:${parsedPatientId}`);
+            } else {
+                console.warn(`⚠️ Could not store insurance details: invalid patientId ${patientId}`);
+            }
+        } catch (storageError) {
+            // Log error but don't fail the request - insurance details were fetched successfully
+            console.error('Failed to store insurance details in Redis:', storageError);
         }
 
         // Return the successful response (even if no insurance records found)

@@ -1,6 +1,7 @@
 import React from "react";
 import { InsuranceCard } from "./InsuranceCard";
 import type { InsuranceData } from "../lib/api-client";
+import type { TPAConfig } from "../hooks/useClinicConfig";
 
 interface InsuranceCardGridProps {
   insuranceDetails: InsuranceData[];
@@ -8,6 +9,7 @@ interface InsuranceCardGridProps {
   error: string | null;
   selectedInsuranceId: number | null;
   onSelectInsurance: (insurance: InsuranceData) => void;
+  tpaConfigs?: TPAConfig[];
 }
 
 export const InsuranceCardGrid: React.FC<InsuranceCardGridProps> = ({
@@ -16,6 +18,7 @@ export const InsuranceCardGrid: React.FC<InsuranceCardGridProps> = ({
   error,
   selectedInsuranceId,
   onSelectInsurance,
+  tpaConfigs,
 }) => {
   const activeCount = insuranceDetails.filter(
     (ins) => ins.insurance_status?.toLowerCase() === "active"
@@ -124,6 +127,7 @@ export const InsuranceCardGrid: React.FC<InsuranceCardGridProps> = ({
               isSelected={selectedInsuranceId === key}
               onSelect={onSelectInsurance}
               index={index}
+              tpaConfigs={tpaConfigs}
             />
           );
         })}

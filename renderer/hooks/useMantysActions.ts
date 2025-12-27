@@ -119,8 +119,27 @@ export const useMantysActions = ({
       const config = configs.find(
         (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
       );
+
       if (config) {
+        // If config doesn't have hospital_insurance_mapping_id, try to fetch from mapping API
+        if (!config.hospital_insurance_mapping_id && response.tpa) {
+          try {
+            const mapping = await clinicConfigApi.getTPAMapping(clinicId, response.tpa);
+            if (mapping) {
+              // Merge mapping data into config
+              config.hospital_insurance_mapping_id = mapping.hospital_insurance_mapping_id;
+              config.insurance_id = mapping.insurance_id;
+              config.insurance_type = mapping.insurance_type;
+              config.insurance_name = mapping.insurance_name;
+              config.ins_payer = mapping.ins_payer;
+            }
+          } catch (mappingError) {
+            console.warn("Failed to fetch TPA mapping:", mappingError);
+          }
+        }
+
         setTpaConfig(config);
+        setTpaConfigLoaded(true);
       }
     } catch (error) {
       console.error("Error fetching TPA config:", error);
@@ -193,7 +212,30 @@ export const useMantysActions = ({
     let savedStatusText: string | null = null;
 
     try {
-      const configMappingId = tpaConfig?.hospital_insurance_mapping_id;
+      // Get TPA config - use state if available, otherwise fetch directly
+      let currentTpaConfig = tpaConfig;
+      if (!currentTpaConfig?.hospital_insurance_mapping_id && response.tpa && clinicId) {
+        try {
+          const configs = await clinicConfigApi.getTPA(clinicId);
+          const foundConfig = configs.find(
+            (c: any) => c.ins_code === response.tpa || c.tpa_id === response.tpa || c.payer_code === response.tpa
+          );
+          if (foundConfig) {
+            currentTpaConfig = foundConfig;
+            // If still missing mapping ID, try mapping API
+            if (!currentTpaConfig.hospital_insurance_mapping_id) {
+              const mapping = await clinicConfigApi.getTPAMapping(clinicId, response.tpa);
+              if (mapping) {
+                currentTpaConfig.hospital_insurance_mapping_id = mapping.hospital_insurance_mapping_id;
+              }
+            }
+          }
+        } catch (fetchError) {
+          console.warn("Failed to fetch TPA config directly:", fetchError);
+        }
+      }
+
+      const configMappingId = currentTpaConfig?.hospital_insurance_mapping_id;
       const fallbackMappingId = data.patient_info?.insurance_mapping_id
         ? parseInt(data.patient_info.insurance_mapping_id, 10)
         : null;
@@ -206,6 +248,7 @@ export const useMantysActions = ({
           clinicId,
           configMappingId,
           fallbackMappingId: data.patient_info?.insurance_mapping_id || null,
+          tpaConfig: currentTpaConfig,
         });
         throw new Error(message);
       } else {

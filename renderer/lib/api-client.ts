@@ -257,8 +257,7 @@ export const appointmentApi = {
 
   getToday: (params: { fromDate: string; toDate: string; customerSiteId?: number }) =>
     fetchJson<AppointmentSearchResponse>(
-      `/api/appointments/today?fromDate=${params.fromDate}&toDate=${params.toDate}${
-        params.customerSiteId ? `&customerSiteId=${params.customerSiteId}` : ''
+      `/api/appointments/today?fromDate=${params.fromDate}&toDate=${params.toDate}${params.customerSiteId ? `&customerSiteId=${params.customerSiteId}` : ''
       }`
     ),
 };
@@ -516,6 +515,13 @@ export const clinicConfigApi = {
   getTPAByName: async (clinicId: string, tpaName: string) => {
     const configs = await clinicConfigApi.getTPA(clinicId);
     return configs.find((config) => config.tpa_name === tpaName) || null;
+  },
+
+  getTPAMapping: async (clinicId: string, insCode: string) => {
+    const response = await fetchJson<{ mapping?: { hospital_insurance_mapping_id: number; insurance_id: number; insurance_type: number; insurance_name: string; ins_payer: string | null; ins_code: string; clinic_id?: string; created_at?: string; updated_at?: string } }>(
+      `/api/clinic-config/tpa/mapping?clinic_id=${clinicId}&ins_code=${encodeURIComponent(insCode)}`
+    );
+    return response.mapping || null;
   },
 
   createTPA: (clinicId: string, config: Partial<TPAConfig> & { tpa_id?: string; ins_code?: string }) =>

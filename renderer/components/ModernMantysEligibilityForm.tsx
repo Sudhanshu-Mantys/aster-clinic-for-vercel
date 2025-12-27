@@ -123,12 +123,16 @@ const VISIT_TYPES: Record<string, Array<{ label: string; value: string; extraArg
   TPA001: [
     { label: "Outpatient", value: "OUTPATIENT" },
     { label: "Emergency", value: "EMERGENCY" },
-    { label: "Maternity", value: "MATERNITY", extraArgs: { title: "maternity_type", titleLabel: "Maternity Type", options: [
-      { label: "Normal Delivery", value: "normal_delivery" },
-      { label: "C-Section", value: "c_section" },
-      { label: "Prenatal", value: "prenatal" },
-      { label: "Postnatal", value: "postnatal" },
-    ]}},
+    {
+      label: "Maternity", value: "MATERNITY", extraArgs: {
+        title: "maternity_type", titleLabel: "Maternity Type", options: [
+          { label: "Normal Delivery", value: "normal_delivery" },
+          { label: "C-Section", value: "c_section" },
+          { label: "Prenatal", value: "prenatal" },
+          { label: "Postnatal", value: "postnatal" },
+        ]
+      }
+    },
   ],
   TPA002: [
     { label: "Outpatient", value: "OUTPATIENT" },
@@ -142,12 +146,16 @@ const VISIT_TYPES: Record<string, Array<{ label: string; value: string; extraArg
   TPA004: [
     { label: "Outpatient", value: "OUTPATIENT" },
     { label: "Emergency", value: "EMERGENCY" },
-    { label: "Maternity", value: "MATERNITY", extraArgs: { title: "maternity_type", titleLabel: "Maternity Type", options: [
-      { label: "Normal Delivery", value: "normal_delivery" },
-      { label: "C-Section", value: "c_section" },
-      { label: "Prenatal", value: "prenatal" },
-      { label: "Postnatal", value: "postnatal" },
-    ]}},
+    {
+      label: "Maternity", value: "MATERNITY", extraArgs: {
+        title: "maternity_type", titleLabel: "Maternity Type", options: [
+          { label: "Normal Delivery", value: "normal_delivery" },
+          { label: "C-Section", value: "c_section" },
+          { label: "Prenatal", value: "prenatal" },
+          { label: "Postnatal", value: "postnatal" },
+        ]
+      }
+    },
   ],
   TPA010: [
     { label: "Outpatient", value: "OUTPATIENT" },
@@ -363,25 +371,79 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
 
   useEffect(() => {
     if (insuranceData) {
-      const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const tpaMapping: Record<string, string> = {
-        Neuron: "TPA001", NextCare: "TPA002", "Al Madallah": "TPA003", NAS: "TPA004",
-        "First Med": "TPA010", FMC: "TPA010", Daman: "INS026", "Daman Thiqa": "TPA023",
-        AXA: "INS010", ADNIC: "INS017", Mednet: "TPA036", Oman: "INS012", Inayah: "TPA008",
-      };
-      const normalizedTpaName = normalize(insuranceData.tpa_name || "");
-      const normalizedPayerName = normalize(insuranceData.payer_name || "");
-      const mappedTpa = Object.entries(tpaMapping).find(([key]) => {
-        const normalizedKey = normalize(key);
-        return normalizedTpaName.includes(normalizedKey) || normalizedPayerName.includes(normalizedKey);
-      });
-      if (mappedTpa) setValue("options", mappedTpa[1]);
+      const isInsuranceValid = insuranceData.is_valid === 1;
+      let prefilledOption: string | null = null;
+
+      // Priority 1: Valid TPA (insurance_type === 2)
+      // insurance_type: 1 = Insurance, 2 = TPA
+      if (isInsuranceValid && insuranceData.insurance_type === 2 && insuranceData.receiver_code) {
+        const matchingOption = INSURANCE_OPTIONS.find(opt => opt.value === insuranceData.receiver_code);
+        if (matchingOption) {
+          prefilledOption = matchingOption.value;
+          console.log("✅ Pre-filling insurance provider from valid TPA (receiver_code):", insuranceData.receiver_code, "->", matchingOption.value);
+        }
+      }
+
+      // Priority 2: Valid Insurance (insurance_type === 1, but not TPA)
+      // Only use if we haven't already found a valid TPA
+      if (!prefilledOption && isInsuranceValid && insuranceData.insurance_type === 1 && insuranceData.payer_code) {
+        const matchingOption = INSURANCE_OPTIONS.find(opt => opt.value === insuranceData.payer_code);
+        if (matchingOption) {
+          prefilledOption = matchingOption.value;
+          console.log("✅ Pre-filling insurance provider from valid Insurance (payer_code):", insuranceData.payer_code, "->", matchingOption.value);
+        }
+      }
+
+      // Priority 3: Fallback - direct code matching (if invalid or type unknown)
+      if (!prefilledOption) {
+        const code = insuranceData.payer_code || insuranceData.receiver_code;
+        if (code) {
+          const matchingOption = INSURANCE_OPTIONS.find(opt => opt.value === code);
+          if (matchingOption) {
+            prefilledOption = matchingOption.value;
+            console.log("✅ Pre-filling insurance provider from code (fallback):", code, "->", matchingOption.value);
+          }
+        }
+      }
+
+      // Priority 4: Name-based mapping (if no code match)
+      if (!prefilledOption) {
+        const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const tpaMapping: Record<string, string> = {
+          Neuron: "TPA001", NextCare: "TPA002", "Al Madallah": "TPA003", NAS: "TPA004",
+          "First Med": "TPA010", FMC: "TPA010", Daman: "INS026", "Daman Thiqa": "TPA023",
+          AXA: "INS010", ADNIC: "INS017", Mednet: "TPA036", Oman: "INS012", Inayah: "TPA008",
+          Saico: "INS015", "Saudi Arabian": "INS015", // Add SAICO mappings
+        };
+        const normalizedTpaName = normalize(insuranceData.tpa_name || "");
+        const normalizedPayerName = normalize(insuranceData.payer_name || "");
+        const mappedTpa = Object.entries(tpaMapping).find(([key]) => {
+          const normalizedKey = normalize(key);
+          return normalizedTpaName.includes(normalizedKey) || normalizedPayerName.includes(normalizedKey);
+        });
+        if (mappedTpa) {
+          prefilledOption = mappedTpa[1];
+          console.log("✅ Pre-filling insurance provider from name mapping:", mappedTpa[0], "->", mappedTpa[1]);
+        }
+      }
+
+      // Set the prefilled option if found
+      if (prefilledOption) {
+        setValue("options", prefilledOption);
+      }
+
+      // Pre-fill member ID
       const memberId = insuranceData.tpa_policy_id || insuranceData.insurance_policy_id || insuranceData.policy_number || null;
       if (memberId) {
+        console.log("✅ Pre-filling member ID:", memberId);
         setValue("idType", "CARDNUMBER");
         setValue("emiratesId", memberId);
       }
-      if (insuranceData.payer_name) setValue("payerName", insuranceData.payer_name);
+
+      // Pre-fill payer name if available
+      if (insuranceData.payer_name) {
+        setValue("payerName", insuranceData.payer_name);
+      }
     }
   }, [insuranceData, setValue]);
 
@@ -502,7 +564,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
       <div className="p-4">
         <MantysResultsDisplay
           response={mantysResponse}
-          onClose={() => {}}
+          onClose={() => { }}
           onCheckAnother={() => { setShowResults(false); setMantysResponse(null); }}
           patientMPI={contextToUse?.mpi}
           patientId={contextToUse?.patient_id}

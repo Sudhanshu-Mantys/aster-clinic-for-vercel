@@ -172,6 +172,7 @@ export default async function handler(
         tpaCode: payload.tpa_name,
         idType: payload.id_type,
         visitType: payload.visit_type,
+        appointmentId: appointmentId || undefined,
         status: "pending",
         createdAt: new Date().toISOString(),
       });
