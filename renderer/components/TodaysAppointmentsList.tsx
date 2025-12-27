@@ -41,6 +41,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
   // Eligibility results drawer/modal state
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedSearchItem, setSelectedSearchItem] = useState<EligibilityHistoryItem | null>(null);
   const [showEligibilityResultsDrawer, setShowEligibilityResultsDrawer] = useState(false);
   const [showEligibilityModal, setShowEligibilityModal] = useState(false);
   const [hasAutoOpened, setHasAutoOpened] = useState(false);
@@ -206,25 +207,43 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
   // Handler for previous search clicks (eligibility history)
   const handlePreviousSearchClick = useCallback((search: EligibilityHistoryItem) => {
-    console.log("[handlePreviousSearchClick] Clicked search item:", {
+    console.log('[TodaysAppointmentsList] handlePreviousSearchClick called:', {
       taskId: search.taskId,
+      id: search.id,
       status: search.status,
-      patientName: search.patientName,
-      patientMPI: search.patientMPI,
-      result: search.result,
-      createdAt: search.createdAt,
+      hasResult: !!search.result,
+      searchObject: {
+        taskId: search.taskId,
+        id: search.id,
+        status: search.status,
+        createdAt: search.createdAt,
+        insurancePayer: search.insurancePayer,
+        appointmentId: search.appointmentId,
+        hasResult: !!search.result,
+      },
     });
+
+    if (!search.taskId) {
+      console.error('[TodaysAppointmentsList] handlePreviousSearchClick: search.taskId is missing!', {
+        search,
+      });
+      return;
+    }
+
     const isErrorStatus = search.status === "error" || (search.status as string) === "failed";
-    console.log("[handlePreviousSearchClick] isErrorStatus:", isErrorStatus);
+
+    console.log('[TodaysAppointmentsList] Setting selectedTaskId and selectedSearchItem:', search.taskId);
     setSelectedTaskId(search.taskId);
+    setSelectedSearchItem(search); // Store the clicked search item
+
     if (isErrorStatus) {
-      console.log("[handlePreviousSearchClick] Opening eligibility modal (error status)");
+      console.log('[TodaysAppointmentsList] Opening eligibility modal (error status)');
       setShowEligibilityModal(true);
     } else if (search.status === "complete") {
-      console.log("[handlePreviousSearchClick] Opening eligibility results drawer (complete status)");
+      console.log('[TodaysAppointmentsList] Opening eligibility results drawer (complete status)');
       setShowEligibilityResultsDrawer(true);
     } else {
-      console.log("[handlePreviousSearchClick] Opening eligibility modal (other status:", search.status, ")");
+      console.log('[TodaysAppointmentsList] Opening eligibility modal (other status:', search.status, ')');
       setShowEligibilityModal(true);
     }
   }, []);
@@ -233,6 +252,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     setShowEligibilityResultsDrawer(false);
     setTimeout(() => {
       setSelectedTaskId(null);
+      setSelectedSearchItem(null);
     }, 300);
   }, []);
 

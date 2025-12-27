@@ -35,7 +35,7 @@
 # To install, run: crontab -e
 # Then add this line (adjust paths as needed):
 #
-# * * * * * cd /path/to/services/auto-eligibility-checker && /path/to/venv/bin/python main.py >> /var/log/eligibility-checker.log 2>&1
+# * * * * * cd /Users/sudhanshusahil/work2/aster-clinics/services/auto-eligibility-checker && /Users/sudhanshusahil/work2/aster-clinics/services/auto-eligibility-checker/venv/bin/python main.py >> /var/log/eligibility-checker.log 2>&1
 #
 # Make sure to:
 # 1. Update the paths to match your installation
