@@ -331,10 +331,10 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
               <h4 className="text-sm font-semibold text-gray-700 mb-2">
                 Search All Progress ({aggregatedResults.length} TPAs checked)
               </h4>
-              <div className="space-y-2">
-                {aggregatedResults.slice(0, 5).map((result: any, index: number) => (
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+                {aggregatedResults.map((result: any, index: number) => (
                   <div key={index} className="text-xs text-gray-600">
-                    <span className="font-medium">{result.tpa_name}:</span>{" "}
+                    <span className="font-bold">{result.tpa_name}:</span>{" "}
                     <span
                       className={
                         result.status === "failed"
@@ -351,11 +351,6 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
                     )}
                   </div>
                 ))}
-                {aggregatedResults.length > 5 && (
-                  <div className="text-xs text-gray-500">
-                    + {aggregatedResults.length - 5} more TPAs...
-                  </div>
-                )}
               </div>
             </div>
           )}
