@@ -639,6 +639,17 @@ export const useMantysActions = ({
 
     setSavingPolicy(true);
 
+    // Define payerIdToUse outside try block so it's accessible in catch block for error logging
+    const payerIdToUse = data.patient_info?.payerId
+      ? typeof data.patient_info.payerId === "string"
+        ? parseInt(data.patient_info.payerId, 10)
+        : data.patient_info.payerId
+      : data.patient_info?.payer_id
+        ? typeof data.patient_info.payer_id === "string"
+          ? parseInt(data.patient_info.payer_id, 10)
+          : data.patient_info.payer_id
+        : null;
+
     try {
       const siteId = tpaConfig?.lt_site_id
         ? parseInt(tpaConfig.lt_site_id, 10)
@@ -652,16 +663,6 @@ export const useMantysActions = ({
         ? tpaConfig.hospital_insurance_mapping_id
         : data.patient_info?.insurance_mapping_id
           ? parseInt(data.patient_info.insurance_mapping_id, 10)
-          : null;
-
-      const payerIdToUse = data.patient_info?.payerId
-        ? typeof data.patient_info.payerId === "string"
-          ? parseInt(data.patient_info.payerId, 10)
-          : data.patient_info.payerId
-        : data.patient_info?.payer_id
-          ? typeof data.patient_info.payer_id === "string"
-            ? parseInt(data.patient_info.payer_id, 10)
-            : data.patient_info.payer_id
           : null;
 
       const policyData = {

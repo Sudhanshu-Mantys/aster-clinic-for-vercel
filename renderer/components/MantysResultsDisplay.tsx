@@ -69,6 +69,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [showSavePolicyModal, setShowSavePolicyModal] = useState(false);
   const [policySaved, setPolicySaved] = useState(false);
+  const [formInitialized, setFormInitialized] = useState(false);
 
   // Form field states
   const [memberId, setMemberId] = useState<string>("");
@@ -557,7 +558,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       console.log("❌ No payer code to match");
     }
 
-    setShowSavePolicyModal(true);
+    // Use setTimeout to ensure all state updates are processed before opening modal
+    setTimeout(() => {
+      setShowSavePolicyModal(true);
+    }, 0);
   };
 
   const handleConfirmSavePolicy = async () => {
@@ -763,9 +767,25 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
       setPolicySaved(true);
       alert("Policy details saved successfully!");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving policy:", error);
-      alert("An error occurred while saving policy details.");
+
+      // Check if error response contains "Insurance Already Exists" message
+      let errorMessage = "An error occurred while saving policy details.";
+
+      if (error?.response?.data?.body?.Error) {
+        const errors = error.response.data.body.Error;
+        if (Array.isArray(errors) && errors.length > 0) {
+          const statusText = errors[0].status_text;
+          if (statusText) {
+            errorMessage = statusText;
+          }
+        }
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+
+      alert(errorMessage);
     } finally {
       setSavingPolicy(false);
     }
@@ -1369,7 +1389,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                   <input
                     type="text"
                     value={memberId}
-                    onChange={(e) => setMemberId(e.target.value)}
+                    onChange={(e) => {
+                      console.log("Member ID changed:", e.target.value);
+                      setMemberId(e.target.value);
+                    }}
                     className="w-full border border-gray-300 rounded-md p-2 text-sm"
                     placeholder="Enter member ID"
                   />
@@ -1383,7 +1406,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                   <input
                     type="text"
                     value={receiverId}
-                    onChange={(e) => setReceiverId(e.target.value)}
+                    onChange={(e) => {
+                      console.log("Receiver ID changed:", e.target.value);
+                      setReceiverId(e.target.value);
+                    }}
                     className="w-full border border-gray-300 rounded-md p-2 text-sm"
                     placeholder="Enter receiver ID"
                   />
@@ -1404,10 +1430,14 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                         : null
                     }
                     onChange={(selected) => {
-                      const payer = payersConfig.find(
-                        (p: any) => p.reciever_payer_id === selected?.value,
-                      );
-                      setSelectedPayer(payer || null);
+                      if (selected) {
+                        const payer = payersConfig.find(
+                          (p: any) => p.reciever_payer_id === selected.value,
+                        );
+                        setSelectedPayer(payer || null);
+                      } else {
+                        setSelectedPayer(null);
+                      }
                     }}
                     options={payersConfig.map((payer: any) => ({
                       value: payer.reciever_payer_id,
@@ -1415,6 +1445,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                     }))}
                     placeholder="Select payer"
                     isSearchable
+                    isClearable
                     className="text-sm"
                   />
                 </div>
@@ -1434,11 +1465,18 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                         : null
                     }
                     onChange={(selected) => {
-                      const plan = plansConfig.find(
-                        (p: any) => p.plan_id === selected?.value,
-                      );
-                      setSelectedPlan(plan || null);
-                      if (plan) setRateCard(plan.plan_code || "");
+                      if (selected) {
+                        const plan = plansConfig.find(
+                          (p: any) => p.plan_id === selected.value,
+                        );
+                        setSelectedPlan(plan || null);
+                        if (plan) {
+                          setRateCard(plan.plan_code || "");
+                        }
+                      } else {
+                        setSelectedPlan(null);
+                        setRateCard("");
+                      }
                     }}
                     options={(() => {
                       // Filter plans by network mapping if network is selected
@@ -1467,6 +1505,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                     })()}
                     placeholder="Select plan"
                     isSearchable
+                    isClearable
                     className="text-sm"
                   />
                 </div>
