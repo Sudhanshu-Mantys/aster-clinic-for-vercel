@@ -3,8 +3,13 @@
 
 This script runs once per cron execution, fetches appointments,
 and creates Mantys eligibility checks for new appointments.
+
+Can also run continuously every 10 seconds using --continuous flag.
 """
 import sys
+import argparse
+import signal
+import time
 import logging
 from typing import Dict, Any, List
 from config import config
@@ -40,6 +45,7 @@ class EligibilityCheckerService:
             "skipped_no_tpa": 0,
             "skipped_no_id": 0,
         }
+        self._should_stop = False
     
     def has_insurance_info(self, appointment: Dict[str, Any]) -> bool:
         """
@@ -213,9 +219,13 @@ class EligibilityCheckerService:
             )
             return False
     
-    def run(self) -> int:
+    def run(self, close_connection: bool = True) -> int:
         """
         Main execution method.
+        
+        Args:
+            close_connection: If True, close Redis connection after execution.
+                             Set to False for continuous mode.
         
         Returns:
             Exit code (0 for success, non-zero for errors)
@@ -258,11 +268,12 @@ class EligibilityCheckerService:
             return 1
         
         finally:
-            # Clean up
-            try:
-                self.redis_tracker.close()
-            except Exception as e:
-                logger.error(f"Error closing Redis connection: {e}")
+            # Clean up only if requested (not in continuous mode)
+            if close_connection:
+                try:
+                    self.redis_tracker.close()
+                except Exception as e:
+                    logger.error(f"Error closing Redis connection: {e}")
     
     def _log_metrics(self) -> None:
         """Log processing metrics."""
@@ -277,13 +288,100 @@ class EligibilityCheckerService:
         logger.info(f"  Skipped (no ID): {self.metrics['skipped_no_id']}")
         logger.info(f"  Errors: {self.metrics['errors']}")
         logger.info("=" * 60)
+    
+    def stop(self) -> None:
+        """Signal the service to stop gracefully."""
+        logger.info("Received stop signal, will finish current iteration and exit")
+        self._should_stop = True
+    
+    def should_stop(self) -> bool:
+        """Check if service should stop."""
+        return self._should_stop
+    
+    def reset_metrics(self) -> None:
+        """Reset metrics for next iteration."""
+        self.metrics = {
+            "appointments_fetched": 0,
+            "appointments_processed": 0,
+            "eligibility_checks_created": 0,
+            "errors": 0,
+            "skipped_no_insurance": 0,
+            "skipped_already_processed": 0,
+            "skipped_no_tpa": 0,
+            "skipped_no_id": 0,
+        }
 
 
 def main() -> int:
     """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Auto eligibility checker service for processing appointments"
+    )
+    parser.add_argument(
+        "--continuous",
+        action="store_true",
+        help="Run continuously every 10 seconds instead of running once and exiting",
+    )
+    args = parser.parse_args()
+    
     service = EligibilityCheckerService()
-    exit_code = service.run()
-    sys.exit(exit_code)
+    
+    # Set up signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        """Handle shutdown signals gracefully."""
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        service.stop()
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    if args.continuous:
+        logger.info("Starting auto eligibility checker service in continuous mode (every 10 seconds)")
+        iteration = 0
+        
+        try:
+            while not service.should_stop():
+                iteration += 1
+                logger.info(f"Starting iteration {iteration}")
+                
+                try:
+                    # Don't close connection between iterations in continuous mode
+                    exit_code = service.run(close_connection=False)
+                    if exit_code != 0:
+                        logger.warning(f"Iteration {iteration} completed with exit code {exit_code}")
+                except Exception as e:
+                    logger.error(f"Error in iteration {iteration}: {e}", exc_info=True)
+                
+                # Reset metrics for next iteration
+                service.reset_metrics()
+                
+                if service.should_stop():
+                    logger.info("Stop signal received, exiting loop")
+                    break
+                
+                logger.info("Waiting 10 seconds before next iteration...")
+                # Sleep in small increments to check for stop signal more frequently
+                for _ in range(10):
+                    if service.should_stop():
+                        break
+                    time.sleep(1)
+            
+            logger.info("Auto eligibility checker service stopped gracefully")
+            return 0
+        except KeyboardInterrupt:
+            logger.info("Interrupted by user")
+            service.stop()
+            return 0
+        finally:
+            # Clean up
+            try:
+                service.redis_tracker.close()
+            except Exception as e:
+                logger.error(f"Error closing Redis connection: {e}")
+    else:
+        # Single-run mode (original behavior)
+        exit_code = service.run()
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":
