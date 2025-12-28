@@ -1,6 +1,10 @@
 # Auto Eligibility Checker Service
 
-A Python script that runs via cron job to automatically fetch appointments and create Mantys eligibility checks for new appointments. The script processes appointments once per execution and exits, letting the frontend app handle status polling automatically.
+A Python script that automatically fetches appointments and creates Mantys eligibility checks for new appointments. The script can run in two modes:
+- **Single-run mode** (default): Processes appointments once and exits - suitable for cron jobs
+- **Continuous mode**: Runs continuously every 10 seconds - suitable for long-running services
+
+The frontend app handles status polling automatically.
 
 ## Overview
 
@@ -16,6 +20,7 @@ This service:
 
 ## Architecture
 
+### Single-Run Mode (Cron)
 ```
 Cron Job (every minute)
   ↓
@@ -32,7 +37,27 @@ Create History Item
 Mark as Processed in Redis
   ↓
 Exit
+```
 
+### Continuous Mode
+```
+Service Start (--continuous flag)
+  ↓
+Loop Forever:
+  ├─ Fetch Appointments
+  ├─ Filter New Appointments
+  ├─ Extract TPA Code, Visit Type, ID
+  ├─ Create Mantys Task
+  ├─ Create History Item
+  ├─ Mark as Processed in Redis
+  ├─ Log Metrics
+  └─ Wait 10 seconds
+  ↓
+(Repeat until SIGTERM/SIGINT)
+```
+
+### Frontend Polling
+```
 Frontend App (when open)
   ↓
 EligibilityPollingManager Component
@@ -122,7 +147,63 @@ Updates Redis History
 
 ## Deployment
 
-### Setting Up Cron Job
+### Option 1: Continuous Mode (Recommended)
+
+Run the service continuously every 10 seconds. This is the recommended approach for production deployments.
+
+1. **Test the script manually first:**
+   ```bash
+   cd /path/to/services/auto-eligibility-checker
+   source venv/bin/activate
+   python main.py --continuous
+   ```
+
+2. **Run as a background service:**
+   ```bash
+   nohup python main.py --continuous >> /var/log/eligibility-checker.log 2>&1 &
+   ```
+
+3. **Or use systemd service (recommended for production):**
+   
+   Create `/etc/systemd/system/eligibility-checker.service`:
+   ```ini
+   [Unit]
+   Description=Auto Eligibility Checker Service
+   After=network.target redis.service
+
+   [Service]
+   Type=simple
+   User=your-user
+   WorkingDirectory=/path/to/services/auto-eligibility-checker
+   Environment="PATH=/path/to/services/auto-eligibility-checker/venv/bin"
+   ExecStart=/path/to/services/auto-eligibility-checker/venv/bin/python main.py --continuous
+   Restart=always
+   RestartSec=10
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   Then enable and start:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable eligibility-checker
+   sudo systemctl start eligibility-checker
+   sudo systemctl status eligibility-checker
+   ```
+
+4. **Stop the service gracefully:**
+   ```bash
+   # If running with nohup, find and kill:
+   pkill -f "python main.py --continuous"
+   
+   # If using systemd:
+   sudo systemctl stop eligibility-checker
+   ```
+
+### Option 2: Cron Job (Single-Run Mode)
+
+Run the script once per minute via cron. This is the traditional approach.
 
 1. **Test the script manually first:**
    ```bash
@@ -155,9 +236,11 @@ Updates Redis History
    tail -f /var/log/eligibility-checker.log
    ```
 
-### Alternative: Using systemd (Optional)
-
-You can also run this as a systemd service with a timer instead of cron. See systemd documentation for details.
+**Note:** Continuous mode (Option 1) is recommended as it provides:
+- More frequent checks (every 10 seconds vs every minute)
+- Better resource management (single process vs multiple cron executions)
+- Easier monitoring and logging
+- Graceful shutdown handling
 
 ## How It Works
 
@@ -215,7 +298,7 @@ Priority order:
 
 ## Monitoring
 
-The script logs comprehensive metrics at the end of each run:
+The script logs comprehensive metrics at the end of each run (or iteration in continuous mode):
 
 ```
 Processing Metrics:
@@ -229,9 +312,25 @@ Processing Metrics:
   Errors: 0
 ```
 
+**In continuous mode**, each iteration is logged with its iteration number:
+```
+Starting iteration 1
+Starting auto eligibility checker service
+...
+Starting iteration 2
+...
+```
+
 Check logs regularly:
 ```bash
+# For continuous mode or systemd service:
 tail -f /var/log/eligibility-checker.log
+
+# For cron job:
+tail -f /var/log/eligibility-checker.log
+
+# View systemd service logs:
+sudo journalctl -u eligibility-checker -f
 ```
 
 ## Troubleshooting
@@ -296,11 +395,21 @@ tail -f /var/log/eligibility-checker.log
 
 ### Running Locally
 
+**Single-run mode (default):**
 ```bash
 cd services/auto-eligibility-checker
 source venv/bin/activate
 python main.py
 ```
+
+**Continuous mode:**
+```bash
+cd services/auto-eligibility-checker
+source venv/bin/activate
+python main.py --continuous
+```
+
+Press `Ctrl+C` to stop continuous mode gracefully.
 
 ### Testing
 
