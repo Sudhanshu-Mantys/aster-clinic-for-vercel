@@ -48,12 +48,16 @@ export default async function handler(
         // Use policyId from existing policy if available, otherwise 0 for new policy
         policyId: cleanPolicyData.policyId || 0,
         isActive: cleanPolicyData.isActive ?? 1,
-        // Ensure payerId is a number or null
-        payerId: cleanPolicyData.payerId
-          ? typeof cleanPolicyData.payerId === "string"
-            ? parseInt(cleanPolicyData.payerId, 10)
-            : cleanPolicyData.payerId
-          : null,
+        // Use the payerId parameter (from tpaConfig.insurance_id) if provided, otherwise fall back to policy data
+        payerId: payerId
+          ? typeof payerId === "string"
+            ? parseInt(payerId, 10)
+            : payerId
+          : cleanPolicyData.payerId
+            ? typeof cleanPolicyData.payerId === "string"
+              ? parseInt(cleanPolicyData.payerId, 10)
+              : cleanPolicyData.payerId
+            : null,
         insuranceCompanyId: cleanPolicyData.insuranceCompanyId || null,
         // Ensure networkId is a number or null
         networkId: cleanPolicyData.networkId

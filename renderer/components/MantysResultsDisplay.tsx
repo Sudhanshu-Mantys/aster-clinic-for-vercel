@@ -623,11 +623,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         patientId: finalPatientId,
         appointmentId: finalAppointmentId,
         encounterId: finalEncounterId,
-        payerId: data.patient_info?.payer_id
-          ? typeof data.patient_info.payer_id === "number"
-            ? data.patient_info.payer_id
-            : parseInt(String(data.patient_info.payer_id), 10)
-          : undefined,
+        payerId: tpaConfig?.insurance_id || undefined,
       });
 
       setPolicySaved(true);
