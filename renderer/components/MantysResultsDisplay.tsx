@@ -769,22 +769,69 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       alert("Policy details saved successfully!");
     } catch (error: any) {
       console.error("Error saving policy:", error);
+      console.error("Error details:", {
+        name: error?.name,
+        message: error?.message,
+        data: error?.data,
+        hasData: !!error?.data,
+        dataType: typeof error?.data,
+      });
 
-      // Check if error response contains "Insurance Already Exists" message
+      // Extract error message - the API client returns ApiError with proper error message
       let errorMessage = "An error occurred while saving policy details.";
 
-      if (error?.response?.data?.body?.Error) {
+      // Check if error has data property (ApiError from our API client)
+      if (error?.data) {
+        console.log("Extracting error from error.data:", error.data);
+
+        // Priority 1: Check for specific error in details.body.Error[0].status_text (most specific)
+        if (error.data.details?.body?.Error?.[0]?.status_text) {
+          errorMessage = error.data.details.body.Error[0].status_text;
+          console.log(
+            "✓ Extracted from data.details.body.Error[0].status_text:",
+            errorMessage,
+          );
+        }
+        // Priority 2: Check for error in body.Error[0].status_text
+        else if (error.data.body?.Error?.[0]?.status_text) {
+          errorMessage = error.data.body.Error[0].status_text;
+          console.log(
+            "✓ Extracted from body.Error[0].status_text:",
+            errorMessage,
+          );
+        }
+        // Priority 3: Use generic error message from data.error (only if more specific not found)
+        else if (error.data.error) {
+          errorMessage = String(error.data.error);
+          console.log("✓ Extracted from data.error:", errorMessage);
+        }
+        // Priority 4: Fallback to error.message
+        else if (error.message) {
+          errorMessage = error.message;
+          console.log("✓ Using error.message:", errorMessage);
+        }
+      }
+      // Fallback to regular error structure (old axios-style error)
+      else if (error?.response?.data?.body?.Error) {
         const errors = error.response.data.body.Error;
         if (Array.isArray(errors) && errors.length > 0) {
           const statusText = errors[0].status_text;
           if (statusText) {
             errorMessage = statusText;
+            console.log(
+              "✓ Extracted from response.data.body.Error[0].status_text:",
+              errorMessage,
+            );
           }
         }
-      } else if (error?.message) {
+      }
+      // Generic error with message property
+      else if (error?.message) {
         errorMessage = error.message;
+        console.log("✓ Using error.message:", errorMessage);
       }
 
+      console.log("Final error message to display:", errorMessage);
       alert(errorMessage);
     } finally {
       setSavingPolicy(false);

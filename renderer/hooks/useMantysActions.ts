@@ -752,7 +752,35 @@ export const useMantysActions = ({
       let errorMessage = "Failed to save policy details";
       let errorDetails: string | undefined;
 
-      if (error instanceof Error) {
+      if (error instanceof ApiError) {
+        // Extract the specific error message from the API response
+        errorMessage = error.message;
+
+        // Try to extract more specific error from the details if available
+        if (error.data && typeof error.data === "object") {
+          const details = error.data as any;
+
+          // Check if there's a more specific error message in body.Error[0].status_text
+          if (details.body?.Error?.[0]?.status_text) {
+            errorMessage = details.body.Error[0].status_text;
+          }
+          // Or check if there's an error in the details object
+          else if (details.error) {
+            errorMessage = String(details.error);
+          }
+        }
+
+        errorDetails =
+          `API Error: ${errorMessage}\n\nContext:\n` +
+          `- Patient ID: ${finalPatientId}\n` +
+          `- Appointment ID: ${finalAppointmentId}\n` +
+          `- Encounter ID: ${finalEncounterId || "N/A"}\n` +
+          `- TPA: ${response.tpa || "N/A"}\n` +
+          `- Insurance Mapping ID: ${tpaConfig?.hospital_insurance_mapping_id || data.patient_info?.insurance_mapping_id || "Missing"}\n` +
+          `- Payer ID: ${payerIdToUse || "N/A"}\n` +
+          `- Policy Number: ${data.patient_info?.patient_id_info?.policy_number || "N/A"}\n` +
+          `- Member ID: ${data.patient_info?.patient_id_info?.member_id || "N/A"}`;
+      } else if (error instanceof Error) {
         errorMessage = error.message || errorMessage;
         errorDetails =
           `${error.name}: ${error.message}\n\nStack trace:\n${error.stack || "N/A"}\n\nContext:\n` +
@@ -764,13 +792,6 @@ export const useMantysActions = ({
           `- Payer ID: ${payerIdToUse || "N/A"}\n` +
           `- Policy Number: ${data.patient_info?.patient_id_info?.policy_number || "N/A"}\n` +
           `- Member ID: ${data.patient_info?.patient_id_info?.member_id || "N/A"}`;
-      } else if (error instanceof ApiError) {
-        errorMessage = error.message;
-        errorDetails =
-          `API Error: ${error.toString()}\n\nContext:\n` +
-          `- Patient ID: ${finalPatientId}\n` +
-          `- Appointment ID: ${finalAppointmentId}\n` +
-          `- TPA: ${response.tpa || "N/A"}`;
       } else {
         errorDetails = `Unknown error: ${String(error)}\n\nPlease check the browser console for more details.`;
       }
