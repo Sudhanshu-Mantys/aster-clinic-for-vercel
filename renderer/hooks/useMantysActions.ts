@@ -165,8 +165,14 @@ export const useMantysActions = ({
         if (context.physician_id || context.physicianId) {
           const physicianIdValue = context.physician_id || context.physicianId;
           if (physicianIdValue) {
-            setEnrichedPhysicianId(typeof physicianIdValue === 'number' ? physicianIdValue : parseInt(String(physicianIdValue), 10));
-            console.log(`✅ Fetched physician_id ${physicianIdValue} from patient context`);
+            setEnrichedPhysicianId(
+              typeof physicianIdValue === "number"
+                ? physicianIdValue
+                : parseInt(String(physicianIdValue), 10),
+            );
+            console.log(
+              `✅ Fetched physician_id ${physicianIdValue} from patient context`,
+            );
           }
         }
       } catch (error) {
@@ -346,20 +352,22 @@ export const useMantysActions = ({
             showDialog({
               status: "error",
               title: "No Active Insurance",
-              message: "There is no active Insurance policy for this user",
+              message:
+                "There is no active Insurance policy for this user, please save policy first to upload files",
             });
             return;
           }
           insTpaPatIdForUpload =
             Number(
               selectedInsurance?.patient_insurance_tpa_policy_id_sites ||
-              selectedInsurance?.patient_insurance_tpa_policy_id,
+                selectedInsurance?.patient_insurance_tpa_policy_id,
             ) || null;
           if (!insTpaPatIdForUpload) {
             showDialog({
               status: "error",
               title: "No Active Insurance",
-              message: "There is no active Insurance policy for this user",
+              message:
+                "There is no active Insurance policy for this user, please save policy first to upload files",
             });
             return;
           }
@@ -367,7 +375,8 @@ export const useMantysActions = ({
           showDialog({
             status: "error",
             title: "No Active Insurance",
-            message: "There is no active Insurance policy for this user",
+            message:
+              "There is no active Insurance policy for this user, please save policy first to upload files",
           });
           return;
         }
@@ -375,7 +384,8 @@ export const useMantysActions = ({
         showDialog({
           status: "error",
           title: "No Active Insurance",
-          message: "There is no active Insurance policy for this user",
+          message:
+            "There is no active Insurance policy for this user, please save policy first to upload files",
         });
         return;
       }
@@ -712,16 +722,63 @@ export const useMantysActions = ({
         title: "Policy Saved",
         message: "Policy details saved successfully!",
       });
-      console.log("Policy saved:", result);
+      console.log("✅ Policy saved successfully:", result);
     } catch (error) {
-      const message =
-        error instanceof ApiError ? error.message : "An error occurred";
-      console.error("Error saving policy:", error);
+      // Enhanced error logging with diagnostic information
+      console.error("❌ Error saving policy:", {
+        error,
+        errorType: error?.constructor?.name,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        context: {
+          patientId: finalPatientId,
+          appointmentId: finalAppointmentId,
+          encounterId: finalEncounterId,
+          tpaCode: response.tpa,
+          hasTpaConfig: !!tpaConfig,
+          insuranceMappingId:
+            tpaConfig?.hospital_insurance_mapping_id ||
+            data.patient_info?.insurance_mapping_id ||
+            null,
+          payerId: payerIdToUse,
+          policyNumber:
+            data.patient_info?.patient_id_info?.policy_number || null,
+          memberId: data.patient_info?.patient_id_info?.member_id || null,
+        },
+      });
+
+      let errorTitle = "Failed to Save Policy";
+      let errorMessage = "Failed to save policy details";
+      let errorDetails: string | undefined;
+
+      if (error instanceof Error) {
+        errorMessage = error.message || errorMessage;
+        errorDetails =
+          `${error.name}: ${error.message}\n\nStack trace:\n${error.stack || "N/A"}\n\nContext:\n` +
+          `- Patient ID: ${finalPatientId}\n` +
+          `- Appointment ID: ${finalAppointmentId}\n` +
+          `- Encounter ID: ${finalEncounterId || "N/A"}\n` +
+          `- TPA: ${response.tpa || "N/A"}\n` +
+          `- Insurance Mapping ID: ${tpaConfig?.hospital_insurance_mapping_id || data.patient_info?.insurance_mapping_id || "Missing"}\n` +
+          `- Payer ID: ${payerIdToUse || "N/A"}\n` +
+          `- Policy Number: ${data.patient_info?.patient_id_info?.policy_number || "N/A"}\n` +
+          `- Member ID: ${data.patient_info?.patient_id_info?.member_id || "N/A"}`;
+      } else if (error instanceof ApiError) {
+        errorMessage = error.message;
+        errorDetails =
+          `API Error: ${error.toString()}\n\nContext:\n` +
+          `- Patient ID: ${finalPatientId}\n` +
+          `- Appointment ID: ${finalAppointmentId}\n` +
+          `- TPA: ${response.tpa || "N/A"}`;
+      } else {
+        errorDetails = `Unknown error: ${String(error)}\n\nPlease check the browser console for more details.`;
+      }
+
       showDialog({
         status: "error",
-        title: "Failed to Save Policy",
-        message: "Failed to save policy details",
-        errorDetails: message,
+        title: errorTitle,
+        message: errorMessage,
+        errorDetails,
       });
     } finally {
       setSavingPolicy(false);
