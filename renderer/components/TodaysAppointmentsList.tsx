@@ -126,8 +126,8 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const { data: eligibilityByMPI = [] } = useEligibilityByMPI(
     selectedAppointment?.mpi || "",
     !!selectedAppointment?.mpi &&
-      eligibilityByAppointment.length === 0 &&
-      eligibilityByPatient.length === 0,
+    eligibilityByAppointment.length === 0 &&
+    eligibilityByPatient.length === 0,
   );
 
   const previousSearches = useMemo(() => {
@@ -469,19 +469,19 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
             headerRight={
               resultData
                 ? (() => {
-                    const keyFields = extractMantysKeyFields(resultData);
-                    return (
-                      <Badge
-                        className={
-                          keyFields.isEligible
-                            ? "bg-green-100 text-green-800"
-                            : "bg-red-100 text-red-800"
-                        }
-                      >
-                        {keyFields.isEligible ? "Eligible" : "Not Eligible"}
-                      </Badge>
-                    );
-                  })()
+                  const keyFields = extractMantysKeyFields(resultData);
+                  return (
+                    <Badge
+                      className={
+                        keyFields.isEligible
+                          ? "bg-green-100 text-green-800"
+                          : "bg-red-100 text-red-800"
+                      }
+                    >
+                      {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+                    </Badge>
+                  );
+                })()
                 : null
             }
             size="xl"
@@ -503,6 +503,13 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                   }
                   appointmentId={selectedEligibilityItem?.appointmentId}
                   encounterId={selectedEligibilityItem?.encounterId}
+                  physicianId={(() => {
+                    const physicianIdValue = patientContext?.physician_id || patientContext?.physicianId;
+                    if (!physicianIdValue) return undefined;
+                    if (typeof physicianIdValue === 'number') return physicianIdValue;
+                    const parsed = parseInt(String(physicianIdValue), 10);
+                    return isNaN(parsed) ? undefined : parsed;
+                  })()}
                 />
               ) : (
                 <div className="text-center py-12 text-gray-500">

@@ -360,6 +360,8 @@ export default async function handler(
             encounterId: appointmentData.encounter_id,
             phone: appointmentData.mobile_phone,
             email: appointmentData.email,
+            // Explicitly ensure physician_id is included (from appointmentData or as physicianId)
+            physician_id: appointmentData.physician_id || appointmentData.physicianId || undefined,
           };
 
           return context;

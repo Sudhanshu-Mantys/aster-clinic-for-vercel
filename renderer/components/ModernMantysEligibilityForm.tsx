@@ -607,6 +607,11 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
           patientId={contextToUse?.patient_id}
           appointmentId={contextToUse?.appointment_id}
           encounterId={contextToUse?.encounter_id}
+          physicianId={contextToUse?.physician_id || contextToUse?.physicianId
+            ? (typeof (contextToUse?.physician_id || contextToUse?.physicianId) === 'number'
+              ? (contextToUse?.physician_id || contextToUse?.physicianId)
+              : parseInt(String(contextToUse?.physician_id || contextToUse?.physicianId), 10))
+            : undefined}
         />
       </div>
     );

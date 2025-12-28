@@ -600,7 +600,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                 </td>
                 <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 text-left">
                   {eligibilityStatusMap[appointment.mpi]?.status ===
-                  "success" ? (
+                    "success" ? (
                     <div className="flex flex-col gap-1 items-start">
                       <button
                         onClick={(e) => {
@@ -818,6 +818,11 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
             patientId={actionAppointment.patient_id}
             appointmentId={actionAppointment.appointment_id}
             encounterId={(actionAppointment as any).encounter_id}
+            physicianId={(actionAppointment as any).physician_id || (actionAppointment as any).physicianId
+              ? (typeof ((actionAppointment as any).physician_id || (actionAppointment as any).physicianId) === 'number'
+                ? ((actionAppointment as any).physician_id || (actionAppointment as any).physicianId)
+                : parseInt(String((actionAppointment as any).physician_id || (actionAppointment as any).physicianId), 10))
+              : undefined}
           />
         </Drawer>
       )}

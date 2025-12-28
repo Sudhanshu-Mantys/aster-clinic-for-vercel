@@ -284,11 +284,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             <button
               key={tab.value}
               onClick={() => setActiveTab(tab.value)}
-              className={`flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-all ${
-                activeTab === tab.value
-                  ? "border-blue-600 text-blue-700 bg-blue-50"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
-              }`}
+              className={`flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-all ${activeTab === tab.value
+                ? "border-blue-600 text-blue-700 bg-blue-50"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                }`}
             >
               {tab.icon}
               <span className="truncate">{tab.label}</span>
@@ -326,6 +325,12 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                   <p className="text-gray-500">Encounter ID:</p>
                   <p className="font-mono font-medium">
                     {encounterId?.toString() || "N/A"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Physician ID:</p>
+                  <p className="font-mono font-medium">
+                    {physicianId?.toString() || "N/A"}
                   </p>
                 </div>
                 <div>

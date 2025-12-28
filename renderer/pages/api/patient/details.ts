@@ -146,6 +146,8 @@ export default async function handler(
                     email: patientData.email,
                     dob: patientData.dob,
                     gender: patientData.gender,
+                    // Include physician_id if available in patientData
+                    physician_id: patientData.physician_id || patientData.physicianId || undefined,
                     lastUpdated: new Date().toISOString(),
                 });
 

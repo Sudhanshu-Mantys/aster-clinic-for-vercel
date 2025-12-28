@@ -285,6 +285,10 @@ def is_valid_tpa_code(tpa_code: Optional[str]) -> bool:
     
     tpa_code = str(tpa_code).strip()
     
+    # Special case: 'BOTH' is a valid TPA code for searching all TPAs
+    if tpa_code == "BOTH":
+        return True
+    
     return (
         TPA_CODE_PATTERN.match(tpa_code) is not None
         or INS_CODE_PATTERN.match(tpa_code) is not None
