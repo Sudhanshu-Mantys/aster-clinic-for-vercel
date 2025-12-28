@@ -90,7 +90,7 @@ export default async function handler(
         insurancePolicyId: cleanPolicyData.insurancePolicyId || null,
         hasTopUpCard: cleanPolicyData.hasTopUpCard ?? 0,
         proposerRelation: cleanPolicyData.proposerRelation || "Self",
-        createdBy: cleanPolicyData.createdBy || null,
+        createdBy: cleanPolicyData.createdBy || 13295,
         empId: cleanPolicyData.empId || null,
         requestLetter: cleanPolicyData.requestLetter || null,
         insertType: cleanPolicyData.insertType || 2,
@@ -126,8 +126,22 @@ export default async function handler(
       },
     );
 
-    const updateResult = await updateResponse.json();
-    console.log("Update response:", JSON.stringify(updateResult, null, 2));
+    // Check if response is JSON
+    const contentType = updateResponse.headers.get("content-type");
+    let updateResult;
+
+    if (contentType && contentType.includes("application/json")) {
+      updateResult = await updateResponse.json();
+      console.log("Update response:", JSON.stringify(updateResult, null, 2));
+    } else {
+      // Response is not JSON, likely an error message
+      const errorText = await updateResponse.text();
+      console.error("Non-JSON response from server:", errorText);
+      return res.status(updateResponse.status || 500).json({
+        error: "Server returned an error",
+        details: errorText,
+      });
+    }
 
     // Check for success - StatusValue can be "Success" (string) or 200 (number)
     const isSuccess =
