@@ -68,6 +68,28 @@ class EligibilityCheckerService:
         
         return has_code or has_name
     
+    def has_emirates_id(self, appointment: Dict[str, Any]) -> bool:
+        """
+        Check if appointment has Emirates ID information.
+        
+        Args:
+            appointment: Appointment dictionary
+        
+        Returns:
+            True if has Emirates ID, False otherwise
+        """
+        # Check nationality_id
+        nationality_id = appointment.get("nationality_id") or appointment.get("nationalityId")
+        if nationality_id and str(nationality_id).strip():
+            return True
+        
+        # Check uid_value
+        uid_value = appointment.get("uid_value") or appointment.get("uidValue")
+        if uid_value and str(uid_value).strip():
+            return True
+        
+        return False
+    
     def process_appointment(self, appointment: Dict[str, Any]) -> bool:
         """
         Process a single appointment and create eligibility check if needed.
@@ -94,10 +116,23 @@ class EligibilityCheckerService:
             return False
         
         # Check if has insurance info
-        if not self.has_insurance_info(appointment):
-            logger.debug(f"Appointment {appointment_id} has no insurance info, skipping")
-            self.metrics["skipped_no_insurance"] += 1
-            return False
+        has_insurance = self.has_insurance_info(appointment)
+        has_emirates_id = self.has_emirates_id(appointment)
+        
+        if not has_insurance:
+            # If no insurance but has Emirates ID, use TPA 'BOTH'
+            if has_emirates_id:
+                logger.info(
+                    f"Appointment {appointment_id} has no insurance but has Emirates ID, "
+                    f"will use TPA 'BOTH'"
+                )
+                # Set TPA to 'BOTH' for processing
+                appointment = appointment.copy()
+                appointment["tpa_code_override"] = "BOTH"
+            else:
+                logger.debug(f"Appointment {appointment_id} has no insurance info and no Emirates ID, skipping")
+                self.metrics["skipped_no_insurance"] += 1
+                return False
         
         # Try to mark as processing (atomic operation)
         if not self.redis_tracker.mark_appointment_processing(appointment_id):
@@ -107,7 +142,13 @@ class EligibilityCheckerService:
         
         try:
             # Extract TPA code to pass to history creator
-            tpa_code = extract_tpa_code_from_appointment(appointment)
+            # If we set tpa_code_override, use that; otherwise extract from appointment
+            if appointment.get("tpa_code_override"):
+                tpa_code = appointment["tpa_code_override"]
+                logger.info(f"Using TPA code override: {tpa_code}")
+            else:
+                tpa_code = extract_tpa_code_from_appointment(appointment)
+            
             if not tpa_code:
                 logger.warning(f"Appointment {appointment_id} has no valid TPA code")
                 self.metrics["skipped_no_tpa"] += 1

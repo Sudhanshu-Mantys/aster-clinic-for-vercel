@@ -201,7 +201,13 @@ def process_appointment_for_eligibility(
         Task ID if successful, None otherwise
     """
     # Step 1: Extract TPA code
-    tpa_code = extract_tpa_code_from_appointment(appointment)
+    # Check if TPA code override is set (e.g., 'BOTH' for no insurance but has Emirates ID)
+    if appointment.get("tpa_code_override"):
+        tpa_code = appointment["tpa_code_override"]
+        logger.info(f"Using TPA code override: {tpa_code}")
+    else:
+        tpa_code = extract_tpa_code_from_appointment(appointment)
+    
     if not tpa_code or not is_valid_tpa_code(tpa_code):
         logger.warning(
             f"Appointment {appointment.get('appointment_id')} has no valid TPA code"

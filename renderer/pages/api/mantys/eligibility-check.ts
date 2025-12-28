@@ -181,12 +181,24 @@ export default async function handler(
       // Also store/update patient context in Redis (important for manual searches)
       if (mpi && patientId) {
         try {
+          // Try to get existing context to preserve physician_id if available
+          let existingContext = null;
+          if (appointmentId) {
+            try {
+              existingContext = await patientContextRedisService.getPatientContextByAppointmentId(appointmentId);
+            } catch (e) {
+              // Ignore errors when fetching existing context
+            }
+          }
+
           await patientContextRedisService.storePatientContext({
             mpi: mpi,
             patientId: Number(patientId),
             patientName: patientName || "",
             appointmentId: appointmentId || undefined,
             encounterId: encounterId || undefined,
+            // Preserve physician_id from existing context if available
+            physician_id: existingContext?.physician_id || existingContext?.physicianId || undefined,
             lastUpdated: new Date().toISOString(),
           });
           console.log(`  ✅ Stored/updated patient context - MPI: ${mpi}, Patient ID: ${patientId}, Appointment: ${appointmentId || 'N/A'}`);

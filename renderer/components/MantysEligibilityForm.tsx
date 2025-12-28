@@ -190,69 +190,69 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
             appointments?: any[];
           };
           if (data.body?.Data && Array.isArray(data.body.Data)) {
-              // Find the appointment matching our appointment_id
-              const appointment = data.body.Data.find(
-                (apt: any) => apt.appointment_id === patientData.appointment_id
-              );
+            // Find the appointment matching our appointment_id
+            const appointment = data.body.Data.find(
+              (apt: any) => apt.appointment_id === patientData.appointment_id
+            );
 
-              if (appointment) {
-                // Try to match by provider name first (most reliable)
-                const providerName = appointment.provider?.trim();
-                const physicianName = appointment.physician_name?.trim();
-                const physicianId = appointment.physician_id;
+            if (appointment) {
+              // Try to match by provider name first (most reliable)
+              const providerName = appointment.provider?.trim();
+              const physicianName = appointment.physician_name?.trim();
+              const physicianId = appointment.physician_id;
 
-                console.log("🔍 Looking for doctor matching:", { providerName, physicianName, physicianId });
+              console.log("🔍 Looking for doctor matching:", { providerName, physicianName, physicianId });
 
-                let matchedDoctor = null;
+              let matchedDoctor = null;
 
-                // Try matching by provider name first
-                if (providerName) {
-                  matchedDoctor = doctorsList.find(
-                    (doc) => {
-                      const docName = doc.doctor_name?.trim().toLowerCase() || "";
-                      const provName = providerName.toLowerCase();
-                      // Try exact match first
-                      if (docName === provName) return true;
-                      // Try partial match (remove "Dr." prefix if present)
-                      const docNameClean = docName.replace(/^dr\.?\s*/i, "");
-                      const provNameClean = provName.replace(/^dr\.?\s*/i, "");
-                      return docNameClean === provNameClean ||
-                        docName.includes(provNameClean) ||
-                        provNameClean.includes(docName);
-                    }
-                  );
-                }
-
-                // If not found, try physician_name
-                if (!matchedDoctor && physicianName) {
-                  matchedDoctor = doctorsList.find(
-                    (doc) => {
-                      const docName = doc.doctor_name?.trim().toLowerCase() || "";
-                      const physName = physicianName.toLowerCase();
-                      return docName === physName ||
-                        docName.includes(physName) ||
-                        physName.includes(docName);
-                    }
-                  );
-                }
-
-                // If still not found and we have physician_id, try matching by lt_user_id
-                if (!matchedDoctor && physicianId) {
-                  matchedDoctor = doctorsList.find(
-                    (doc) => doc.lt_user_id === physicianId.toString() || doc.doctor_id === physicianId.toString()
-                  );
-                }
-
-                // If found and has DHA ID, pre-fill
-                if (matchedDoctor && matchedDoctor.dha_id && matchedDoctor.dha_id.trim() !== "") {
-                  console.log("✅ Pre-filling doctor from appointment:", matchedDoctor.doctor_name, "DHA ID:", matchedDoctor.dha_id);
-                  setDoctorName(matchedDoctor.dha_id);
-                } else if (matchedDoctor) {
-                  console.log("⚠️ Found doctor but no DHA ID:", matchedDoctor.doctor_name);
-                } else {
-                  console.log("⚠️ No matching doctor found for:", { providerName, physicianName, physicianId });
-                }
+              // Try matching by provider name first
+              if (providerName) {
+                matchedDoctor = doctorsList.find(
+                  (doc) => {
+                    const docName = doc.doctor_name?.trim().toLowerCase() || "";
+                    const provName = providerName.toLowerCase();
+                    // Try exact match first
+                    if (docName === provName) return true;
+                    // Try partial match (remove "Dr." prefix if present)
+                    const docNameClean = docName.replace(/^dr\.?\s*/i, "");
+                    const provNameClean = provName.replace(/^dr\.?\s*/i, "");
+                    return docNameClean === provNameClean ||
+                      docName.includes(provNameClean) ||
+                      provNameClean.includes(docName);
+                  }
+                );
               }
+
+              // If not found, try physician_name
+              if (!matchedDoctor && physicianName) {
+                matchedDoctor = doctorsList.find(
+                  (doc) => {
+                    const docName = doc.doctor_name?.trim().toLowerCase() || "";
+                    const physName = physicianName.toLowerCase();
+                    return docName === physName ||
+                      docName.includes(physName) ||
+                      physName.includes(docName);
+                  }
+                );
+              }
+
+              // If still not found and we have physician_id, try matching by lt_user_id
+              if (!matchedDoctor && physicianId) {
+                matchedDoctor = doctorsList.find(
+                  (doc) => doc.lt_user_id === physicianId.toString() || doc.doctor_id === physicianId.toString()
+                );
+              }
+
+              // If found and has DHA ID, pre-fill
+              if (matchedDoctor && matchedDoctor.dha_id && matchedDoctor.dha_id.trim() !== "") {
+                console.log("✅ Pre-filling doctor from appointment:", matchedDoctor.doctor_name, "DHA ID:", matchedDoctor.dha_id);
+                setDoctorName(matchedDoctor.dha_id);
+              } else if (matchedDoctor) {
+                console.log("⚠️ Found doctor but no DHA ID:", matchedDoctor.doctor_name);
+              } else {
+                console.log("⚠️ No matching doctor found for:", { providerName, physicianName, physicianId });
+              }
+            }
           } else if (data.appointments && Array.isArray(data.appointments)) {
             // Fallback to old format
             const appointment = data.appointments.find(
@@ -1446,6 +1446,11 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         patientId={contextToUse?.patient_id}
         appointmentId={contextToUse?.appointment_id}
         encounterId={contextToUse?.encounter_id}
+        physicianId={contextToUse?.physician_id || contextToUse?.physicianId
+          ? (typeof (contextToUse?.physician_id || contextToUse?.physicianId) === 'number'
+            ? (contextToUse?.physician_id || contextToUse?.physicianId)
+            : parseInt(String(contextToUse?.physician_id || contextToUse?.physicianId), 10))
+          : undefined}
       />
     );
   }

@@ -151,11 +151,21 @@ export default async function handler(
                     requestData.appointmentId
                 );
 
-                // Fetch physician_id if not provided
-                if (!physicianId && appointmentContext?.physician_id) {
-                    physicianId = appointmentContext.physician_id;
-                    console.log(`✅ Fetched physician_id ${physicianId} from Redis for appointment ${requestData.appointmentId}`);
-                } else if (!physicianId) {
+                // Fetch physician_id if not provided (check both snake_case and camelCase)
+                if (!physicianId) {
+                    physicianId = appointmentContext?.physician_id || appointmentContext?.physicianId || undefined;
+                    if (physicianId) {
+                        // Ensure it's a number
+                        physicianId = typeof physicianId === 'number' ? physicianId : parseInt(String(physicianId), 10);
+                        if (isNaN(physicianId)) {
+                            physicianId = undefined;
+                        } else {
+                            console.log(`✅ Fetched physician_id ${physicianId} from Redis for appointment ${requestData.appointmentId}`);
+                        }
+                    }
+                }
+
+                if (!physicianId) {
                     console.warn(`⚠️ No physician_id found in Redis for appointment ${requestData.appointmentId}`);
                 }
 
@@ -172,6 +182,19 @@ export default async function handler(
                 console.error('❌ Error fetching appointment context from Redis:', error);
                 // Continue with existing values if Redis fetch fails
             }
+        }
+
+        // Validate that physicianId is present and is an integer
+        if (!physicianId || !Number.isInteger(physicianId) || physicianId <= 0) {
+            console.error('❌ Invalid or missing physicianId:', physicianId);
+            return res.status(400).json({
+                error: 'physicianId is required and must be a positive integer',
+                details: {
+                    provided: requestData.physicianId,
+                    fetched: physicianId,
+                    appointmentId: requestData.appointmentId
+                }
+            });
         }
 
         // Prepare dates (using Asia/Dubai timezone)
@@ -222,7 +245,7 @@ export default async function handler(
                         insuranceMappingId: ordObjInsuranceMappingId, // Use insTpaPatId, not hospital_insurance_mapping_id
                         orderId: null,
                         authPayerPayable: null,
-                        reqPhyId: physicianId ?? null,
+                        reqPhyId: physicianId, // Already validated above, guaranteed to be a positive integer
                         authQty: null
                     }
                 ],

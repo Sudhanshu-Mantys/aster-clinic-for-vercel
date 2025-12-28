@@ -161,6 +161,14 @@ export const useMantysActions = ({
         if (context.encounterId !== undefined) {
           setEnrichedEncounterId(parseInt(context.encounterId, 10));
         }
+        // Extract physician_id from context (can be physician_id or physicianId)
+        if (context.physician_id || context.physicianId) {
+          const physicianIdValue = context.physician_id || context.physicianId;
+          if (physicianIdValue) {
+            setEnrichedPhysicianId(typeof physicianIdValue === 'number' ? physicianIdValue : parseInt(String(physicianIdValue), 10));
+            console.log(`✅ Fetched physician_id ${physicianIdValue} from patient context`);
+          }
+        }
       } catch (error) {
         console.error("Error fetching patient context:", error);
       }
@@ -345,7 +353,7 @@ export const useMantysActions = ({
           insTpaPatIdForUpload =
             Number(
               selectedInsurance?.patient_insurance_tpa_policy_id_sites ||
-                selectedInsurance?.patient_insurance_tpa_policy_id,
+              selectedInsurance?.patient_insurance_tpa_policy_id,
             ) || null;
           if (!insTpaPatIdForUpload) {
             showDialog({
