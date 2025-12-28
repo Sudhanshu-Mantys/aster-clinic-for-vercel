@@ -272,8 +272,7 @@ export const appointmentApi = {
     customerSiteId?: number;
   }) =>
     fetchJson<AppointmentSearchResponse>(
-      `/api/appointments/today?fromDate=${params.fromDate}&toDate=${params.toDate}${
-        params.customerSiteId ? `&customerSiteId=${params.customerSiteId}` : ""
+      `/api/appointments/today?fromDate=${params.fromDate}&toDate=${params.toDate}${params.customerSiteId ? `&customerSiteId=${params.customerSiteId}` : ""
       }`,
     ),
 };
@@ -957,6 +956,8 @@ export interface PatientData {
   associated_nationality_id: number | null;
   appointment_id?: number;
   encounter_id?: number;
+  physician_id?: number;
+  physicianId?: number;
 }
 
 export interface PatientDetailsResponse {
