@@ -248,7 +248,8 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
     return (
         <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-4">
             {/* Main Filters - Always Visible */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Row 1: Date Fields - 2 cols on mobile, 4 cols on lg */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
                     <Label htmlFor="fromDate" className="text-sm font-medium">
                         From Date
@@ -269,20 +270,6 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                         date={toDate}
                         onDateChange={handleToDateChange}
                         placeholder="Select to date"
-                        disabled={isLoading}
-                    />
-                </div>
-
-                <div className="space-y-2">
-                    <Label htmlFor="phoneNumber" className="text-sm font-medium">
-                        Mobile Phone
-                    </Label>
-                    <PhoneInput
-                        id="phoneNumber"
-                        placeholder="Enter phone number"
-                        value={filters.phoneNumber || ""}
-                        onChange={handlePhoneNumberChange}
-                        defaultCountry="AE"
                         disabled={isLoading}
                     />
                 </div>
@@ -320,7 +307,10 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                         disabled={isLoading}
                     />
                 </div>
+            </div>
 
+            {/* Row 2: Appointment Status & Physician - 2 cols on mobile, 4 cols on lg */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
                     <Label htmlFor="appStatus" className="text-sm font-medium">
                         Appointment Status
@@ -376,6 +366,23 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                 </div>
             </div>
 
+            {/* Row 3: Phone Number - full width on mobile, partial on lg */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="phoneNumber" className="text-sm font-medium">
+                        Mobile Phone
+                    </Label>
+                    <PhoneInput
+                        id="phoneNumber"
+                        placeholder="Enter phone number"
+                        value={filters.phoneNumber || ""}
+                        onChange={handlePhoneNumberChange}
+                        defaultCountry="AE"
+                        disabled={isLoading}
+                    />
+                </div>
+            </div>
+
             {/* Advanced Filters Toggle */}
             <div className="flex items-center gap-2">
                 <button
@@ -403,8 +410,8 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
             {/* Advanced Filters - Collapsible */}
             {showAdvancedFilters && (
                 <div className="space-y-4 pt-2 border-t border-gray-200">
-                    {/* First Row - Encounter #, Payer Type */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Row 1: Encounter # (standalone) */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="encounterNumber" className="text-sm font-medium">
                                 Encounter #
@@ -421,7 +428,10 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                                 disabled={isLoading}
                             />
                         </div>
+                    </div>
 
+                    {/* Row 2: Payer & Appointment Level - 2x2 grid on mobile */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="payerType" className="text-sm font-medium">
                                 Payer
@@ -440,6 +450,26 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                             >
                                 {payerTypeOptions.map((option) => (
                                     <option key={option.value || "all"} value={option.value || ""}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="encounterType" className="text-sm font-medium">
+                                Appointment Level
+                            </Label>
+                            <select
+                                id="encounterType"
+                                value={filters.encounterType}
+                                onChange={(e) =>
+                                    handleInputChange("encounterType", Number(e.target.value))
+                                }
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                {encounterTypeOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
                                         {option.label}
                                     </option>
                                 ))}
@@ -488,29 +518,6 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                                 className="w-full"
                                 disabled={isLoading}
                             />
-                        </div>
-                    </div>
-
-                    {/* Second Row - Encounter Type */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="encounterType" className="text-sm font-medium">
-                                Appointment Level
-                            </Label>
-                            <select
-                                id="encounterType"
-                                value={filters.encounterType}
-                                onChange={(e) =>
-                                    handleInputChange("encounterType", Number(e.target.value))
-                                }
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                                {encounterTypeOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
                         </div>
                     </div>
                 </div>
@@ -592,27 +599,6 @@ export const AppointmentsFilterForm: React.FC<AppointmentsFilterFormProps> = ({
                     Refresh
                 </Button>
 
-                <Button
-                    onClick={() => window.print()}
-                    disabled={isLoading}
-                    variant="outline"
-                    className="px-6 flex-shrink-0"
-                >
-                    <svg
-                        className="w-4 h-4 mr-2"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                    >
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
-                        />
-                    </svg>
-                    Print Options
-                </Button>
             </div>
         </div>
     );
