@@ -249,7 +249,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
           (record: any) => record.is_current === 1,
         );
         if (!selectedInsurance) {
-          alert("There is no active Insurance policy for this user, please save policy first to upload files");
+          alert("There is no active Insurance policy for this user");
           return;
         }
         const insTpaPatIdValue =
@@ -259,11 +259,11 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
           insTpaPatId = Number(insTpaPatIdValue);
         }
         if (!insTpaPatId) {
-          alert("There is no active Insurance policy for this user, please save policy first to upload files");
+          alert("There is no active Insurance policy for this user");
           return;
         }
       } else {
-        alert("There is no active Insurance policy for this user, please save policy first to upload files");
+        alert("There is no active Insurance policy for this user");
         return;
       }
 
