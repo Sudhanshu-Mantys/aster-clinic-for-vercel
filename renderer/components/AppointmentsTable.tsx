@@ -245,9 +245,19 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
         insuranceResponse?.body?.Data &&
         Array.isArray(insuranceResponse.body.Data)
       ) {
-        const selectedInsurance = insuranceResponse.body.Data.find(
-          (record: any) => record.is_current === 1,
+        // Priority 1: Active + Valid
+        let selectedInsurance = insuranceResponse.body.Data.find(
+          (record: any) =>
+            record.insurance_status?.toLowerCase() === "active" &&
+            record.is_valid === 1,
         );
+        // Priority 2: Just Active
+        if (!selectedInsurance) {
+          selectedInsurance = insuranceResponse.body.Data.find(
+            (record: any) =>
+              record.insurance_status?.toLowerCase() === "active",
+          );
+        }
         if (!selectedInsurance) {
           alert("There is no active Insurance policy for this user");
           return;
