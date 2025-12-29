@@ -37,7 +37,7 @@ export async function getRedisClient(): Promise<Redis> {
                     console.error('Redis: Too many retry attempts')
                     return null
                 }
-                return Math.min(times * 50, 500)
+                return Math.min(times * 100, 2000)
             },
             reconnectOnError: (err) => {
                 const targetError = 'READONLY'
@@ -47,8 +47,11 @@ export async function getRedisClient(): Promise<Redis> {
                 }
                 return false
             },
-            connectTimeout: 5000, // 5 second connection timeout
-            commandTimeout: 5000, // 5 second timeout for individual commands
+            connectTimeout: 10000, // 10 second connection timeout for Azure Redis
+            commandTimeout: 10000, // 10 second timeout for individual commands (Azure Redis needs more time)
+            enableOfflineQueue: false, // Don't queue commands when disconnected
+            lazyConnect: false, // Connect immediately
+            keepAlive: 30000, // Keep connection alive (30 seconds) for Azure Redis
         })
 
         redisClient.on('error', (err) => {
@@ -73,8 +76,8 @@ export async function getRedisClient(): Promise<Redis> {
             await new Promise((resolve, reject) => {
                 redisClient!.once('ready', resolve)
                 redisClient!.once('error', reject)
-                // Timeout after 5 seconds
-                setTimeout(() => reject(new Error('Redis connection timeout')), 5000)
+                // Timeout after 10 seconds for Azure Redis
+                setTimeout(() => reject(new Error('Redis connection timeout')), 10000)
             })
         }
 
