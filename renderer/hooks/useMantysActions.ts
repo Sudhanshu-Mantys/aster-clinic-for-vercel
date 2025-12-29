@@ -206,9 +206,19 @@ export const useMantysActions = ({
         insuranceResponse?.body?.Data &&
         Array.isArray(insuranceResponse.body.Data)
       ) {
-        const selectedInsurance = insuranceResponse.body.Data.find(
-          (record: any) => record.is_current === 1,
+        // Priority 1: Active + Valid
+        let selectedInsurance = insuranceResponse.body.Data.find(
+          (record: any) =>
+            record.insurance_status?.toLowerCase() === "active" &&
+            record.is_valid === 1,
         );
+        // Priority 2: Just Active
+        if (!selectedInsurance) {
+          selectedInsurance = insuranceResponse.body.Data.find(
+            (record: any) =>
+              record.insurance_status?.toLowerCase() === "active",
+          );
+        }
         if (selectedInsurance) {
           const insTpaPatIdValue =
             selectedInsurance?.patient_insurance_tpa_policy_id_sites ||
@@ -339,9 +349,19 @@ export const useMantysActions = ({
           insuranceResponse?.body?.Data &&
           Array.isArray(insuranceResponse.body.Data)
         ) {
-          const selectedInsurance = insuranceResponse.body.Data.find(
-            (record: any) => record.is_current === 1,
+          // Priority 1: Active + Valid
+          let selectedInsurance = insuranceResponse.body.Data.find(
+            (record: any) =>
+              record.insurance_status?.toLowerCase() === "active" &&
+              record.is_valid === 1,
           );
+          // Priority 2: Just Active
+          if (!selectedInsurance) {
+            selectedInsurance = insuranceResponse.body.Data.find(
+              (record: any) =>
+                record.insurance_status?.toLowerCase() === "active",
+            );
+          }
           if (!selectedInsurance) {
             showDialog({
               status: "error",
