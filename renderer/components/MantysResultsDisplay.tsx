@@ -14,6 +14,7 @@ import { Sidebar } from "./ui/sidebar";
 import { LifetrenzEligibilityPreview } from "./LifetrenzEligibilityPreview";
 import { useAuth } from "../contexts/AuthContext";
 import { Modal } from "./ui/modal";
+import { StatusDialog } from "./StatusDialog";
 import { asterApi, patientApi } from "../lib/api-client";
 import { useMantysActions } from "../hooks/useMantysActions";
 import {
@@ -113,7 +114,19 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
   const { user } = useAuth();
 
-  const { handleUploadScreenshots, uploadingFiles } = useMantysActions({
+  const {
+    handleUploadScreenshots,
+    uploadingFiles,
+    dialogOpen,
+    dialogStatus,
+    dialogTitle,
+    dialogMessage,
+    dialogReqId,
+    dialogDocumentCount,
+    dialogFailedCount,
+    dialogErrorDetails,
+    closeDialog,
+  } = useMantysActions({
     clinicId: user?.selected_team_id,
     response,
     patientMPI,
@@ -1279,6 +1292,18 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       </div>
 
       {/* Modals */}
+      <StatusDialog
+        isOpen={dialogOpen}
+        onClose={closeDialog}
+        status={dialogStatus}
+        title={dialogTitle}
+        message={dialogMessage}
+        reqId={dialogReqId}
+        documentCount={dialogDocumentCount}
+        failedCount={dialogFailedCount}
+        errorDetails={dialogErrorDetails}
+      />
+
       <Sidebar
         isOpen={showLifetrenzPreview}
         onClose={() => setShowLifetrenzPreview(false)}
