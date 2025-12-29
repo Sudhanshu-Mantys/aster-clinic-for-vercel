@@ -165,14 +165,8 @@ export const useMantysActions = ({
         if (context.physician_id || context.physicianId) {
           const physicianIdValue = context.physician_id || context.physicianId;
           if (physicianIdValue) {
-            setEnrichedPhysicianId(
-              typeof physicianIdValue === "number"
-                ? physicianIdValue
-                : parseInt(String(physicianIdValue), 10),
-            );
-            console.log(
-              `✅ Fetched physician_id ${physicianIdValue} from patient context`,
-            );
+            setEnrichedPhysicianId(typeof physicianIdValue === 'number' ? physicianIdValue : parseInt(String(physicianIdValue), 10));
+            console.log(`✅ Fetched physician_id ${physicianIdValue} from patient context`);
           }
         }
       } catch (error) {
@@ -352,22 +346,20 @@ export const useMantysActions = ({
             showDialog({
               status: "error",
               title: "No Active Insurance",
-              message:
-                "There is no active Insurance policy for this user, please save policy first to upload files",
+              message: "There is no active Insurance policy for this user",
             });
             return;
           }
           insTpaPatIdForUpload =
             Number(
               selectedInsurance?.patient_insurance_tpa_policy_id_sites ||
-                selectedInsurance?.patient_insurance_tpa_policy_id,
+              selectedInsurance?.patient_insurance_tpa_policy_id,
             ) || null;
           if (!insTpaPatIdForUpload) {
             showDialog({
               status: "error",
               title: "No Active Insurance",
-              message:
-                "There is no active Insurance policy for this user, please save policy first to upload files",
+              message: "There is no active Insurance policy for this user",
             });
             return;
           }
@@ -375,8 +367,7 @@ export const useMantysActions = ({
           showDialog({
             status: "error",
             title: "No Active Insurance",
-            message:
-              "There is no active Insurance policy for this user, please save policy first to upload files",
+            message: "There is no active Insurance policy for this user",
           });
           return;
         }
@@ -384,8 +375,7 @@ export const useMantysActions = ({
         showDialog({
           status: "error",
           title: "No Active Insurance",
-          message:
-            "There is no active Insurance policy for this user, please save policy first to upload files",
+          message: "There is no active Insurance policy for this user",
         });
         return;
       }
@@ -639,17 +629,6 @@ export const useMantysActions = ({
 
     setSavingPolicy(true);
 
-    // Define payerIdToUse outside try block so it's accessible in catch block for error logging
-    const payerIdToUse = data.patient_info?.payerId
-      ? typeof data.patient_info.payerId === "string"
-        ? parseInt(data.patient_info.payerId, 10)
-        : data.patient_info.payerId
-      : data.patient_info?.payer_id
-        ? typeof data.patient_info.payer_id === "string"
-          ? parseInt(data.patient_info.payer_id, 10)
-          : data.patient_info.payer_id
-        : null;
-
     try {
       const siteId = tpaConfig?.lt_site_id
         ? parseInt(tpaConfig.lt_site_id, 10)
@@ -663,6 +642,16 @@ export const useMantysActions = ({
         ? tpaConfig.hospital_insurance_mapping_id
         : data.patient_info?.insurance_mapping_id
           ? parseInt(data.patient_info.insurance_mapping_id, 10)
+          : null;
+
+      const payerIdToUse = data.patient_info?.payerId
+        ? typeof data.patient_info.payerId === "string"
+          ? parseInt(data.patient_info.payerId, 10)
+          : data.patient_info.payerId
+        : data.patient_info?.payer_id
+          ? typeof data.patient_info.payer_id === "string"
+            ? parseInt(data.patient_info.payer_id, 10)
+            : data.patient_info.payer_id
           : null;
 
       const policyData = {
@@ -723,84 +712,16 @@ export const useMantysActions = ({
         title: "Policy Saved",
         message: "Policy details saved successfully!",
       });
-      console.log("✅ Policy saved successfully:", result);
+      console.log("Policy saved:", result);
     } catch (error) {
-      // Enhanced error logging with diagnostic information
-      console.error("❌ Error saving policy:", {
-        error,
-        errorType: error?.constructor?.name,
-        errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-        context: {
-          patientId: finalPatientId,
-          appointmentId: finalAppointmentId,
-          encounterId: finalEncounterId,
-          tpaCode: response.tpa,
-          hasTpaConfig: !!tpaConfig,
-          insuranceMappingId:
-            tpaConfig?.hospital_insurance_mapping_id ||
-            data.patient_info?.insurance_mapping_id ||
-            null,
-          payerId: payerIdToUse,
-          policyNumber:
-            data.patient_info?.patient_id_info?.policy_number || null,
-          memberId: data.patient_info?.patient_id_info?.member_id || null,
-        },
-      });
-
-      let errorTitle = "Failed to Save Policy";
-      let errorMessage = "Failed to save policy details";
-      let errorDetails: string | undefined;
-
-      if (error instanceof ApiError) {
-        // Extract the specific error message from the API response
-        errorMessage = error.message;
-
-        // Try to extract more specific error from the details if available
-        if (error.data && typeof error.data === "object") {
-          const details = error.data as any;
-
-          // Check if there's a more specific error message in body.Error[0].status_text
-          if (details.body?.Error?.[0]?.status_text) {
-            errorMessage = details.body.Error[0].status_text;
-          }
-          // Or check if there's an error in the details object
-          else if (details.error) {
-            errorMessage = String(details.error);
-          }
-        }
-
-        errorDetails =
-          `API Error: ${errorMessage}\n\nContext:\n` +
-          `- Patient ID: ${finalPatientId}\n` +
-          `- Appointment ID: ${finalAppointmentId}\n` +
-          `- Encounter ID: ${finalEncounterId || "N/A"}\n` +
-          `- TPA: ${response.tpa || "N/A"}\n` +
-          `- Insurance Mapping ID: ${tpaConfig?.hospital_insurance_mapping_id || data.patient_info?.insurance_mapping_id || "Missing"}\n` +
-          `- Payer ID: ${payerIdToUse || "N/A"}\n` +
-          `- Policy Number: ${data.patient_info?.patient_id_info?.policy_number || "N/A"}\n` +
-          `- Member ID: ${data.patient_info?.patient_id_info?.member_id || "N/A"}`;
-      } else if (error instanceof Error) {
-        errorMessage = error.message || errorMessage;
-        errorDetails =
-          `${error.name}: ${error.message}\n\nStack trace:\n${error.stack || "N/A"}\n\nContext:\n` +
-          `- Patient ID: ${finalPatientId}\n` +
-          `- Appointment ID: ${finalAppointmentId}\n` +
-          `- Encounter ID: ${finalEncounterId || "N/A"}\n` +
-          `- TPA: ${response.tpa || "N/A"}\n` +
-          `- Insurance Mapping ID: ${tpaConfig?.hospital_insurance_mapping_id || data.patient_info?.insurance_mapping_id || "Missing"}\n` +
-          `- Payer ID: ${payerIdToUse || "N/A"}\n` +
-          `- Policy Number: ${data.patient_info?.patient_id_info?.policy_number || "N/A"}\n` +
-          `- Member ID: ${data.patient_info?.patient_id_info?.member_id || "N/A"}`;
-      } else {
-        errorDetails = `Unknown error: ${String(error)}\n\nPlease check the browser console for more details.`;
-      }
-
+      const message =
+        error instanceof ApiError ? error.message : "An error occurred";
+      console.error("Error saving policy:", error);
       showDialog({
         status: "error",
-        title: errorTitle,
-        message: errorMessage,
-        errorDetails,
+        title: "Failed to Save Policy",
+        message: "Failed to save policy details",
+        errorDetails: message,
       });
     } finally {
       setSavingPolicy(false);

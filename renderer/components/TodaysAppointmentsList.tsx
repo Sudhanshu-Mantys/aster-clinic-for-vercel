@@ -495,16 +495,14 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                   screenshot={
                     selectedEligibilityItem?.interimResults?.screenshot || null
                   }
-                  patientMPI={selectedEligibilityItem?.patientMPI || selectedAppointment?.mpi}
+                  patientMPI={selectedEligibilityItem?.patientMPI}
                   patientId={
                     selectedEligibilityItem?.patientId
                       ? parseInt(selectedEligibilityItem.patientId)
-                      : selectedAppointment?.patient_id
-                        ? selectedAppointment.patient_id
-                        : undefined
+                      : undefined
                   }
-                  appointmentId={selectedEligibilityItem?.appointmentId || selectedAppointment?.appointment_id}
-                  encounterId={selectedEligibilityItem?.encounterId || (selectedAppointment as any)?.encounter_id}
+                  appointmentId={selectedEligibilityItem?.appointmentId}
+                  encounterId={selectedEligibilityItem?.encounterId}
                   physicianId={(() => {
                     const physicianIdValue = patientContext?.physician_id || patientContext?.physicianId;
                     if (!physicianIdValue) return undefined;
