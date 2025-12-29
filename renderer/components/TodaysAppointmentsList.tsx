@@ -495,15 +495,23 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                   screenshot={
                     selectedEligibilityItem?.interimResults?.screenshot || null
                   }
-                  patientMPI={selectedEligibilityItem?.patientMPI}
+                  patientMPI={selectedEligibilityItem?.patientMPI || selectedAppointment?.mpi}
                   patientId={
-                    selectedEligibilityItem?.patientId
+                    selectedAppointment?.patient_id ||
+                    (selectedEligibilityItem?.patientId
                       ? parseInt(selectedEligibilityItem.patientId)
-                      : undefined
+                      : undefined)
                   }
-                  appointmentId={selectedEligibilityItem?.appointmentId}
-                  encounterId={selectedEligibilityItem?.encounterId}
+                  appointmentId={selectedEligibilityItem?.appointmentId || selectedAppointment?.appointment_id}
+                  encounterId={selectedEligibilityItem?.encounterId || (selectedAppointment as any)?.encounter_id}
                   physicianId={(() => {
+                    // Priority: appointment data > patient context > history
+                    const appointmentPhysicianId = (selectedAppointment as any)?.physician_id;
+                    if (appointmentPhysicianId) {
+                      return typeof appointmentPhysicianId === 'number'
+                        ? appointmentPhysicianId
+                        : parseInt(String(appointmentPhysicianId), 10);
+                    }
                     const physicianIdValue = patientContext?.physician_id || patientContext?.physicianId;
                     if (!physicianIdValue) return undefined;
                     if (typeof physicianIdValue === 'number') return physicianIdValue;
