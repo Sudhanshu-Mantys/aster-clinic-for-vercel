@@ -62,6 +62,14 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
     ? parseInt(patientContext.patientId)
     : undefined;
 
+  const enrichedPhysicianId = (() => {
+    const physicianIdValue = patientContext?.physician_id || patientContext?.physicianId;
+    if (!physicianIdValue) return undefined;
+    if (typeof physicianIdValue === 'number') return physicianIdValue;
+    const parsed = parseInt(String(physicianIdValue), 10);
+    return isNaN(parsed) ? undefined : parsed;
+  })();
+
   const historyItems = useMemo(() => {
     let items = allHistory;
 
@@ -277,11 +285,10 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                filterStatus === status
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === status
+                ? "bg-blue-600 text-white"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
             >
               {status.charAt(0).toUpperCase() + status.slice(1)}
             </button>
@@ -431,6 +438,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                 patientId={enrichedPatientId || (selectedItem.patientId ? parseInt(selectedItem.patientId) : undefined)}
                 appointmentId={selectedItem.appointmentId}
                 encounterId={selectedItem.encounterId}
+                physicianId={enrichedPhysicianId}
               />
             ) : (
               <div className="text-center py-12 text-gray-500">

@@ -245,9 +245,19 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
         insuranceResponse?.body?.Data &&
         Array.isArray(insuranceResponse.body.Data)
       ) {
-        const selectedInsurance = insuranceResponse.body.Data.find(
-          (record: any) => record.is_current === 1,
+        // Priority 1: Active + Valid
+        let selectedInsurance = insuranceResponse.body.Data.find(
+          (record: any) =>
+            record.insurance_status?.toLowerCase() === "active" &&
+            record.is_valid === 1,
         );
+        // Priority 2: Just Active
+        if (!selectedInsurance) {
+          selectedInsurance = insuranceResponse.body.Data.find(
+            (record: any) =>
+              record.insurance_status?.toLowerCase() === "active",
+          );
+        }
         if (!selectedInsurance) {
           alert("There is no active Insurance policy for this user");
           return;
@@ -600,7 +610,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                 </td>
                 <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 text-left">
                   {eligibilityStatusMap[appointment.mpi]?.status ===
-                  "success" ? (
+                    "success" ? (
                     <div className="flex flex-col gap-1 items-start">
                       <button
                         onClick={(e) => {
@@ -819,6 +829,11 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
             patientId={actionAppointment.patient_id}
             appointmentId={actionAppointment.appointment_id}
             encounterId={(actionAppointment as any).encounter_id}
+            physicianId={(actionAppointment as any).physician_id || (actionAppointment as any).physicianId
+              ? (typeof ((actionAppointment as any).physician_id || (actionAppointment as any).physicianId) === 'number'
+                ? ((actionAppointment as any).physician_id || (actionAppointment as any).physicianId)
+                : parseInt(String((actionAppointment as any).physician_id || (actionAppointment as any).physicianId), 10))
+              : undefined}
           />
         </Drawer>
       )}

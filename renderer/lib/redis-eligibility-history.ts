@@ -66,6 +66,7 @@ export interface EligibilityHistoryItem {
  * - eligibility:history:clinic:{clinicId} → Set of historyIds for this clinic
  * - eligibility:history:task:{taskId} → historyId (for quick lookup by taskId)
  * - eligibility:history:patient:{patientId} → Set of historyIds for this patient
+ * - eligibility:history:appointment:{appointmentId} → Set of historyIds for this appointment
  */
 
 export class EligibilityHistoryRedisService {
@@ -108,6 +109,13 @@ export class EligibilityHistoryRedisService {
       const patientKey = `eligibility:history:patient:${newItem.patientId}`;
       pipeline.sadd(patientKey, historyId);
       pipeline.expire(patientKey, this.TTL);
+    }
+
+    // Add to appointment index (optional, for faster appointment-specific queries)
+    if (newItem.appointmentId) {
+      const appointmentKey = `eligibility:history:appointment:${newItem.appointmentId}`;
+      pipeline.sadd(appointmentKey, historyId);
+      pipeline.expire(appointmentKey, this.TTL);
     }
 
     await pipeline.exec();
@@ -224,6 +232,45 @@ export class EligibilityHistoryRedisService {
   }
 
   /**
+   * Get history items by appointment ID
+   */
+  async getHistoryByAppointmentId(appointmentId: number): Promise<EligibilityHistoryItem[]> {
+    const appointmentKey = `eligibility:history:appointment:${appointmentId}`;
+    const historyIds = await this.redis.smembers(appointmentKey);
+
+    if (historyIds.length === 0) {
+      return [];
+    }
+
+    const pipeline = this.redis.pipeline();
+    historyIds.forEach((historyId) => {
+      pipeline.get(`eligibility:history:item:${historyId}`);
+    });
+
+    const results = await pipeline.exec();
+    const items: EligibilityHistoryItem[] = [];
+
+    results?.forEach((result) => {
+      if (result && result[1]) {
+        try {
+          const item = JSON.parse(result[1] as string);
+          if (item) {
+            items.push(item);
+          }
+        } catch (err) {
+          console.error("Error parsing history item:", err);
+        }
+      }
+    });
+
+    // Sort by createdAt descending (most recent first)
+    return items.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }
+
+  /**
    * Update an existing history item
    */
   async updateHistoryItem(
@@ -288,6 +335,12 @@ export class EligibilityHistoryRedisService {
       pipeline.srem(patientKey, historyId);
     }
 
+    // Remove from appointment index
+    if (item.appointmentId) {
+      const appointmentKey = `eligibility:history:appointment:${item.appointmentId}`;
+      pipeline.srem(appointmentKey, historyId);
+    }
+
     // Delete the item itself
     const itemKey = `eligibility:history:item:${historyId}`;
     pipeline.del(itemKey);
@@ -332,6 +385,12 @@ export class EligibilityHistoryRedisService {
       if (item.patientId) {
         const patientKey = `eligibility:history:patient:${item.patientId}`;
         pipeline.srem(patientKey, item.id);
+      }
+
+      // Remove from appointment index
+      if (item.appointmentId) {
+        const appointmentKey = `eligibility:history:appointment:${item.appointmentId}`;
+        pipeline.srem(appointmentKey, item.id);
       }
 
       // Delete the item itself

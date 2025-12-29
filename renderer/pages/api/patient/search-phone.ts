@@ -321,21 +321,23 @@ export default async function handler(
                     // Store all appointment data fields, ensuring required fields are present
                     const context: any = {
                         // Required fields
-                    mpi: appointmentData.mpi,
-                    patientId: appointmentData.patient_id,
-                    patientName: appointmentData.full_name || '',
+                        mpi: appointmentData.mpi,
+                        patientId: appointmentData.patient_id,
+                        patientName: appointmentData.full_name || '',
                         lastUpdated: new Date().toISOString(),
-                        
+
                         // Include all appointment data fields
                         ...appointmentData,
-                        
+
                         // Map field names to match our interface (if different)
-                    appointmentId: appointmentData.appointment_id,
-                    encounterId: appointmentData.encounter_id,
-                    phone: appointmentData.mobile_phone,
-                    email: appointmentData.email,
+                        appointmentId: appointmentData.appointment_id,
+                        encounterId: appointmentData.encounter_id,
+                        phone: appointmentData.mobile_phone,
+                        email: appointmentData.email,
+                        // Explicitly ensure physician_id is included (from appointmentData or as physicianId)
+                        physician_id: appointmentData.physician_id || appointmentData.physicianId || undefined,
                     };
-                    
+
                     return context;
                 });
 

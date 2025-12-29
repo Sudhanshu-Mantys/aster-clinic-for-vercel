@@ -69,6 +69,7 @@ async function getRedisClient(): Promise<Redis> {
         },
         maxRetriesPerRequest: 3,
         connectTimeout: 5000, // 5 second connection timeout
+        commandTimeout: 5000, // 5 second timeout for individual commands
         lazyConnect: false, // Connect immediately
       });
 
@@ -173,9 +174,10 @@ export interface PatientContext {
 
 /**
  * Key patterns:
- * - patient:mpi:{mpi} → Patient context
- * - patient:id:{patientId} → Patient context
- * - appointment:{appointmentId} → Appointment context with patient info
+ * - patient:id:{patientId} → Full patient context (JSON)
+ * - patient:id:{patientId}:insurance-details → Insurance details (JSON)
+ * - patient:mpi:{mpi} → Mapping to patient ID: {patientId: <ID>}
+ * - patient:appointment1:{appointmentId} → Full patient context with appointment details (JSON)
  */
 
 export class PatientContextRedisService {
@@ -189,31 +191,45 @@ export class PatientContextRedisService {
   }
 
   /**
-   * Store patient context by MPI
+   * Store patient context
+   * Stores full context by patient ID and appointment ID (if present), and lightweight mapping for MPI
    */
   async storePatientContext(context: PatientContext): Promise<void> {
     const redis = await this.getRedis();
     const pipeline = redis.pipeline();
 
-    // Store by MPI
-    const mpiKey = `patient:mpi:${context.mpi}`;
-    pipeline.setex(mpiKey, this.TTL, JSON.stringify(context));
-
-    // Store by patient ID
+    // Store full context by patient ID (single source of truth)
     const patientIdKey = `patient:id:${context.patientId}`;
     pipeline.setex(patientIdKey, this.TTL, JSON.stringify(context));
+    console.log(`✅ Storing full context in: ${patientIdKey}`);
 
-    // If appointment ID exists, store by appointment ID
+    // Store lightweight mapping: MPI → patient ID
+    const mpiKey = `patient:mpi:${context.mpi}`;
+    const mpiMapping = JSON.stringify({ patientId: context.patientId });
+    pipeline.setex(mpiKey, this.TTL, mpiMapping);
+    console.log(`✅ Storing MPI mapping in: ${mpiKey} → {patientId: ${context.patientId}}`);
+
+    // If appointment ID exists, store full context by appointment ID
     if (context.appointmentId) {
-      const appointmentKey = `appointment:${context.appointmentId}`;
+      const appointmentKey = `patient:appointment1:${context.appointmentId}`;
       pipeline.setex(appointmentKey, this.TTL, JSON.stringify(context));
+      console.log(`✅ Storing full appointment context in: ${appointmentKey}`);
     }
 
-    await pipeline.exec();
+    const results = await pipeline.exec();
+    if (results) {
+      const errors = results.filter(([err]) => err !== null);
+      if (errors.length > 0) {
+        console.error(`❌ Redis pipeline errors:`, errors);
+      } else {
+        console.log(`✅ Successfully stored patient context for Patient ID: ${context.patientId}, MPI: ${context.mpi}`);
+      }
+    }
   }
 
   /**
    * Store multiple patient contexts in bulk using a single pipeline
+   * Stores full context by patient ID and appointment ID (if present), and lightweight mapping for MPI
    */
   async storeBulkPatientContexts(contexts: PatientContext[]): Promise<void> {
     if (contexts.length === 0) {
@@ -223,96 +239,151 @@ export class PatientContextRedisService {
 
     console.log(`📦 Starting bulk store of ${contexts.length} contexts in Redis`);
 
-    const redis = await this.getRedis();
-    const pipeline = redis.pipeline();
-    let keysToStore = 0;
+    try {
+      const redis = await this.getRedis();
 
-    for (const context of contexts) {
+      // Test Redis connection
       try {
-        // Validate required fields
-        if (!context.mpi || !context.patientId) {
-          console.warn(`⚠️ Skipping context - missing mpi or patientId:`, {
+        await redis.ping();
+        console.log("✅ Redis connection verified");
+      } catch (pingError) {
+        console.error("❌ Redis ping failed:", pingError);
+        throw pingError;
+      }
+
+      const pipeline = redis.pipeline();
+      let keysToStore = 0;
+
+      for (const context of contexts) {
+        try {
+          // Validate required fields
+          if (!context.mpi || !context.patientId) {
+            console.warn(`⚠️ Skipping context - missing mpi or patientId:`, {
+              mpi: context.mpi,
+              patientId: context.patientId,
+              appointmentId: context.appointmentId,
+            });
+            continue;
+          }
+
+          // Store full context by patient ID (single source of truth)
+          const patientIdKey = `patient:id:${context.patientId}`;
+          pipeline.setex(patientIdKey, this.TTL, JSON.stringify(context));
+          keysToStore++;
+
+          // Store lightweight mapping: MPI → patient ID
+          const mpiKey = `patient:mpi:${context.mpi}`;
+          const mpiMapping = JSON.stringify({ patientId: context.patientId });
+          pipeline.setex(mpiKey, this.TTL, mpiMapping);
+          keysToStore++;
+
+          // If appointment ID exists, store full context by appointment ID
+          if (context.appointmentId) {
+            const appointmentKey = `patient:appointment1:${context.appointmentId}`;
+            pipeline.setex(appointmentKey, this.TTL, JSON.stringify(context));
+            keysToStore++;
+            console.log(`  📝 Queued keys: patient:id:${context.patientId}, patient:mpi:${context.mpi}, patient:appointment1:${context.appointmentId}`);
+          } else {
+            console.warn(`  ⚠️ Context missing appointmentId for MPI: ${context.mpi}, PatientId: ${context.patientId}`);
+            console.log(`  📝 Queued keys: patient:id:${context.patientId}, patient:mpi:${context.mpi}`);
+          }
+        } catch (error) {
+          console.error(`❌ Error preparing context for storage:`, error);
+          console.error(`  Context:`, {
             mpi: context.mpi,
             patientId: context.patientId,
             appointmentId: context.appointmentId,
           });
-          continue;
         }
+      }
 
-        // Store by MPI
-        const mpiKey = `patient:mpi:${context.mpi}`;
-        pipeline.setex(mpiKey, this.TTL, JSON.stringify(context));
-        keysToStore++;
+      if (keysToStore === 0) {
+        console.warn("⚠️ No valid keys to store after processing contexts");
+        return;
+      }
 
-        // Store by patient ID
-        const patientIdKey = `patient:id:${context.patientId}`;
-        pipeline.setex(patientIdKey, this.TTL, JSON.stringify(context));
-        keysToStore++;
+      console.log(`📤 Executing Redis pipeline with ${keysToStore} SETEX operations`);
 
-        // If appointment ID exists, store by appointment ID
-        if (context.appointmentId) {
-          const appointmentKey = `appointment:${context.appointmentId}`;
-          pipeline.setex(appointmentKey, this.TTL, JSON.stringify(context));
-          keysToStore++;
-          console.log(`  📝 Queued appointment:${context.appointmentId} for MPI: ${context.mpi}`);
+      try {
+        const results = await pipeline.exec();
+
+        if (results) {
+          const errors = results.filter(([err]) => err !== null);
+          const successes = results.filter(([err]) => err === null);
+
+          if (errors.length > 0) {
+            console.error(`❌ Redis pipeline had ${errors.length} errors out of ${results.length} operations`);
+            errors.forEach(([err, result], index) => {
+              console.error(`  Error ${index + 1}:`, err);
+            });
+          }
+
+          console.log(`✅ Redis pipeline completed: ${successes.length} successful, ${errors.length} failed`);
+          console.log(`📊 Storage summary: ${contexts.length} contexts stored as ${keysToStore} Redis keys`);
+          console.log(`   - ${contexts.length} full contexts in patient:id:* keys`);
+          console.log(`   - ${contexts.length} MPI mappings in patient:mpi:* keys`);
+          const appointmentCount = contexts.filter(c => c.appointmentId).length;
+          if (appointmentCount > 0) {
+            console.log(`   - ${appointmentCount} full appointment contexts in patient:appointment1:* keys`);
+          }
+
+          // Log sample keys that were created
+          if (contexts.length > 0) {
+            const sample = contexts[0];
+            console.log(`🔑 Sample keys created:`);
+            console.log(`   - patient:id:${sample.patientId}`);
+            console.log(`   - patient:mpi:${sample.mpi}`);
+            if (sample.appointmentId) {
+              console.log(`   - patient:appointment1:${sample.appointmentId}`);
+            }
+          }
         } else {
-          console.warn(`  ⚠️ Context missing appointmentId for MPI: ${context.mpi}, PatientId: ${context.patientId}`);
+          console.warn("⚠️ Pipeline exec returned null/undefined");
         }
       } catch (error) {
-        console.error(`❌ Error preparing context for storage:`, error);
-        console.error(`  Context:`, {
-          mpi: context.mpi,
-          patientId: context.patientId,
-          appointmentId: context.appointmentId,
-        });
-      }
-    }
-
-    if (keysToStore === 0) {
-      console.warn("⚠️ No valid keys to store after processing contexts");
-      return;
-    }
-
-    console.log(`📤 Executing Redis pipeline with ${keysToStore} SETEX operations`);
-
-    try {
-      const results = await pipeline.exec();
-
-      if (results) {
-        const errors = results.filter(([err]) => err !== null);
-        const successes = results.filter(([err]) => err === null);
-
-        if (errors.length > 0) {
-          console.error(`❌ Redis pipeline had ${errors.length} errors out of ${results.length} operations`);
-          errors.forEach(([err, result], index) => {
-            console.error(`  Error ${index + 1}:`, err);
-          });
-        }
-
-        console.log(`✅ Redis pipeline completed: ${successes.length} successful, ${errors.length} failed`);
-      } else {
-        console.warn("⚠️ Pipeline exec returned null/undefined");
+        console.error("❌ Redis pipeline execution failed:", error);
+        console.error("Error details:", error instanceof Error ? error.message : String(error));
+        console.error("Error stack:", error instanceof Error ? error.stack : "No stack trace");
+        throw error; // Re-throw so caller can handle it
       }
     } catch (error) {
-      console.error("❌ Redis pipeline execution failed:", error);
-      console.error("Error details:", error instanceof Error ? error.message : String(error));
-      console.error("Error stack:", error instanceof Error ? error.stack : "No stack trace");
-      throw error; // Re-throw so caller can handle it
+      console.error("❌❌❌ CRITICAL: Failed to store patient contexts in Redis:", error);
+      console.error("Error type:", error instanceof Error ? error.constructor.name : typeof error);
+      console.error("Error message:", error instanceof Error ? error.message : String(error));
+      console.error("Full error:", error);
+      throw error; // Re-throw so caller can see the error
     }
   }
 
   /**
    * Get patient context by MPI
+   * Two-step lookup: MPI mapping → patient ID → full context
    */
   async getPatientContextByMPI(mpi: string): Promise<PatientContext | null> {
     const redis = await this.getRedis();
-    const mpiKey = `patient:mpi:${mpi}`;
-    const data = await redis.get(mpiKey);
 
-    if (data) {
-      return JSON.parse(data);
+    // Step 1: Get patient ID from MPI mapping
+    const mpiKey = `patient:mpi:${mpi}`;
+    const mappingData = await redis.get(mpiKey);
+
+    if (!mappingData) {
+      return null;
     }
-    return null;
+
+    try {
+      const mapping = JSON.parse(mappingData);
+      const patientId = mapping.patientId;
+
+      if (!patientId) {
+        return null;
+      }
+
+      // Step 2: Get full context by patient ID
+      return await this.getPatientContextByPatientId(patientId);
+    } catch (error) {
+      console.error("Error parsing MPI mapping:", error);
+      return null;
+    }
   }
 
   /**
@@ -333,18 +404,27 @@ export class PatientContextRedisService {
 
   /**
    * Get patient context by appointment ID
+   * Direct lookup: appointment ID → full context
    */
   async getPatientContextByAppointmentId(
     appointmentId: number
   ): Promise<PatientContext | null> {
     const redis = await this.getRedis();
-    const appointmentKey = `appointment:${appointmentId}`;
+
+    // Get full context directly from appointment key
+    const appointmentKey = `patient:appointment1:${appointmentId}`;
     const data = await redis.get(appointmentKey);
 
-    if (data) {
-      return JSON.parse(data);
+    if (!data) {
+      return null;
     }
-    return null;
+
+    try {
+      return JSON.parse(data);
+    } catch (error) {
+      console.error("Error parsing appointment context:", error);
+      return null;
+    }
   }
 
   /**
@@ -386,7 +466,62 @@ export class PatientContextRedisService {
   }
 
   /**
+   * Store insurance details for a patient
+   * Stores insurance details in a separate key: patient:id:{patientId}:insurance-details
+   */
+  async storeInsuranceDetails(
+    patientId: number,
+    insuranceDetails: any
+  ): Promise<void> {
+    const redis = await this.getRedis();
+    const insuranceKey = `patient:id:${patientId}:insurance-details`;
+
+    await redis.setex(
+      insuranceKey,
+      this.TTL,
+      JSON.stringify(insuranceDetails)
+    );
+
+    console.log(`✅ Stored insurance details in: ${insuranceKey}`);
+  }
+
+  /**
+   * Get insurance details for a patient
+   */
+  async getInsuranceDetails(patientId: number): Promise<any | null> {
+    const redis = await this.getRedis();
+    const insuranceKey = `patient:id:${patientId}:insurance-details`;
+    const data = await redis.get(insuranceKey);
+
+    if (data) {
+      return JSON.parse(data);
+    }
+    return null;
+  }
+
+  /**
+   * Update insurance details for a patient
+   */
+  async updateInsuranceDetails(
+    patientId: number,
+    insuranceDetails: any
+  ): Promise<void> {
+    await this.storeInsuranceDetails(patientId, insuranceDetails);
+  }
+
+  /**
+   * Delete insurance details for a patient
+   */
+  async deleteInsuranceDetails(patientId: number): Promise<void> {
+    const redis = await this.getRedis();
+    const insuranceKey = `patient:id:${patientId}:insurance-details`;
+    await redis.del(insuranceKey);
+    console.log(`✅ Deleted insurance details key: ${insuranceKey}`);
+  }
+
+  /**
    * Delete patient context
+   * Gets context first to find all related keys, then deletes them
    */
   async deletePatientContext(mpi: string): Promise<void> {
     const context = await this.getPatientContextByMPI(mpi);
@@ -395,11 +530,18 @@ export class PatientContextRedisService {
       const redis = await this.getRedis();
       const pipeline = redis.pipeline();
 
-      pipeline.del(`patient:mpi:${context.mpi}`);
+      // Delete full context
       pipeline.del(`patient:id:${context.patientId}`);
 
+      // Delete insurance details
+      pipeline.del(`patient:id:${context.patientId}:insurance-details`);
+
+      // Delete MPI mapping
+      pipeline.del(`patient:mpi:${context.mpi}`);
+
+      // Delete appointment ID mapping if exists
       if (context.appointmentId) {
-        pipeline.del(`appointment:${context.appointmentId}`);
+        pipeline.del(`patient:appointment1:${context.appointmentId}`);
       }
 
       await pipeline.exec();
@@ -421,3 +563,4 @@ export class PatientContextRedisService {
 
 // Export singleton instance
 export const patientContextRedisService = new PatientContextRedisService();
+

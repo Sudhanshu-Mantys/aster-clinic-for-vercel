@@ -3,6 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   useActiveEligibilityChecks,
   useEligibilityPolling,
+  type EligibilityHistoryItem,
 } from "../hooks/useEligibility";
 
 interface PollingTaskProps {
@@ -11,6 +12,8 @@ interface PollingTaskProps {
   clinicId: string;
   patientId?: string;
   patientMPI?: string;
+  appointmentId?: number;
+  status: EligibilityHistoryItem["status"];
 }
 
 const PollingTask: React.FC<PollingTaskProps> = ({
@@ -19,8 +22,24 @@ const PollingTask: React.FC<PollingTaskProps> = ({
   clinicId,
   patientId,
   patientMPI,
+  appointmentId,
+  status,
 }) => {
-  useEligibilityPolling(taskId, historyId, clinicId, patientId, patientMPI, { enabled: true });
+  // Only enable polling if the task is still pending or processing
+  // This prevents polling for tasks that are already complete/error
+  const isActive = status === "pending" || status === "processing";
+
+  useEligibilityPolling(
+    taskId,
+    historyId,
+    clinicId,
+    patientId,
+    patientMPI,
+    appointmentId,
+    {
+      enabled: isActive,
+    },
+  );
   return null;
 };
 
@@ -46,6 +65,8 @@ export const EligibilityPollingManager: React.FC = () => {
           clinicId={clinicId}
           patientId={item.patientId}
           patientMPI={item.patientMPI}
+          appointmentId={item.appointmentId}
+          status={item.status}
         />
       ))}
     </>

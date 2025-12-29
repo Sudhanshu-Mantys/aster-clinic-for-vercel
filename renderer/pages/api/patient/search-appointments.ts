@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { patientContextRedisService } from '../../../lib/redis-patient-context'
 
 /**
  * Next.js API Route - Flexible Appointment Search Proxy
@@ -295,6 +296,73 @@ export default async function handler(
         }
 
         console.log('✅ Found', data.body.Data.length, 'appointments')
+
+        // Store patient context in Redis in bulk (background task - fire and forget)
+        if (data.body?.Data && Array.isArray(data.body.Data)) {
+            console.log(`📝 Preparing to store ${data.body.Data.length} appointments in Redis`);
+
+            const contexts = data.body.Data
+                .filter((appointmentData) => {
+                    const hasRequired = appointmentData.mpi && appointmentData.patient_id;
+                    if (!hasRequired) {
+                        console.warn(`⚠️ Skipping appointment ${appointmentData.appointment_id} - missing mpi or patient_id`);
+                    }
+                    return hasRequired;
+                })
+                .map((appointmentData) => {
+                    // Store all appointment data fields, ensuring required fields are present
+                    const context: any = {
+                        // Include all appointment data fields first
+                        ...appointmentData,
+
+                        // Required fields (override to ensure they're present and correctly named)
+                        mpi: appointmentData.mpi,
+                        patientId: appointmentData.patient_id,
+                        patientName: appointmentData.full_name || "",
+                        lastUpdated: new Date().toISOString(),
+
+                        // Map field names to match our interface (override original field names)
+                        appointmentId: appointmentData.appointment_id,
+                        encounterId: appointmentData.encounter_id,
+                        phone: appointmentData.mobile_phone,
+                        email: appointmentData.email,
+                        // Explicitly ensure physician_id is included (from appointmentData or as physicianId)
+                        physician_id: appointmentData.physician_id || appointmentData.physicianId || undefined,
+                    };
+
+                    return context;
+                });
+
+            console.log(`📝 Filtered to ${contexts.length} valid contexts to store`);
+
+            if (contexts.length > 0) {
+                // Run as background task - don't await
+                patientContextRedisService
+                    .storeBulkPatientContexts(contexts)
+                    .then(() => {
+                        console.log(
+                            `✅ Successfully bulk stored ${contexts.length} patient contexts in Redis`,
+                        );
+                        // Log a sample of what was stored
+                        if (contexts.length > 0) {
+                            const sample = contexts[0];
+                            console.log(`📋 Sample stored context - MPI: ${sample.mpi}, PatientId: ${sample.patientId}, AppointmentId: ${sample.appointmentId}`);
+                        }
+                    })
+                    .catch((redisError) => {
+                        console.error(
+                            "❌ Failed to bulk store appointment contexts in Redis (non-fatal):",
+                            redisError,
+                        );
+                        console.error("Error details:", redisError instanceof Error ? redisError.message : String(redisError));
+                        console.error("Error stack:", redisError instanceof Error ? redisError.stack : "No stack trace");
+                    });
+            } else {
+                console.warn("⚠️ No valid contexts to store in Redis");
+            }
+        } else {
+            console.warn("⚠️ No appointment data found in response to store in Redis");
+        }
 
         // Return the raw appointment data (no transformation needed for appointments)
         return res.status(200).json(data)

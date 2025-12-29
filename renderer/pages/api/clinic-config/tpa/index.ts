@@ -4,6 +4,7 @@ import {
     setTPAConfig,
     bulkImportTPAMappings,
     getAllTPAMappings,
+    validateTPAConfig,
     type TPAMapping,
     type TPAConfig
 } from '../../../../lib/redis-config-store'
@@ -19,16 +20,62 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse) {
     const clinicId = getClinicIdFromQuery(req)
     if (!clinicId) return res.status(400).json({ error: 'clinic_id is required' })
 
-    // Check if requesting mappings only (filtered to show only mapping data)
-    const { mappings } = req.query
-    if (mappings === 'true') {
-        const tpaMappings = await getAllTPAMappings(clinicId)
-        return res.status(200).json({ mappings: tpaMappings })
-    }
+    try {
+        // Check if requesting mappings only (filtered to show only mapping data)
+        const { mappings } = req.query
+        if (mappings === 'true') {
+            const tpaMappings = await getAllTPAMappings(clinicId)
+            return res.status(200).json({ mappings: tpaMappings })
+        }
 
-    // Return all TPA configs (includes both config and mapping data)
-    const configs = await getTPAConfigs(clinicId)
-    return res.status(200).json({ configs })
+        // Return all TPA configs (includes both config and mapping data)
+        const configs = await getTPAConfigs(clinicId)
+
+        // Add validation status to each config
+        const configsWithValidation = configs.map(config => {
+            const validation = validateTPAConfig(config, true)
+
+            // Log warnings for incomplete configs
+            if (!validation.isValid) {
+                console.warn(`TPA config ${config.ins_code || config.tpa_id || 'unknown'} is incomplete:`, {
+                    missingFields: validation.missingFields,
+                    errors: validation.errors
+                })
+            }
+
+            return {
+                ...config,
+                validation_status: {
+                    isValid: validation.isValid,
+                    missingFields: validation.missingFields,
+                    warnings: validation.warnings,
+                    errors: validation.errors
+                }
+            }
+        })
+
+        // Count incomplete configs
+        const incompleteCount = configsWithValidation.filter(c => !c.validation_status.isValid).length
+        if (incompleteCount > 0) {
+            console.warn(`Found ${incompleteCount} incomplete TPA config(s) for clinic ${clinicId}`)
+        }
+
+        return res.status(200).json({
+            configs: configsWithValidation,
+            summary: {
+                total: configsWithValidation.length,
+                complete: configsWithValidation.filter(c => c.validation_status.isValid).length,
+                incomplete: incompleteCount
+            }
+        })
+    } catch (error: any) {
+        console.error('Error fetching TPA configs:', error)
+        return res.status(500).json({
+            error: 'Failed to fetch TPA configs',
+            details: error.message || 'Unknown error occurred',
+            suggestion: 'Please check Redis connection and ensure clinic-config data is properly stored'
+        })
+    }
 }
 
 async function handlePost(req: NextApiRequest, res: NextApiResponse) {
@@ -67,7 +114,8 @@ async function handlePost(req: NextApiRequest, res: NextApiResponse) {
             return res.status(201).json({
                 message: 'TPA mappings imported successfully',
                 imported: result.imported,
-                errors: result.errors
+                errors: result.errors,
+                validationErrors: result.validationErrors
             })
         } catch (error: any) {
             console.error('Error bulk importing TPA mappings:', error)

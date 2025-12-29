@@ -104,6 +104,61 @@ export interface TPAConfig {
     updated_at?: string
 }
 
+export interface ValidationResult {
+    isValid: boolean
+    missingFields: string[]
+    warnings: string[]
+    errors: string[]
+}
+
+/**
+ * Validate TPA config for required mapping fields
+ * Returns validation result with missing fields and warnings
+ */
+export function validateTPAConfig(config: TPAConfig, requireMapping: boolean = false): ValidationResult {
+    const missingFields: string[] = []
+    const warnings: string[] = []
+    const errors: string[] = []
+
+    // Always require ins_code
+    if (!config.ins_code && !config.tpa_id) {
+        errors.push('Either ins_code or tpa_id is required')
+    }
+
+    // If mapping is required (for eligibility checks), validate mapping fields
+    if (requireMapping) {
+        if (!config.hospital_insurance_mapping_id) {
+            missingFields.push('hospital_insurance_mapping_id')
+        }
+        if (config.insurance_id === undefined || config.insurance_id === null) {
+            missingFields.push('insurance_id')
+        }
+        if (config.insurance_type === undefined || config.insurance_type === null) {
+            missingFields.push('insurance_type')
+        }
+        if (!config.insurance_name) {
+            missingFields.push('insurance_name')
+        }
+    }
+
+    // Warnings for optional but recommended fields
+    if (!config.ins_payer) {
+        warnings.push('ins_payer is missing (optional but recommended)')
+    }
+
+    // If config has tpa_name but no insurance_name, that's a warning
+    if (config.tpa_name && !config.insurance_name && requireMapping) {
+        warnings.push('tpa_name exists but insurance_name is missing (insurance_name is preferred)')
+    }
+
+    return {
+        isValid: errors.length === 0 && missingFields.length === 0,
+        missingFields,
+        warnings,
+        errors
+    }
+}
+
 /**
  * Get all TPA configs for a clinic
  */
@@ -111,26 +166,51 @@ export async function getTPAConfigs(clinicId: string): Promise<TPAConfig[]> {
     try {
         const redis = await getRedisClient()
         const pattern = `${REDIS_KEYS.TPA_CONFIG}:${clinicId}:*`
+
+        // Test connection first
+        try {
+            await redis.ping()
+        } catch (pingError) {
+            console.error('Redis ping failed in getTPAConfigs:', pingError)
+            throw new Error(`Redis connection failed: ${pingError instanceof Error ? pingError.message : String(pingError)}`)
+        }
+
         const keys = await redis.keys(pattern)
 
         // Filter out index keys
         const configKeys = keys.filter(key => !key.endsWith(':index'))
 
         if (configKeys.length === 0) {
+            console.warn(`No TPA config keys found for clinic ${clinicId} with pattern ${pattern}`)
             return []
         }
 
         const configs = await Promise.all(
             configKeys.map(async (key) => {
-                const data = await redis.get(key)
-                return data ? JSON.parse(data) : null
+                try {
+                    const data = await redis.get(key)
+                    return data ? JSON.parse(data) : null
+                } catch (parseError) {
+                    console.error(`Error parsing config from key ${key}:`, parseError)
+                    return null
+                }
             })
         )
 
-        return configs.filter(Boolean)
+        const validConfigs = configs.filter(Boolean)
+        if (validConfigs.length === 0 && configKeys.length > 0) {
+            console.warn(`Found ${configKeys.length} keys but all failed to parse for clinic ${clinicId}`)
+        }
+
+        return validConfigs
     } catch (error) {
         console.error('Error getting TPA configs from Redis:', error)
-        return []
+        console.error('Error details:', {
+            clinicId,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            errorStack: error instanceof Error ? error.stack : undefined
+        })
+        throw error // Re-throw to surface connection issues
     }
 }
 
@@ -141,11 +221,38 @@ export async function getTPAConfigByCode(clinicId: string, insCode: string): Pro
     try {
         const redis = await getRedisClient()
         const key = `${REDIS_KEYS.TPA_CONFIG}:${clinicId}:${insCode}`
+
+        // Test connection first
+        try {
+            await redis.ping()
+        } catch (pingError) {
+            console.error('Redis ping failed in getTPAConfigByCode:', pingError)
+            throw new Error(`Redis connection failed: ${pingError instanceof Error ? pingError.message : String(pingError)}`)
+        }
+
         const data = await redis.get(key)
-        return data ? JSON.parse(data) : null
+
+        if (!data) {
+            console.warn(`No TPA config found for key: ${key} (clinicId: ${clinicId}, insCode: ${insCode})`)
+            return null
+        }
+
+        try {
+            return JSON.parse(data)
+        } catch (parseError) {
+            console.error(`Error parsing TPA config from key ${key}:`, parseError)
+            return null
+        }
     } catch (error) {
         console.error('Error getting TPA config by code from Redis:', error)
-        return null
+        console.error('Error details:', {
+            clinicId,
+            insCode,
+            key: `${REDIS_KEYS.TPA_CONFIG}:${clinicId}:${insCode}`,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            errorStack: error instanceof Error ? error.stack : undefined
+        })
+        throw error // Re-throw to surface connection issues
     }
 }
 
@@ -165,9 +272,24 @@ export async function getTPAConfig(clinicId: string, tpaId: string): Promise<TPA
 
 /**
  * Set TPA config (uses ins_code as key if available, otherwise uses tpa_id)
+ * Validates config before saving and warns about missing mapping fields
  */
-export async function setTPAConfig(clinicId: string, config: TPAConfig): Promise<void> {
+export async function setTPAConfig(clinicId: string, config: TPAConfig, options?: { skipValidation?: boolean }): Promise<void> {
     try {
+        // Validate config unless explicitly skipped
+        if (!options?.skipValidation) {
+            const validation = validateTPAConfig(config, false)
+            if (validation.errors.length > 0) {
+                throw new Error(`TPA config validation failed: ${validation.errors.join(', ')}`)
+            }
+            if (validation.missingFields.length > 0) {
+                console.warn(`TPA config for ${config.ins_code || config.tpa_id || 'unknown'} is missing mapping fields: ${validation.missingFields.join(', ')}`)
+            }
+            if (validation.warnings.length > 0) {
+                console.warn(`TPA config warnings for ${config.ins_code || config.tpa_id || 'unknown'}: ${validation.warnings.join(', ')}`)
+            }
+        }
+
         const redis = await getRedisClient()
 
         // Use ins_code as primary key, fallback to tpa_id
@@ -245,10 +367,12 @@ export async function setTPAMapping(clinicId: string, mapping: TPAMapping): Prom
 
 /**
  * Bulk import TPA mappings from API response
+ * Validates each mapping before importing
  */
-export async function bulkImportTPAMappings(clinicId: string, mappings: TPAMapping[]): Promise<{ imported: number; errors: number }> {
+export async function bulkImportTPAMappings(clinicId: string, mappings: TPAMapping[]): Promise<{ imported: number; errors: number; validationErrors: number }> {
     let imported = 0
     let errors = 0
+    let validationErrors = 0
 
     try {
         const redis = await getRedisClient()
@@ -264,6 +388,22 @@ export async function bulkImportTPAMappings(clinicId: string, mappings: TPAMappi
                     console.warn('Skipping mapping without ins_code:', mapping)
                     errors++
                     continue
+                }
+
+                // Validate mapping (require mapping fields for bulk import)
+                const validation = validateTPAConfig(mapping as TPAConfig, true)
+                if (!validation.isValid) {
+                    console.error(`Skipping invalid mapping for ${mapping.ins_code}:`, {
+                        missingFields: validation.missingFields,
+                        errors: validation.errors
+                    })
+                    validationErrors++
+                    errors++
+                    continue
+                }
+
+                if (validation.warnings.length > 0) {
+                    console.warn(`Mapping warnings for ${mapping.ins_code}:`, validation.warnings)
                 }
 
                 const key = `${REDIS_KEYS.TPA_CONFIG}:${clinicId}:${mapping.ins_code}`
@@ -284,7 +424,7 @@ export async function bulkImportTPAMappings(clinicId: string, mappings: TPAMappi
         }
 
         await pipeline.exec()
-        return { imported, errors }
+        return { imported, errors, validationErrors }
     } catch (error) {
         console.error('Error bulk importing TPA mappings:', error)
         throw error
