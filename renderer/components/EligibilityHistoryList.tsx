@@ -426,6 +426,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                 onClose={handleCloseDrawer}
                 onCheckAnother={handleCheckAnother}
                 screenshot={selectedItem.interimResults?.screenshot || null}
+                patientName={selectedItem.patientName}
                 patientMPI={selectedItem.patientMPI}
                 patientId={enrichedPatientId || (selectedItem.patientId ? parseInt(selectedItem.patientId) : undefined)}
                 appointmentId={selectedItem.appointmentId}

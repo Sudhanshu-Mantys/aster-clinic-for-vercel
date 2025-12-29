@@ -376,7 +376,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       <Drawer
         isOpen={showDrawer}
         onClose={handleCloseDrawer}
-        title="Appointment Details"
+        title={`Appointment Details${selectedAppointment?.full_name ? ` - ${selectedAppointment.full_name}` : ""}`}
         headerRight={
           selectedAppointment && (
             <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
@@ -403,7 +403,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         <Drawer
           isOpen={showEligibilityResultsDrawer}
           onClose={handleCloseEligibilityResultsDrawer}
-          title={`Eligibility Check Results - ${selectedEligibilityItem?.patientName || selectedEligibilityItem?.patientId || "Patient"}`}
+          title={`Eligibility Check Results - ${selectedEligibilityItem?.patientName || selectedAppointment?.full_name || selectedEligibilityItem?.patientId || "Patient"}`}
           headerRight={
             resultData ? (
               (() => {
@@ -425,6 +425,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                 onClose={handleCloseEligibilityResultsDrawer}
                 onCheckAnother={handleCloseEligibilityResultsDrawer}
                 screenshot={selectedEligibilityItem?.interimResults?.screenshot || null}
+                patientName={selectedEligibilityItem?.patientName || selectedAppointment?.full_name}
                 patientMPI={selectedEligibilityItem?.patientMPI}
                 patientId={
                   selectedEligibilityItem?.patientId

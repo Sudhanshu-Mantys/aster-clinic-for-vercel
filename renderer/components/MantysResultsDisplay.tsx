@@ -41,6 +41,7 @@ interface MantysResultsDisplayProps {
   onClose?: () => void;
   onCheckAnother?: () => void;
   screenshot?: string | null;
+  patientName?: string;
   patientMPI?: string;
   patientId?: number;
   appointmentId?: number;
@@ -55,6 +56,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   onClose,
   onCheckAnother,
   screenshot,
+  patientName,
   patientMPI,
   patientId,
   appointmentId,
