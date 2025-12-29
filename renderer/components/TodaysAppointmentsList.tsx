@@ -433,7 +433,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       <Drawer
         isOpen={showDrawer}
         onClose={handleCloseDrawer}
-        title="Appointment Details"
+        title={`Appointment Details${selectedAppointment?.full_name ? ` - ${selectedAppointment.full_name}` : ""}`}
         headerRight={
           selectedAppointment && (
             <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
@@ -465,23 +465,23 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           <Drawer
             isOpen={showEligibilityResultsDrawer}
             onClose={handleCloseEligibilityResultsDrawer}
-            title={`Eligibility Check Results - ${selectedEligibilityItem?.patientName || selectedEligibilityItem?.patientId || "Patient"}`}
+            title={`Eligibility Check Results - ${selectedEligibilityItem?.patientName || selectedAppointment?.full_name || selectedEligibilityItem?.patientId || "Patient"}`}
             headerRight={
               resultData
                 ? (() => {
-                  const keyFields = extractMantysKeyFields(resultData);
-                  return (
-                    <Badge
-                      className={
-                        keyFields.isEligible
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }
-                    >
-                      {keyFields.isEligible ? "Eligible" : "Not Eligible"}
-                    </Badge>
-                  );
-                })()
+                    const keyFields = extractMantysKeyFields(resultData);
+                    return (
+                      <Badge
+                        className={
+                          keyFields.isEligible
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                        }
+                      >
+                        {keyFields.isEligible ? "Eligible" : "Not Eligible"}
+                      </Badge>
+                    );
+                  })()
                 : null
             }
             size="xl"
@@ -495,6 +495,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                   screenshot={
                     selectedEligibilityItem?.interimResults?.screenshot || null
                   }
+                  patientName={selectedEligibilityItem?.patientName || selectedAppointment?.full_name}
                   patientMPI={selectedEligibilityItem?.patientMPI || selectedAppointment?.mpi}
                   patientId={
                     selectedAppointment?.patient_id ||

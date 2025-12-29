@@ -597,12 +597,16 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
 
   if (showResults && mantysResponse) {
     const contextToUse = enrichedPatientContext || patientData;
+    const patientFullName = contextToUse
+      ? [contextToUse.firstname, contextToUse.middlename, contextToUse.lastname].filter(Boolean).join(" ")
+      : undefined;
     return (
       <div className="p-4">
         <MantysResultsDisplay
           response={mantysResponse}
           onClose={() => { }}
           onCheckAnother={() => { setShowResults(false); setMantysResponse(null); }}
+          patientName={patientFullName}
           patientMPI={contextToUse?.mpi}
           patientId={contextToUse?.patient_id}
           appointmentId={contextToUse?.appointment_id}

@@ -1437,11 +1437,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     // Use enriched context if available, otherwise use original patientData
     const contextToUse = enrichedPatientContext || patientData;
 
+    const patientFullName = contextToUse
+      ? [contextToUse.firstname, contextToUse.middlename, contextToUse.lastname].filter(Boolean).join(" ")
+      : undefined;
+
     return (
       <MantysResultsDisplay
         response={mantysResponse}
         onClose={onClose}
         onCheckAnother={handleCheckAnother}
+        patientName={patientFullName}
         patientMPI={contextToUse?.mpi}
         patientId={contextToUse?.patient_id}
         appointmentId={contextToUse?.appointment_id}
