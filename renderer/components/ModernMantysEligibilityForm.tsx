@@ -145,84 +145,284 @@ const BASE_ID_TYPES = [
 ];
 
 const VISIT_TYPES: Record<string, Array<{ label: string; value: string; extraArgs?: any }>> = {
-  BOTH: [
-    { label: "Outpatient", value: "OUTPATIENT" },
-    { label: "Emergency", value: "EMERGENCY" },
-  ],
   DHPO: [
     { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+    { label: "Daycase", value: "DAYCASE" },
+    { label: "Maternity", value: "MATERNITY" },
+    { label: "Dental", value: "DENTAL" },
+    { label: "Optical", value: "OPTICAL" },
+    { label: "Psychiatry", value: "PSYCHIATRY" },
+    { label: "Wellness", value: "WELLNESS" },
+    { label: "Life", value: "LIFE" },
+    { label: "Travel Insurance", value: "TRAVEL_INSURANCE" },
+    { label: "Chronic Out", value: "CHRONIC_OUT" },
     { label: "Emergency", value: "EMERGENCY" },
   ],
-  RIYATI: [{ label: "Outpatient", value: "OUTPATIENT" }],
-  TPA001: [
+  RIYATI: [
     { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+    { label: "Daycase", value: "DAYCASE" },
+    { label: "Maternity", value: "MATERNITY" },
+    { label: "Dental", value: "DENTAL" },
+    { label: "Optical", value: "OPTICAL" },
+    { label: "Psychiatry", value: "PSYCHIATRY" },
+    { label: "Wellness", value: "WELLNESS" },
+    { label: "Life", value: "LIFE" },
+    { label: "Travel Insurance", value: "TRAVEL_INSURANCE" },
+    { label: "Chronic Out", value: "CHRONIC_OUT" },
     { label: "Emergency", value: "EMERGENCY" },
-    {
-      label: "Maternity", value: "MATERNITY", extraArgs: {
-        title: "maternity_type", titleLabel: "Maternity Type", options: [
-          { label: "Normal Delivery", value: "normal_delivery" },
-          { label: "C-Section", value: "c_section" },
-          { label: "Prenatal", value: "prenatal" },
-          { label: "Postnatal", value: "postnatal" },
-        ]
-      }
-    },
   ],
-  TPA002: [
+  BOTH: [
     { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+    { label: "Daycase", value: "DAYCASE" },
+    { label: "Maternity", value: "MATERNITY" },
+    { label: "Dental", value: "DENTAL" },
+    { label: "Optical", value: "OPTICAL" },
+    { label: "Psychiatry", value: "PSYCHIATRY" },
+    { label: "Wellness", value: "WELLNESS" },
+    { label: "Life", value: "LIFE" },
+    { label: "Travel Insurance", value: "TRAVEL_INSURANCE" },
     { label: "Chronic Out", value: "CHRONIC_OUT" },
     { label: "Emergency", value: "EMERGENCY" },
   ],
   TPA003: [
-    { label: "Outpatient", value: "OUTPATIENT" },
-    { label: "Emergency", value: "EMERGENCY" },
-  ],
-  TPA004: [
-    { label: "Outpatient", value: "OUTPATIENT" },
-    { label: "Emergency", value: "EMERGENCY" },
-    {
-      label: "Maternity", value: "MATERNITY", extraArgs: {
-        title: "maternity_type", titleLabel: "Maternity Type", options: [
-          { label: "Normal Delivery", value: "normal_delivery" },
-          { label: "C-Section", value: "c_section" },
-          { label: "Prenatal", value: "prenatal" },
-          { label: "Postnatal", value: "postnatal" },
-        ]
-      }
-    },
-  ],
-  TPA010: [
-    { label: "Outpatient", value: "OUTPATIENT" },
-    { label: "Emergency", value: "EMERGENCY" },
-  ],
-  TPA023: [
-    { label: "Outpatient", value: "OUTPATIENT" },
-    { label: "Emergency", value: "EMERGENCY" },
-  ],
-  TPA026: [
-    { label: "Outpatient", value: "OUTPATIENT" },
-    { label: "Emergency", value: "EMERGENCY" },
+    { label: "OP", value: "OUTPATIENT" },
+    { label: "IP/Daycase", value: "INPATIENT" },
+    { label: "Maternity", value: "MATERNITY" },
+    { label: "Dental", value: "DENTAL" },
+    { label: "Optical", value: "OPTICAL" },
+    { label: "Psychiatry", value: "PSYCHIATRY" },
   ],
   TPA029: [
-    { label: "Outpatient", value: "OUTPATIENT" },
-    { label: "Emergency", value: "EMERGENCY" },
+    { label: "Out Patient", value: "OUTPATIENT" },
+    { label: "In Patient", value: "INPATIENT" },
+  ],
+  TPA010: [
+    { label: "Out Patient", value: "OUTPATIENT" },
+    { label: "In Patient", value: "INPATIENT" },
+  ],
+  INS038: [
+    { label: "O - Out Patient", value: "OUTPATIENT" },
+    { label: "I - In Patient", value: "INPATIENT" },
+    { label: "D - Daycase", value: "DAYCASE" },
+  ],
+  TPA004: [
+    { label: "OutPatient", value: "OUTPATIENT" },
+    { label: "InPatient", value: "INPATIENT" },
+    { label: "Dental", value: "DENTAL" },
+    { label: "Optical", value: "OPTICAL" },
+    {
+      label: "Maternity",
+      value: "MATERNITY",
+      extraArgs: {
+        title: "maternity_treatment",
+        titleLabel: "Is Inpatient treatment?",
+        options: [
+          { label: "Yes", value: "YES" },
+          { label: "No", value: "NO" },
+        ],
+      },
+    },
+    { label: "Psychiatry", value: "PSYCHIATRY" },
+    { label: "Wellness", value: "WELLNESS" },
+  ],
+  TPA001: [
+    { label: "OutPatient", value: "OUTPATIENT" },
+    { label: "InPatient", value: "INPATIENT" },
+    { label: "Dental", value: "DENTAL" },
+    { label: "Optical", value: "OPTICAL" },
+    {
+      label: "Maternity",
+      value: "MATERNITY",
+      extraArgs: {
+        title: "maternity_treatment",
+        titleLabel: "Is Inpatient treatment?",
+        options: [
+          { label: "Yes", value: "YES" },
+          { label: "No", value: "NO" },
+        ],
+      },
+    },
+    { label: "Psychiatry", value: "PSYCHIATRY" },
+    { label: "Wellness", value: "WELLNESS" },
+  ],
+  TPA002: [
+    { label: "In-Patient", value: "INPATIENT" },
+    { label: "Out-Patient", value: "OUTPATIENT" },
+    { label: "Dental", value: "DENTAL" },
+    { label: "Life", value: "LIFE" },
+    { label: "Optical", value: "OPTICAL" },
+    { label: "Travel Insurance", value: "TRAVEL_INSURANCE" },
+    { label: "Chronic Out", value: "CHRONIC_OUT" },
+    { label: "Emergency Room Services", value: "EMERGENCY" },
+    { label: "Maternity", value: "MATERNITY" },
+  ],
+  TPA036: [
+    { label: "Out Patient", value: "OUTPATIENT" },
+    { label: "Emergency (Select only in case of emergency)", value: "EMERGENCY" },
+  ],
+  INS026: [
+    { label: "Consultation - Elective", value: "OUTPATIENT" },
+    { label: "Consultation - Elective", value: "CONSULTATION_ELECTIVE" },
+    { label: "Consultation - Emergency", value: "CONSULTATION_EMERGENCY" },
+    { label: "Consultation - Oncology", value: "CONSULTATION_ONCOLOGY" },
+    { label: "Consultation - Referral", value: "CONSULTATION_REFERRAL" },
+    { label: "Consultation - Screening", value: "CONSULTATION_SCREENING" },
+    { label: "Consultation - Vaccination", value: "CONSULTATION_VACCINATION" },
+    { label: "In Patient", value: "INPATIENT" },
+    { label: "Tele-Consultation/Telemedicine", value: "TELEHEALTH" },
+    { label: "Free Follow-up (not reimbursable by the Payer)", value: "FREE_FOLLOWUP" },
+    { label: "Diagnostic Testing", value: "DIAGNOSTIC" },
+    { label: "Physiotherapy", value: "PHYSIOTHERAPY" },
+    { label: "Dental Services", value: "DENTAL_SERVICES" },
+    { label: "Pharmacy", value: "PHARMACY" },
+    { label: "Homecare", value: "HOMECARE" },
+    { label: "Rehabilitation", value: "REHABILITATION" },
+    { label: "Daycare", value: "DAYCARE" },
+    { label: "Ultrasound - First Trimester", value: "ULTRASOUND_FIRST_TRIMESTER" },
+    { label: "Ultrasound - Second Trimester", value: "ULTRASOUND_SECOND_TRIMESTER" },
+    { label: "Ultrasound - Third Trimester", value: "ULTRASOUND_THIRD_TRIMESTER" },
+    { label: "Other OP Services", value: "OTHER_OP" },
+  ],
+  TPA023: [
+    { label: "Consultation - Elective", value: "OUTPATIENT" },
+    { label: "Consultation - Elective", value: "CONSULTATION_ELECTIVE" },
+    { label: "Consultation - Emergency", value: "CONSULTATION_EMERGENCY" },
+    { label: "Consultation - Oncology", value: "CONSULTATION_ONCOLOGY" },
+    { label: "Consultation - Referral", value: "CONSULTATION_REFERRAL" },
+    { label: "Consultation - Screening", value: "CONSULTATION_SCREENING" },
+    { label: "Consultation - Vaccination", value: "CONSULTATION_VACCINATION" },
+    { label: "In Patient", value: "INPATIENT" },
+    { label: "Tele-Consultation/Telemedicine", value: "TELEHEALTH" },
+    { label: "Free Follow-up (not reimbursable by the Payer)", value: "FREE_FOLLOWUP" },
+    { label: "Diagnostic Testing", value: "DIAGNOSTIC" },
+    { label: "Physiotherapy", value: "PHYSIOTHERAPY" },
+    { label: "Dental Services", value: "DENTAL_SERVICES" },
+    { label: "Pharmacy", value: "PHARMACY" },
+    { label: "Homecare", value: "HOMECARE" },
+    { label: "Rehabilitation", value: "REHABILITATION" },
+    { label: "Daycare", value: "DAYCARE" },
+    { label: "Ultrasound - First Trimester", value: "ULTRASOUND_FIRST_TRIMESTER" },
+    { label: "Ultrasound - Second Trimester", value: "ULTRASOUND_SECOND_TRIMESTER" },
+    { label: "Ultrasound - Third Trimester", value: "ULTRASOUND_THIRD_TRIMESTER" },
+    { label: "Other OP Services", value: "OTHER_OP" },
+    { label: "Dental Services - Capitation Program", value: "DENTAL_SERVICES_CAPITATION_PROGRAM" },
+    { label: "Dental Services - Routine FFS", value: "DENTAL_SERVICES_ROUTINE_FFS" },
+    { label: "Dental Services - Advanced FFS", value: "DENTAL_SERVICES_ADVANCED_FFS" },
+  ],
+  D004: [
+    { label: "Consultation - Elective", value: "OUTPATIENT" },
+    { label: "Consultation - Elective", value: "CONSULTATION_ELECTIVE" },
+    { label: "Consultation - Emergency", value: "CONSULTATION_EMERGENCY" },
+    { label: "Consultation - Oncology", value: "CONSULTATION_ONCOLOGY" },
+    { label: "Consultation - Referral", value: "CONSULTATION_REFERRAL" },
+    { label: "Consultation - Screening", value: "CONSULTATION_SCREENING" },
+    { label: "Consultation - Vaccination", value: "CONSULTATION_VACCINATION" },
+    { label: "In Patient", value: "INPATIENT" },
+    { label: "Tele-Consultation/Telemedicine", value: "TELEHEALTH" },
+    { label: "Free Follow-up (not reimbursable by the Payer)", value: "FREE_FOLLOWUP" },
+    { label: "Diagnostic Testing", value: "DIAGNOSTIC" },
+    { label: "Physiotherapy", value: "PHYSIOTHERAPY" },
+    { label: "Dental Services", value: "DENTAL_SERVICES" },
+    { label: "Pharmacy", value: "PHARMACY" },
+    { label: "Homecare", value: "HOMECARE" },
+    { label: "Rehabilitation", value: "REHABILITATION" },
+    { label: "Daycare", value: "DAYCARE" },
+    { label: "Ultrasound - First Trimester", value: "ULTRASOUND_FIRST_TRIMESTER" },
+    { label: "Ultrasound - Second Trimester", value: "ULTRASOUND_SECOND_TRIMESTER" },
+    { label: "Ultrasound - Third Trimester", value: "ULTRASOUND_THIRD_TRIMESTER" },
+    { label: "Other OP Services", value: "OTHER_OP" },
+  ],
+  TPA008: [
+    { label: "OP", value: "OUTPATIENT" },
+    { label: "IP", value: "INPATIENT" },
   ],
   INS010: [
-    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "DEFAULT", value: "OUTPATIENT" },
     { label: "Dental", value: "DENTAL" },
-    { label: "Emergency", value: "EMERGENCY" },
+  ],
+  TPA013: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  TPA016: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  TPA021: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  TPA025: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  TPA027: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  TPA030: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  TPA032: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  TPA037: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  TPA038: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  INS005: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  INS012: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  INS013: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  INS015: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
   ],
   INS017: [
     { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
     { label: "Emergency", value: "EMERGENCY" },
   ],
-  INS026: [
+  INS020: [
     { label: "Outpatient", value: "OUTPATIENT" },
-    { label: "Emergency", value: "EMERGENCY" },
+    { label: "Inpatient", value: "INPATIENT" },
   ],
-  D004: [
+  INS028: [
     { label: "Outpatient", value: "OUTPATIENT" },
-    { label: "Emergency", value: "EMERGENCY" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  INS029: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  INS041: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  INS044: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
+  ],
+  INS053: [
+    { label: "Outpatient", value: "OUTPATIENT" },
+    { label: "Inpatient", value: "INPATIENT" },
   ],
 };
 
