@@ -681,7 +681,7 @@ export const useMantysActions = ({
         insuranceCompanyId: null,
         networkId: null,
         siteId: siteId,
-        policyNumber: data.patient_info?.patient_id_info?.policy_number || null,
+        policyNumber: null,
         insuranceGroupPolicyId: null,
         encounterid: finalEncounterId || null,
         parentInsPolicyId: null,

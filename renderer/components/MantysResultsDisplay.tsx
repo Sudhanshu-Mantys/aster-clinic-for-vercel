@@ -336,8 +336,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     // Initialize form fields from Mantys response
     setMemberId(
       data.patient_info?.patient_id_info?.member_id ||
-        data.patient_info?.policy_primary_member_id ||
-        "",
+      data.patient_info?.policy_primary_member_id ||
+      "",
     );
 
     setReceiverId(tpaConfig?.tpa_name || response.tpa || "");
@@ -600,7 +600,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       const customerId = tpaConfig?.lt_customer_id
         ? parseInt(tpaConfig.lt_customer_id, 10)
         : 1;
-      const createdBy = user?.id ? parseInt(user.id, 10) : 13295;
+      const createdBy = 13295; // Always use 13295 for new policies to match system expectations
       const ltOtherConfig = tpaConfig?.lt_other_config || {};
 
       // Get insurance mapping ID from config or Mantys response
@@ -663,7 +663,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         });
       }
 
-      // Add copay rules for each charge group
+      // TEMPORARILY DISABLED: Add copay rules for each charge group
       if (hasCopay && chargeGroups.length > 0) {
         chargeGroups.forEach((cg) => {
           const payableAmnt =
@@ -710,16 +710,17 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         policyId: isNewPolicy
           ? 0
           : selectedExistingPolicy?.patient_insurance_tpa_policy_id || 0,
+        patientInsTpaId: isNewPolicy
+          ? 0
+          : selectedExistingPolicy?.patient_insurance_tpa_policy_id || 0,
         isActive: 1,
         // Use selectedPayer.ins_tpaid as payerId (this is the Payer ID from clinic's payer config)
         payerId: selectedPayer?.ins_tpaid || null,
         insuranceCompanyId: null,
         networkId: networkIdNumeric,
         siteId: siteId,
-        // policyNumber should be null for new policies, else the policy ID being updated
-        policyNumber: isNewPolicy
-          ? null
-          : selectedExistingPolicy?.patient_insurance_tpa_policy_id || null,
+        // policyNumber should always be null
+        policyNumber: null,
         insuranceGroupPolicyId: null,
         encounterid: finalEncounterId || null,
         parentInsPolicyId: null,
@@ -1338,10 +1339,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                         ? { value: "new", label: "Add New Policy" }
                         : selectedExistingPolicy
                           ? {
-                              value:
-                                selectedExistingPolicy.patient_insurance_tpa_policy_id,
-                              label: `${selectedExistingPolicy.tpa_name || "Unknown TPA"} (Policy ID: ${selectedExistingPolicy.patient_insurance_tpa_policy_id})`,
-                            }
+                            value:
+                              selectedExistingPolicy.patient_insurance_tpa_policy_id,
+                            label: `${selectedExistingPolicy.tpa_name || "Unknown TPA"} (Policy ID: ${selectedExistingPolicy.patient_insurance_tpa_policy_id})`,
+                          }
                           : null
                     }
                     onChange={(selected) => {
@@ -1387,11 +1388,11 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                       </h4>
                       {(selectedExistingPolicy.is_current === 1 ||
                         selectedExistingPolicy.insurance_status ===
-                          "active") && (
-                        <Badge className="bg-green-100 text-green-800">
-                          Active
-                        </Badge>
-                      )}
+                        "active") && (
+                          <Badge className="bg-green-100 text-green-800">
+                            Active
+                          </Badge>
+                        )}
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
                       <div>
@@ -1414,8 +1415,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                         <span className="font-medium">Valid Until:</span>{" "}
                         {selectedExistingPolicy.ins_exp_date
                           ? new Date(
-                              selectedExistingPolicy.ins_exp_date,
-                            ).toLocaleDateString()
+                            selectedExistingPolicy.ins_exp_date,
+                          ).toLocaleDateString()
                           : "N/A"}
                       </div>
                     </div>
@@ -1483,9 +1484,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                     value={
                       selectedPayer
                         ? {
-                            value: selectedPayer.reciever_payer_id,
-                            label: selectedPayer.ins_tpa_name,
-                          }
+                          value: selectedPayer.reciever_payer_id,
+                          label: selectedPayer.ins_tpa_name,
+                        }
                         : null
                     }
                     onChange={(selected) => {
@@ -1518,9 +1519,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                     value={
                       selectedPlan
                         ? {
-                            value: selectedPlan.plan_id,
-                            label: `${selectedPlan.plan_id} - ${selectedPlan.insurance_plan_name}`,
-                          }
+                          value: selectedPlan.plan_id,
+                          label: `${selectedPlan.plan_id} - ${selectedPlan.insurance_plan_name}`,
+                        }
                         : null
                     }
                     onChange={(selected) => {

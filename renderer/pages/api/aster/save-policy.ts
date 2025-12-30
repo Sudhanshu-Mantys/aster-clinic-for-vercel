@@ -57,12 +57,13 @@ export default async function handler(
         siteId: cleanPolicyData.siteId || 31,
         policyNumber: cleanPolicyData.policyNumber || null,
         insuranceGroupPolicyId: cleanPolicyData.insuranceGroupPolicyId || null,
-        encounterid: cleanPolicyData.encounterid ?? null, // Note: lowercase 'id' as per API, use null instead of 0
+        encounterid: null, // Always null to prevent state conflicts - policies are patient-level, not encounter-specific
         parentInsPolicyId: cleanPolicyData.parentInsPolicyId || null,
         tpaCompanyId: cleanPolicyData.tpaCompanyId || null,
         planName: cleanPolicyData.planName || null,
         eligibilityReqId: cleanPolicyData.eligibilityReqId || null,
         tpaPolicyId: cleanPolicyData.tpaPolicyId || null,
+        patientInsTpaId: cleanPolicyData.patientInsTpaId || 0,
         // insRules should be an array or null - if null, use empty array or keep as provided
         insRules: cleanPolicyData.insRules || null,
         orgId: cleanPolicyData.orgId || null,
