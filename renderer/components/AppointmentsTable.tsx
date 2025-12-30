@@ -824,6 +824,7 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
             response={eligibilityResult}
             onClose={handleCloseActionDrawer}
             onCheckAnother={handleCloseActionDrawer}
+            patientName={actionAppointment.full_name}
             patientMPI={actionAppointment.mpi}
             patientId={actionAppointment.patient_id}
             appointmentId={actionAppointment.appointment_id}
