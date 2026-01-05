@@ -89,6 +89,9 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // NextCare Policy Number specific
   const [payerName, setPayerName] = useState<string | null>(null);
 
+  // Referral Number (TPA002 - NextCare)
+  const [referralNo, setReferralNo] = useState("");
+
   // Member Present at Facility (TPA004/TPA001)
   const [isMemberPresentAtFacility, setIsMemberPresentAtFacility] = useState(true);
 
@@ -1031,6 +1034,12 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // Payer name field (NextCare with Policy Number)
   const showPayerNameField = options === "TPA002" && idType === "POLICYNUMBER";
 
+  // Referral Number field (NextCare - TPA002)
+  const showReferralNoField = options === "TPA002";
+
+  // Referring Physician field (TPA001, TPA004, INS026)
+  const showReferringPhysicianField = options === "TPA001" || options === "TPA004" || options === "INS026";
+
   // Visit category (ADNIC at Org1)
   const showVisitCategoryField = isOrg1Ins017;
 
@@ -1303,6 +1312,13 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     if (errors.referringPhysician) {
       setErrors({ ...errors, referringPhysician: "" });
     }
+  };
+
+  const handleReferralNoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    // Limit to 32 characters
+    const sanitized = sanitizeAlphanumericInput(rawValue).slice(0, 32);
+    setReferralNo(sanitized);
   };
 
   // ============================================================================
@@ -1682,6 +1698,15 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         }
       }
 
+      // Build extraArgs object
+      const extraArgs: Record<string, any> = {};
+      if (showMemberPresenceField && isMemberPresentAtFacility !== null) {
+        extraArgs.is_member_present_at_the_facility = isMemberPresentAtFacility;
+      }
+      if (options === "TPA002" && referralNo) {
+        extraArgs.referral_no = referralNo;
+      }
+
       // Build Mantys payload according to API specification
       const mantysPayload = buildMantysPayload({
         idValue: emiratesId,
@@ -1692,10 +1717,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         payerName: undefined,
         referringPhysician: referringPhysician || undefined,
         referralDocumentUrl: referralDocument?.url || undefined,
-        extraArgs:
-          showMemberPresenceField && isMemberPresentAtFacility !== null
-            ? { is_member_present_at_the_facility: isMemberPresentAtFacility }
-            : undefined,
+        extraArgs: Object.keys(extraArgs).length > 0 ? extraArgs : undefined,
       });
 
       // Add patient metadata for Redis enrichment (use enriched data if available)
@@ -1775,6 +1797,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     setReferringPhysician("");
     setReferralDocument(null);
     setReferralDocumentError(null);
+    // Reset referral number (TPA002)
+    setReferralNo("");
     // Reset extraction states
     setInterimScreenshot(null);
     setInterimDocuments([]);
@@ -2319,29 +2343,52 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
               </div>
             )}
 
-            {/* Referring Physician */}
-            <div>
-              <label className="block font-semibold text-gray-700 mb-2">
-                Referring Physician{" "}
-                <span className="text-gray-400 text-xs">(optional)</span>
-              </label>
-              <input
-                type="text"
-                value={referringPhysician}
-                onChange={handleReferringPhysicianChange}
-                placeholder="Enter referring physician name or ID"
-                maxLength={100}
-                className={`w-full border ${errors.referringPhysician ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
-              />
-              {errors.referringPhysician && (
-                <span className="text-red-500 text-sm mt-1 block">
-                  {errors.referringPhysician}
-                </span>
-              )}
-              <small className="text-gray-500 mt-1 block">
-                Name or ID of the referring physician (if applicable)
-              </small>
-            </div>
+            {/* Referral Number (TPA002 - NextCare) */}
+            {showReferralNoField && (
+              <div>
+                <label className="block font-semibold text-gray-700 mb-2">
+                  Referral Number{" "}
+                  <span className="text-gray-400 text-xs">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={referralNo}
+                  onChange={handleReferralNoChange}
+                  placeholder="Enter referral number"
+                  maxLength={32}
+                  className="w-full border border-gray-300 rounded-md p-3"
+                />
+                <small className="text-gray-500 mt-1 block">
+                  Maximum 32 characters
+                </small>
+              </div>
+            )}
+
+            {/* Referring Physician - TPA001, TPA004, INS026 */}
+            {showReferringPhysicianField && (
+              <div>
+                <label className="block font-semibold text-gray-700 mb-2">
+                  Referring Physician{" "}
+                  <span className="text-gray-400 text-xs">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={referringPhysician}
+                  onChange={handleReferringPhysicianChange}
+                  placeholder="Enter referring physician name or ID"
+                  maxLength={100}
+                  className={`w-full border ${errors.referringPhysician ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
+                />
+                {errors.referringPhysician && (
+                  <span className="text-red-500 text-sm mt-1 block">
+                    {errors.referringPhysician}
+                  </span>
+                )}
+                <small className="text-gray-500 mt-1 block">
+                  Name or ID of the referring physician (if applicable)
+                </small>
+              </div>
+            )}
 
             {/* Referral Document Upload - Only for TPA001 and TPA004 */}
             {["TPA001", "TPA004"].includes(options) && (

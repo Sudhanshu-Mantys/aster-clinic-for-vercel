@@ -100,6 +100,7 @@ interface FormData {
   maternityType: string;
   isMemberPresentAtFacility: boolean | null;
   referringPhysician: string;
+  referralNo: string;
 }
 
 const INSURANCE_OPTIONS = [
@@ -516,6 +517,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
       maternityType: "",
       isMemberPresentAtFacility: true,
       referringPhysician: "",
+      referralNo: "",
     },
   });
 
@@ -623,8 +625,9 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
   const shouldShowPodFields = (watchOptions === "TPA023" || watchOptions === "INS026" || watchOptions === "D004") && selectedOrganizationId === "medcare";
   const showMaternityExtraArgs = watchVisitType === "MATERNITY" && (watchOptions === "TPA004" || watchOptions === "TPA001");
   const showMemberPresenceField = watchOptions === "TPA004" || watchOptions === "TPA001";
-  const showReferringPhysicianField = watchOptions === "TPA001" || watchOptions === "TPA004";
+  const showReferringPhysicianField = watchOptions === "TPA001" || watchOptions === "TPA004" || watchOptions === "INS026";
   const showReferralDocumentField = watchOptions === "TPA001" || watchOptions === "TPA004";
+  const showReferralNoField = watchOptions === "TPA002";
 
   useEffect(() => {
     if (patientData) {
@@ -884,6 +887,15 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
         doctorDhaId = selectedDoctor?.dha_id || data.doctorName;
       }
 
+      // Build extraArgs object
+      const extraArgs: Record<string, any> = {};
+      if (showMemberPresenceField && data.isMemberPresentAtFacility !== null) {
+        extraArgs.is_member_present_at_the_facility = data.isMemberPresentAtFacility;
+      }
+      if (data.options === "TPA002" && data.referralNo) {
+        extraArgs.referral_no = data.referralNo;
+      }
+
       const mantysPayload = buildMantysPayload({
         idValue: data.emiratesId,
         tpaId: data.options as TPACode,
@@ -893,10 +905,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
         payerName: undefined,
         referringPhysician: data.referringPhysician || undefined,
         referralDocumentUrl: referralDocument?.url || undefined,
-        extraArgs:
-          showMemberPresenceField && data.isMemberPresentAtFacility !== null
-            ? { is_member_present_at_the_facility: data.isMemberPresentAtFacility }
-            : undefined,
+        extraArgs: Object.keys(extraArgs).length > 0 ? extraArgs : undefined,
       });
 
       const payloadWithMetadata = {
@@ -1262,6 +1271,39 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
                 />
               )}
             />
+          </div>
+        )}
+
+        {/* Referral Number - TPA002 (NextCare) */}
+        {showReferralNoField && (
+          <div>
+            <Label>
+              Referral Number{" "}
+              <span className="text-gray-400 text-xs">(optional)</span>
+            </Label>
+            <Controller
+              name="referralNo"
+              control={control}
+              rules={{
+                maxLength: {
+                  value: 32,
+                  message: "Referral number cannot exceed 32 characters",
+                },
+              }}
+              render={({ field }) => (
+                <Input
+                  {...field}
+                  className="mt-1"
+                  placeholder="Enter referral number"
+                  maxLength={32}
+                />
+              )}
+            />
+            {errors.referralNo && (
+              <p className="text-red-500 text-sm mt-1">
+                {errors.referralNo.message}
+              </p>
+            )}
           </div>
         )}
 
