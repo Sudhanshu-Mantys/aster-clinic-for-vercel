@@ -1206,10 +1206,9 @@ export interface MantysEligibilityRequest {
   visit_type: string;
   doctorName?: string;
   payerName?: string;
-  extra_args?: {
-    title: string;
-    value: string;
-  };
+  referringPhysician?: string;
+  referralDocumentUrl?: string;
+  extra_args?: Record<string, unknown>;
   mpi?: string;
   patientId?: string | number;
   patientName?: string;

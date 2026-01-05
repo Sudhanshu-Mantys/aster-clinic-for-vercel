@@ -98,6 +98,7 @@ interface FormData {
   phoneSuffix: string;
   maternityType: string;
   isMemberPresentAtFacility: boolean | null;
+  referringPhysician: string;
 }
 
 const INSURANCE_OPTIONS = [
@@ -508,6 +509,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
       phoneSuffix: "",
       maternityType: "",
       isMemberPresentAtFacility: true,
+      referringPhysician: "",
     },
   });
 
@@ -756,6 +758,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
         visitType: data.visitType as VisitType,
         doctorName: doctorDhaId,
         payerName: undefined,
+        referringPhysician: data.referringPhysician || undefined,
         extraArgs:
           showMemberPresenceField && data.isMemberPresentAtFacility !== null
             ? { is_member_present_at_the_facility: data.isMemberPresentAtFacility }

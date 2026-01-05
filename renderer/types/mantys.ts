@@ -69,6 +69,17 @@ export interface MantysEligibilityRequest {
     extra_args?: Record<string, any>
     doctorName?: string
     payerName?: string
+    referringPhysician?: string
+    referralDocumentUrl?: string
+}
+
+export interface ReferralDocumentUpload {
+    url: string
+    objectKey: string
+    fileName: string
+    path: string
+    tpaId: string
+    patientId: string
 }
 
 // ============================================================================
