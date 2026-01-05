@@ -96,13 +96,23 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
 
   const handleViewDetails = (item: EligibilityHistoryItem) => {
     setSelectedItemId(item.id);
-    if (item.status === "error") {
-      setShowModal(true);
-      return;
-    }
-    if (item.status === "complete" && item.result) {
+    
+    // Log for debugging
+    console.log("[EligibilityHistoryList] View details for item:", {
+      id: item.id,
+      status: item.status,
+      taskId: item.taskId,
+      hasResult: !!item.result,
+      result: item.result,
+      error: item.error,
+    });
+    
+    if (item.status === "complete" || item.status === "error") {
+      // Always show drawer for completed or error status
+      // The drawer will display results or error message appropriately
       setShowDrawer(true);
     } else {
+      // Pending/processing - show modal for live progress
       setShowModal(true);
     }
   };
@@ -233,7 +243,23 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
         } as MantysEligibilityResponse;
       }
 
-      // No eligible result found in search-all
+      // No eligible result found in search-all - return first result with data for display
+      const firstResultWithData = searchAllResult.aggregated_results.find(
+        (r: any) => r.data
+      );
+      
+      if (firstResultWithData) {
+        return {
+          tpa: firstResultWithData.tpa_name || "",
+          data: firstResultWithData.data,
+          status: "not_found" as const,
+          job_task_id: firstResultWithData.data?.job_task_id || "",
+          task_id: searchAllResult.task_id,
+          // Include all aggregated results for display
+          aggregated_results: searchAllResult.aggregated_results,
+        } as MantysEligibilityResponse & { aggregated_results?: any[] };
+      }
+
       return undefined;
     }
 
@@ -415,6 +441,8 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                   </Badge>
                 );
               })()
+            ) : selectedItem.status === "error" ? (
+              <Badge className="bg-red-100 text-red-800">Failed</Badge>
             ) : null
           }
           size="xl"
@@ -427,7 +455,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                   <p className="mt-4 text-gray-600">Loading results...</p>
                 </div>
               </div>
-            ) : resultData ? (
+            ) : (
               <MantysResultsDisplay
                 response={resultData}
                 onClose={handleCloseDrawer}
@@ -439,11 +467,9 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                 appointmentId={selectedItem.appointmentId}
                 encounterId={selectedItem.encounterId}
                 physicianId={enrichedPhysicianId}
+                errorMessage={selectedItem.error || freshResult?.error}
+                taskId={selectedItem.taskId}
               />
-            ) : (
-              <div className="text-center py-12 text-gray-500">
-                <p>No results available</p>
-              </div>
             )}
           </div>
         </Drawer>

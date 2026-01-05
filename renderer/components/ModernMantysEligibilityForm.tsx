@@ -570,6 +570,21 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
     );
   }, [isDoctorCompulsory, watchOptions]);
 
+  // Doctor name is required for validation (not just shown)
+  // For BOTH, RIYATI, DHPO - doctor field is shown but optional
+  const isDoctorRequired = useMemo(() => {
+    // If doctor is compulsory in config, it's required
+    if (isDoctorCompulsory) {
+      return true;
+    }
+    // BOTH, RIYATI, DHPO - doctor is optional (shown but not required)
+    if (watchOptions === "BOTH" || watchOptions === "RIYATI" || watchOptions === "DHPO") {
+      return false;
+    }
+    // For other TPAs that show the field, it's required
+    return showDoctorsNameField;
+  }, [isDoctorCompulsory, watchOptions, showDoctorsNameField]);
+
   const showNameField = useMemo(() => {
     return (["TPA003", "BOTH", "RIYATI", "DHPO"].includes(watchOptions) && watchIdType !== "EMIRATESID") ||
       watchOptions === "TPA016" ||
@@ -993,11 +1008,11 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
 
         {showDoctorsNameField && (
           <div>
-            <Label>Doctor's Name {isDoctorCompulsory && <span className="text-red-500">*</span>}</Label>
+            <Label>Doctor's Name {isDoctorRequired && <span className="text-red-500">*</span>}</Label>
             <Controller
               name="doctorName"
               control={control}
-              rules={{ validate: (value) => isDoctorCompulsory ? validateDoctorName(value).isValid || "Doctor is required" : true }}
+              rules={{ validate: (value) => isDoctorRequired ? validateDoctorName(value).isValid || "Doctor is required" : true }}
               render={({ field }) => (
                 <Select
                   {...field}

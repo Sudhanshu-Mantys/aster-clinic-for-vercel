@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 
 interface MantysResultsDisplayProps {
-  response: MantysEligibilityResponse;
+  response?: MantysEligibilityResponse & { aggregated_results?: any[] };
   onClose?: () => void;
   onCheckAnother?: () => void;
   screenshot?: string | null;
@@ -44,6 +44,8 @@ interface MantysResultsDisplayProps {
   appointmentId?: number;
   encounterId?: number;
   physicianId?: number;
+  errorMessage?: string | null;
+  taskId?: string;
 }
 
 type TabValue = "overview" | "benefits" | "policy" | "documents";
@@ -59,6 +61,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   appointmentId,
   encounterId,
   physicianId,
+  errorMessage,
+  taskId,
 }) => {
   const [activeTab, setActiveTab] = useState<TabValue>("documents");
   const [copied, setCopied] = useState<string | null>(null);
@@ -138,43 +142,77 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     physicianId,
   });
 
-  const keyFields: MantysKeyFields = extractMantysKeyFields(response);
-  const { data } = response;
+  // Extract key fields from response (will be null if no response)
+  const keyFieldsOrNull: MantysKeyFields | null = response ? extractMantysKeyFields(response) : null;
+  const data = response?.data;
   const screenshotSrc = screenshot || data?.screenshot_key || null;
+  
+  // After the early return for !data, keyFields is guaranteed to be non-null
+  // This is used after the early return check
+  const keyFields = keyFieldsOrNull as MantysKeyFields;
 
   useEffect(() => {
     setShowScreenshot(true);
   }, [screenshotSrc]);
 
   useEffect(() => {
-    const isFinalStatus = ["found", "not_found", "error"].includes(
-      response.status,
-    );
+    // Use taskId prop or from response
+    const effectiveTaskId = taskId || response?.task_id;
+    
+    if (!response) {
+      // For error-only cases, try to fetch v3 result using taskId prop
+      if (effectiveTaskId) {
+        let isMounted = true;
+        const fetchV3Result = async () => {
+          try {
+            console.log("[MantysResultsDisplay] Fetching v3 result for error case, taskId:", effectiveTaskId);
+            const resultResponse = await fetch(
+              `/api/mantys/eligibility-result-v3?task_id=${encodeURIComponent(effectiveTaskId)}`,
+            );
+            if (!resultResponse.ok) {
+              throw new Error(`Failed to fetch v3 result: ${resultResponse.status}`);
+            }
+            const resultData = await resultResponse.json();
+            console.log("[MantysResultsDisplay] V3 result for error case:", resultData);
+            if (isMounted) {
+              setV3Result(resultData);
+            }
+          } catch (error) {
+            console.error("[MantysResultsDisplay] Failed to fetch v3 eligibility result:", error);
+          }
+        };
+        fetchV3Result();
+        return () => { isMounted = false; };
+      }
+      setV3Result(null);
+      return;
+    }
+
+    const isFinalStatus = ["found", "not_found", "error"].includes(response.status);
     if (!isFinalStatus) {
       setV3Result(null);
       return;
     }
 
-    const taskId = response.task_id;
-    if (!taskId) return;
+    if (!effectiveTaskId) return;
 
     let isMounted = true;
     const fetchV3Result = async () => {
       try {
+        console.log("[MantysResultsDisplay] Fetching v3 result, taskId:", effectiveTaskId);
         const resultResponse = await fetch(
-          `/api/mantys/eligibility-result-v3?task_id=${encodeURIComponent(taskId)}`,
+          `/api/mantys/eligibility-result-v3?task_id=${encodeURIComponent(effectiveTaskId)}`,
         );
         if (!resultResponse.ok) {
-          throw new Error(
-            `Failed to fetch v3 result: ${resultResponse.status}`,
-          );
+          throw new Error(`Failed to fetch v3 result: ${resultResponse.status}`);
         }
         const resultData = await resultResponse.json();
+        console.log("[MantysResultsDisplay] V3 result:", resultData);
         if (isMounted) {
           setV3Result(resultData);
         }
       } catch (error) {
-        console.error("Failed to fetch v3 eligibility result:", error);
+        console.error("[MantysResultsDisplay] Failed to fetch v3 eligibility result:", error);
       }
     };
 
@@ -182,13 +220,13 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [response.status, response.task_id]);
+  }, [response?.status, response?.task_id, taskId]);
 
   // Load TPA Configuration and related configs
   useEffect(() => {
     const loadTPAConfig = async () => {
       const selectedClinicId = user?.selected_team_id;
-      if (!selectedClinicId || !response.tpa) return;
+      if (!selectedClinicId || !response?.tpa) return;
 
       try {
         // Fetch TPA config
@@ -252,7 +290,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     };
 
     loadTPAConfig();
-  }, [user?.selected_team_id, response.tpa]);
+  }, [user?.selected_team_id, response?.tpa]);
 
   // Auto-select plan from network mapping
   useEffect(() => {
@@ -854,19 +892,60 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
     }
   };
 
+  // Handle error-only case (no response data)
   if (!data) {
     return (
-      <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-        <h2 className="text-lg font-semibold text-red-900">Error</h2>
-        <p className="text-red-700">Invalid response</p>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded"
-          >
-            Close
-          </button>
+      <div className="space-y-4">
+        {/* Error Banner */}
+        <div className="p-6 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-start gap-4">
+            <XCircle className="h-8 w-8 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h2 className="text-xl font-semibold text-red-900 mb-2">Eligibility Check Failed</h2>
+              <p className="text-red-700 mb-4">
+                {errorMessage || "Unable to retrieve eligibility information. Please try again later."}
+              </p>
+              {taskId && (
+                <p className="text-xs text-red-500 font-mono">Task ID: {taskId}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Screenshot if available */}
+        {screenshotSrc && (
+          <Card className="p-4">
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">
+              Eligibility Screenshot
+            </h4>
+            <a
+              href={screenshotSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block border border-gray-300 rounded-lg overflow-hidden bg-gray-50 shadow-sm hover:border-gray-400 transition-colors"
+            >
+              <img
+                src={screenshotSrc}
+                alt="Eligibility verification screenshot"
+                className="w-full h-auto max-h-[420px] object-contain"
+              />
+            </a>
+          </Card>
         )}
+
+        {/* Action Buttons */}
+        <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t">
+          {onCheckAnother && (
+            <Button onClick={onCheckAnother} className="flex-1 gap-2">
+              Check Another Eligibility
+            </Button>
+          )}
+          {onClose && (
+            <Button variant="outline" onClick={onClose}>
+              Close
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
@@ -911,25 +990,42 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Action Buttons - 2x2 Grid on Mobile */}
-      <div className="grid grid-cols-2 gap-2">
-        <Button
-          onClick={handleSavePolicy}
-          className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-        >
-          <Download className="h-4 w-4" /> Save Policy
-        </Button>
-        {keyFields.referralDocuments?.length > 0 && (
+      {/* Not Eligible Banner */}
+      {!keyFields.isEligible && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center gap-3">
+            <XCircle className="h-6 w-6 text-red-600 flex-shrink-0" />
+            <div>
+              <h3 className="font-semibold text-red-900">Patient Not Eligible</h3>
+              <p className="text-sm text-red-700">
+                {data?.failure_reason || "This patient is not covered under this insurance policy."}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Action Buttons - 2x2 Grid on Mobile - Only show when eligible */}
+      {keyFields.isEligible && (
+        <div className="grid grid-cols-2 gap-2">
           <Button
-            onClick={handleUploadScreenshots}
-            disabled={uploadingFiles}
+            onClick={handleSavePolicy}
             className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
           >
-            <Upload className="h-4 w-4" />{" "}
-            {uploadingFiles ? "Uploading..." : "Upload Documents"}
+            <Download className="h-4 w-4" /> Save Policy
           </Button>
-        )}
-      </div>
+          {keyFields.referralDocuments?.length > 0 && (
+            <Button
+              onClick={handleUploadScreenshots}
+              disabled={uploadingFiles}
+              className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <Upload className="h-4 w-4" />{" "}
+              {uploadingFiles ? "Uploading..." : "Upload Documents"}
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Tab Navigation - 2x2 on Mobile */}
       <div className="border-b border-gray-200">
@@ -1250,6 +1346,60 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
                       onError={() => setShowScreenshot(false)}
                     />
                   </a>
+                </div>
+              )}
+
+              {/* Search-All TPA Results */}
+              {response.aggregated_results && response.aggregated_results.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3">
+                    TPA Search Results ({response.aggregated_results.length} checked)
+                  </h4>
+                  <div className="space-y-4">
+                    {response.aggregated_results.map((result: any, idx: number) => (
+                      <div key={idx} className="border border-gray-200 rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between p-3 bg-gray-50">
+                          <span className="font-medium text-gray-900">{result.tpa_name}</span>
+                          <Badge
+                            className={
+                              result.status === "found" && result.data?.is_eligible
+                                ? "bg-green-100 text-green-800"
+                                : result.status === "failed" || result.status === "error"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-yellow-100 text-yellow-800"
+                            }
+                          >
+                            {result.status === "found" && result.data?.is_eligible
+                              ? "Eligible"
+                              : result.status === "found"
+                                ? "Not Eligible"
+                                : result.status === "failed" || result.status === "error"
+                                  ? "Failed"
+                                  : result.status}
+                          </Badge>
+                        </div>
+                        {result.message && (
+                          <div className="px-3 py-2 text-sm text-gray-600 border-t border-gray-200 bg-white">
+                            {result.message}
+                          </div>
+                        )}
+                        {result.data?.screenshot_key && (
+                          <a
+                            href={result.data.screenshot_key}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block border-t border-gray-200"
+                          >
+                            <img
+                              src={result.data.screenshot_key}
+                              alt={`${result.tpa_name} screenshot`}
+                              className="w-full h-auto max-h-[300px] object-contain bg-gray-50"
+                            />
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </Card>

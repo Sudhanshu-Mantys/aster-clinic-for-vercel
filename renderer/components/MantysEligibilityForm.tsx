@@ -982,6 +982,21 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     );
   }, [isDoctorCompulsory, options, selectedOrganizationId]);
 
+  // Doctor name is required for validation (not just shown)
+  // For BOTH, RIYATI, DHPO - doctor field is shown but optional
+  const isDoctorRequired = useMemo(() => {
+    // If doctor is compulsory in config, it's required
+    if (isDoctorCompulsory) {
+      return true;
+    }
+    // BOTH, RIYATI, DHPO - doctor is optional (shown but not required)
+    if (options === "BOTH" || options === "RIYATI" || options === "DHPO") {
+      return false;
+    }
+    // For other TPAs that show the field, it's required
+    return showDoctorsNameField;
+  }, [isDoctorCompulsory, options, showDoctorsNameField]);
+
   // Name field requirement
   const showNameField =
     (["TPA003", "BOTH", "RIYATI", "DHPO"].includes(options) &&
@@ -1451,8 +1466,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       newErrors.visitType = visitTypeValidation.error || "Visit type is required";
     }
 
-    // Doctor name validation
-    if (showDoctorsNameField) {
+    // Doctor name validation - only validate if required (not just shown)
+    if (isDoctorRequired) {
       const doctorValidation = validateDoctorName(doctorName);
       if (!doctorValidation.isValid) {
         newErrors.doctorName = doctorValidation.error || "Doctor name is required";
@@ -2082,7 +2097,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
             {showDoctorsNameField && (
               <div>
                 <label className="block font-semibold text-gray-700 mb-2">
-                  Doctor's Name <span className="text-red-600">*</span>
+                  Doctor's Name {isDoctorRequired && <span className="text-red-600">*</span>}
                 </label>
                 <Select
                   value={DOCTORS_LIST.find((opt) => opt.value === doctorName)}
