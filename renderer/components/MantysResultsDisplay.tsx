@@ -17,6 +17,7 @@ import { Modal } from "./ui/modal";
 import { StatusDialog } from "./StatusDialog";
 import { asterApi, patientApi } from "../lib/api-client";
 import { useMantysActions } from "../hooks/useMantysActions";
+import { logButtonClick } from "../lib/logging";
 import {
   CheckCircle2,
   XCircle,
@@ -1016,7 +1017,10 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           </Button>
           {keyFields.referralDocuments?.length > 0 && (
             <Button
-              onClick={handleUploadScreenshots}
+              onClick={async () => {
+                await logButtonClick(taskId, "upload_documents");
+                handleUploadScreenshots();
+              }}
               disabled={uploadingFiles}
               className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
             >
