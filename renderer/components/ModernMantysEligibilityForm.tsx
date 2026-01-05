@@ -10,6 +10,7 @@ import {
   TPACode,
   IDType,
   VisitType,
+  ReferralDocumentUpload,
 } from "../types/mantys";
 import {
   appointmentApi,
@@ -466,6 +467,11 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
   const [mantysResponse, setMantysResponse] = useState<MantysEligibilityResponse | null>(null);
   const [showResults, setShowResults] = useState(false);
 
+  // Referral Document Upload (TPA001/TPA004)
+  const [referralDocument, setReferralDocument] = useState<ReferralDocumentUpload | null>(null);
+  const [isReferralDocumentUploading, setIsReferralDocumentUploading] = useState(false);
+  const [referralDocumentError, setReferralDocumentError] = useState<string | null>(null);
+
   const createEligibilityCheck = useCreateEligibilityCheck();
   const createHistoryItem = useCreateEligibilityHistoryItem();
 
@@ -610,6 +616,8 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
   const shouldShowPodFields = (watchOptions === "TPA023" || watchOptions === "INS026" || watchOptions === "D004") && selectedOrganizationId === "medcare";
   const showMaternityExtraArgs = watchVisitType === "MATERNITY" && (watchOptions === "TPA004" || watchOptions === "TPA001");
   const showMemberPresenceField = watchOptions === "TPA004" || watchOptions === "TPA001";
+  const showReferringPhysicianField = watchOptions === "TPA001" || watchOptions === "TPA004";
+  const showReferralDocumentField = watchOptions === "TPA001" || watchOptions === "TPA004";
 
   useEffect(() => {
     if (patientData) {
@@ -732,6 +740,109 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
     }
   }, [currentHistoryItem]);
 
+  // Helper functions for referral document upload
+  const formatUploadTimestamp = () => {
+    const now = new Date();
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  };
+
+  const sanitizeIdForPath = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) return "unknown-id";
+    return trimmed.replace(/\s+/g, "_").replace(/[^A-Za-z0-9_-]/g, "-");
+  };
+
+  const uploadReferralDocument = async (file: File) => {
+    if (!file) return;
+
+    // Validate PDF only
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setReferralDocumentError("Only PDF files are allowed.");
+      return;
+    }
+
+    const tpaId = watchOptions;
+    const patientId = watch("emiratesId");
+
+    if (!tpaId || tpaId === "BOTH") {
+      setReferralDocumentError("Please select a specific TPA before uploading a referral document.");
+      return;
+    }
+
+    if (!patientId) {
+      setReferralDocumentError("Please enter an ID before uploading a referral document.");
+      return;
+    }
+
+    setIsReferralDocumentUploading(true);
+    setReferralDocumentError(null);
+
+    const safeId = sanitizeIdForPath(patientId);
+    const timestamp = formatUploadTimestamp();
+    const extensionMatch = file.name.split(".").pop();
+    const extension = extensionMatch ? extensionMatch.toLowerCase() : "pdf";
+    const fileName = `${safeId}_${timestamp}.${extension}`;
+    const pathPrefix = `${tpaId}/referral_documents`;
+
+    const formData = new FormData();
+    formData.append("path", pathPrefix);
+    formData.append("file", file, fileName);
+
+    try {
+      const accessToken = localStorage.getItem("stack_access_token");
+      const MANTYS_CLIENT_ID = process.env.MANTYS_CLIENT_ID || "aster-clinic";
+      const MANTYS_CLINIC_ID = process.env.MANTYS_CLINIC_ID || "92d5da39-36af-4fa2-bde3-3828600d7871";
+
+      const response = await fetch(
+        "https://critical.api.mantys.org/v2/eligibilities-v3/upload-document",
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: accessToken ? `Bearer ${accessToken}` : "",
+            "x-client-id": MANTYS_CLIENT_ID,
+            "x-clinic-id": MANTYS_CLINIC_ID,
+          },
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Upload failed (${response.status}): ${errorBody || response.statusText}`);
+      }
+
+      const result = await response.json();
+      const url = result?.data?.url;
+      const objectKey = result?.data?.object_key || `${pathPrefix}/${fileName}`;
+
+      if (!url) {
+        throw new Error("Upload succeeded but no URL was returned.");
+      }
+
+      setReferralDocument({
+        url,
+        objectKey,
+        fileName,
+        path: objectKey,
+        tpaId,
+        patientId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed.";
+      setReferralDocumentError(message);
+      setReferralDocument(null);
+    } finally {
+      setIsReferralDocumentUploading(false);
+    }
+  };
+
+  const clearReferralDocument = () => {
+    setReferralDocument(null);
+    setReferralDocumentError(null);
+  };
+
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     setApiError(null);
@@ -774,6 +885,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
         doctorName: doctorDhaId,
         payerName: undefined,
         referringPhysician: data.referringPhysician || undefined,
+        referralDocumentUrl: referralDocument?.url || undefined,
         extraArgs:
           showMemberPresenceField && data.isMemberPresentAtFacility !== null
             ? { is_member_present_at_the_facility: data.isMemberPresentAtFacility }
@@ -1191,6 +1303,193 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
               <p className="text-red-500 text-sm mt-1">
                 {errors.isMemberPresentAtFacility.message}
               </p>
+            )}
+          </div>
+        )}
+
+        {/* Referring Physician - TPA001/TPA004 */}
+        {showReferringPhysicianField && (
+          <div>
+            <Label>
+              Referring Physician{" "}
+              <span className="text-gray-400 text-xs">(optional)</span>
+            </Label>
+            <Controller
+              name="referringPhysician"
+              control={control}
+              render={({ field }) => (
+                <Input
+                  {...field}
+                  className="mt-1"
+                  placeholder="Name or ID of referring physician"
+                />
+              )}
+            />
+            <p className="text-gray-500 text-xs mt-1">
+              Name or ID of the referring physician (if applicable)
+            </p>
+          </div>
+        )}
+
+        {/* Referral Document Upload - TPA001/TPA004 */}
+        {showReferralDocumentField && (
+          <div>
+            <Label>
+              Referral Document{" "}
+              <span className="text-gray-400 text-xs">(optional)</span>
+            </Label>
+
+            {/* Upload Area */}
+            {!referralDocument && (
+              <div className="relative mt-1">
+                <input
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      uploadReferralDocument(file);
+                    }
+                  }}
+                  disabled={isReferralDocumentUploading}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                />
+                <div
+                  className={`border-2 border-dashed ${
+                    referralDocumentError
+                      ? "border-red-300 bg-red-50"
+                      : "border-gray-300 bg-gray-50"
+                  } rounded-lg p-6 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors ${
+                    isReferralDocumentUploading ? "opacity-50" : ""
+                  }`}
+                >
+                  {isReferralDocumentUploading ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <svg
+                        className="animate-spin h-8 w-8 text-blue-600"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      <span className="text-sm text-blue-600 font-medium">
+                        Uploading document...
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <svg
+                        className="mx-auto h-10 w-10 text-gray-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                        />
+                      </svg>
+                      <p className="mt-2 text-sm text-gray-600">
+                        <span className="font-medium text-blue-600">
+                          Click to upload
+                        </span>{" "}
+                        or drag and drop
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        PDF only (max 10MB)
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Uploaded Document Display */}
+            {referralDocument && (
+              <div className="border border-green-200 bg-green-50 rounded-lg p-4 mt-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <svg
+                      className="h-8 w-8 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-medium text-green-900">
+                        {referralDocument.fileName}
+                      </p>
+                      <p className="text-xs text-green-700">
+                        Uploaded successfully
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearReferralDocument}
+                    className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-100 transition-colors"
+                    title="Remove document"
+                  >
+                    <svg
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Error Display */}
+            {referralDocumentError && (
+              <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <svg
+                    className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <p className="text-sm text-red-800">{referralDocumentError}</p>
+                </div>
+              </div>
             )}
           </div>
         )}
