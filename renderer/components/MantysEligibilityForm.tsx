@@ -1346,23 +1346,32 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     const fileName = `${safeId}_${timestamp}.${extension}`;
     const pathPrefix = `${tpaId}/referral_documents`;
 
+    // Use browser's native FormData - same as extension
     const formData = new FormData();
     formData.append("path", pathPrefix);
     formData.append("file", file, fileName);
 
     try {
-      // Get bearer token from localStorage
+      // Get bearer token from localStorage - same as extension
       const accessToken = localStorage.getItem("stack_access_token");
+      const MANTYS_CLIENT_ID = process.env.MANTYS_CLIENT_ID || "aster-clinic";
+      const MANTYS_CLINIC_ID =
+        process.env.MANTYS_CLINIC_ID || "92d5da39-36af-4fa2-bde3-3828600d7871";
 
-      const response = await fetch("/api/mantys/upload-document", {
-        method: "POST",
-        headers: {
-          ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
-          "X-Client-ID": selectedOrganizationId,
-          "X-Clinic-ID": selectedClinicId,
-        },
-        body: formData,
-      });
+      // Upload directly to Mantys API - same as extension
+      const response = await fetch(
+        "https://critical.api.mantys.org/v2/eligibilities-v3/upload-document",
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: accessToken ? `Bearer ${accessToken}` : "",
+            "x-client-id": MANTYS_CLIENT_ID,
+            "x-clinic-id": MANTYS_CLINIC_ID,
+          },
+          body: formData,
+        }
+      );
 
       if (!response.ok) {
         const errorBody = await response.text();
