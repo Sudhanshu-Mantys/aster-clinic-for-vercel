@@ -337,6 +337,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   };
 
   const handleSavePolicy = async () => {
+    // Log button click to Mantys analytics
+    await logButtonClick(taskId, "save_policy");
+
     // Fetch existing policies first
     if (patientId) {
       setLoadingPolicies(true);
