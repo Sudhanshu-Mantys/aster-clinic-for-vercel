@@ -255,19 +255,18 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
         search.status === "error" || (search.status as string) === "failed";
       console.log("[handlePreviousSearchClick] isErrorStatus:", isErrorStatus);
       setSelectedTaskId(search.taskId);
-      if (isErrorStatus) {
+      if (search.status === "complete" || isErrorStatus) {
+        // Show drawer for completed or error status (same as EligibilityHistoryList)
         console.log(
-          "[handlePreviousSearchClick] Opening eligibility modal (error status)",
-        );
-        setShowEligibilityModal(true);
-      } else if (search.status === "complete") {
-        console.log(
-          "[handlePreviousSearchClick] Opening eligibility results drawer (complete status)",
+          "[handlePreviousSearchClick] Opening eligibility results drawer (status:",
+          search.status,
+          ")",
         );
         setShowEligibilityResultsDrawer(true);
       } else {
+        // Pending/processing - show modal for live progress
         console.log(
-          "[handlePreviousSearchClick] Opening eligibility modal (other status:",
+          "[handlePreviousSearchClick] Opening eligibility modal (status:",
           search.status,
           ")",
         );
@@ -460,8 +459,9 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       {/* Eligibility Results Drawer */}
       {showEligibilityResultsDrawer &&
         (selectedEligibilityItem?.status === "complete" ||
-          freshTaskResult?.status === "complete") &&
-        resultData && (
+          freshTaskResult?.status === "complete" ||
+          selectedEligibilityItem?.status === "error" ||
+          (selectedEligibilityItem?.status as string) === "failed") && (
           <Drawer
             isOpen={showEligibilityResultsDrawer}
             onClose={handleCloseEligibilityResultsDrawer}
@@ -482,49 +482,48 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
                       </Badge>
                     );
                   })()
-                : null
+                : (selectedEligibilityItem?.status === "error" ||
+                   (selectedEligibilityItem?.status as string) === "failed")
+                  ? <Badge className="bg-red-100 text-red-800">Failed</Badge>
+                  : null
             }
             size="xl"
           >
             <div className="p-6">
-              {resultData ? (
-                <MantysResultsDisplay
-                  response={resultData}
-                  onClose={handleCloseEligibilityResultsDrawer}
-                  onCheckAnother={handleCloseEligibilityResultsDrawer}
-                  screenshot={
-                    selectedEligibilityItem?.interimResults?.screenshot || null
+              <MantysResultsDisplay
+                response={resultData || undefined}
+                onClose={handleCloseEligibilityResultsDrawer}
+                onCheckAnother={handleCloseEligibilityResultsDrawer}
+                screenshot={
+                  selectedEligibilityItem?.interimResults?.screenshot || null
+                }
+                patientName={selectedEligibilityItem?.patientName || selectedAppointment?.full_name}
+                patientMPI={selectedEligibilityItem?.patientMPI || selectedAppointment?.mpi}
+                patientId={
+                  selectedAppointment?.patient_id ||
+                  (selectedEligibilityItem?.patientId
+                    ? parseInt(selectedEligibilityItem.patientId)
+                    : undefined)
+                }
+                appointmentId={selectedEligibilityItem?.appointmentId || selectedAppointment?.appointment_id}
+                encounterId={selectedEligibilityItem?.encounterId || (selectedAppointment as any)?.encounter_id}
+                physicianId={(() => {
+                  // Priority: appointment data > patient context > history
+                  const appointmentPhysicianId = (selectedAppointment as any)?.physician_id;
+                  if (appointmentPhysicianId) {
+                    return typeof appointmentPhysicianId === 'number'
+                      ? appointmentPhysicianId
+                      : parseInt(String(appointmentPhysicianId), 10);
                   }
-                  patientName={selectedEligibilityItem?.patientName || selectedAppointment?.full_name}
-                  patientMPI={selectedEligibilityItem?.patientMPI || selectedAppointment?.mpi}
-                  patientId={
-                    selectedAppointment?.patient_id ||
-                    (selectedEligibilityItem?.patientId
-                      ? parseInt(selectedEligibilityItem.patientId)
-                      : undefined)
-                  }
-                  appointmentId={selectedEligibilityItem?.appointmentId || selectedAppointment?.appointment_id}
-                  encounterId={selectedEligibilityItem?.encounterId || (selectedAppointment as any)?.encounter_id}
-                  physicianId={(() => {
-                    // Priority: appointment data > patient context > history
-                    const appointmentPhysicianId = (selectedAppointment as any)?.physician_id;
-                    if (appointmentPhysicianId) {
-                      return typeof appointmentPhysicianId === 'number'
-                        ? appointmentPhysicianId
-                        : parseInt(String(appointmentPhysicianId), 10);
-                    }
-                    const physicianIdValue = patientContext?.physician_id || patientContext?.physicianId;
-                    if (!physicianIdValue) return undefined;
-                    if (typeof physicianIdValue === 'number') return physicianIdValue;
-                    const parsed = parseInt(String(physicianIdValue), 10);
-                    return isNaN(parsed) ? undefined : parsed;
-                  })()}
-                />
-              ) : (
-                <div className="text-center py-12 text-gray-500">
-                  <p>No results available</p>
-                </div>
-              )}
+                  const physicianIdValue = patientContext?.physician_id || patientContext?.physicianId;
+                  if (!physicianIdValue) return undefined;
+                  if (typeof physicianIdValue === 'number') return physicianIdValue;
+                  const parsed = parseInt(String(physicianIdValue), 10);
+                  return isNaN(parsed) ? undefined : parsed;
+                })()}
+                errorMessage={selectedEligibilityItem?.error || freshTaskResult?.error}
+                taskId={selectedTaskId || undefined}
+              />
             </div>
           </Drawer>
         )}

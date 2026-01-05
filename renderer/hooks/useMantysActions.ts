@@ -45,7 +45,7 @@ interface UseMantysActionsProps {
   appointmentId?: number;
   encounterId?: number;
   physicianId?: number;
-  response: MantysEligibilityResponse;
+  response?: MantysEligibilityResponse;
 }
 
 export const useMantysActions = ({
@@ -111,8 +111,8 @@ export const useMantysActions = ({
     setDialogOpen(false);
   }, []);
 
-  const keyFields: MantysKeyFields = extractMantysKeyFields(response);
-  const data = (response as any).data || response;
+  const keyFields: MantysKeyFields | null = response ? extractMantysKeyFields(response) : null;
+  const data = response ? ((response as any).data || response) : null;
 
   const [enrichedPatientId, setEnrichedPatientId] = useState<
     number | undefined
@@ -241,7 +241,7 @@ export const useMantysActions = ({
   ]);
 
   const enrichTPAConfig = useCallback(async () => {
-    if (!response.tpa) return;
+    if (!response?.tpa) return;
     if (!clinicId) {
       console.warn("TPA config load skipped: missing clinicId.");
       return;
@@ -251,17 +251,17 @@ export const useMantysActions = ({
       const configs = await clinicConfigApi.getTPA(clinicId);
       const config = configs.find(
         (c: any) =>
-          c.ins_code === response.tpa ||
-          c.tpa_id === response.tpa ||
-          c.payer_code === response.tpa,
+          c.ins_code === response?.tpa ||
+          c.tpa_id === response?.tpa ||
+          c.payer_code === response?.tpa,
       );
 
       if (config) {
         // If config doesn't have hospital_insurance_mapping_id, try to fetch from mapping API with retry
-        if (!config.hospital_insurance_mapping_id && response.tpa) {
+        if (!config.hospital_insurance_mapping_id && response?.tpa) {
           try {
             const mapping = await retryWithBackoff(
-              () => clinicConfigApi.getTPAMapping(clinicId, response.tpa!),
+              () => clinicConfigApi.getTPAMapping(clinicId, response?.tpa!),
               3,
               1000,
             );
@@ -276,7 +276,7 @@ export const useMantysActions = ({
             }
           } catch (mappingError) {
             console.error("Failed to fetch TPA mapping after retries:", {
-              tpa: response.tpa,
+              tpa: response?.tpa,
               clinicId,
               error:
                 mappingError instanceof Error
@@ -294,7 +294,7 @@ export const useMantysActions = ({
     } catch (error) {
       console.error("Error fetching TPA config:", error);
     }
-  }, [clinicId, response.tpa]);
+  }, [clinicId, response?.tpa]);
 
   const ensureDataLoaded = useCallback(async () => {
     await enrichPatientContext();
@@ -304,7 +304,7 @@ export const useMantysActions = ({
 
   const handleUploadScreenshots = useCallback(async () => {
     if (
-      !keyFields.referralDocuments ||
+      !keyFields?.referralDocuments ||
       keyFields.referralDocuments.length === 0
     ) {
       showDialog({
@@ -412,16 +412,16 @@ export const useMantysActions = ({
       let currentTpaConfig = tpaConfig;
       if (
         !currentTpaConfig?.hospital_insurance_mapping_id &&
-        response.tpa &&
+        response?.tpa &&
         clinicId
       ) {
         try {
           const configs = await clinicConfigApi.getTPA(clinicId);
           const foundConfig = configs.find(
             (c: any) =>
-              c.ins_code === response.tpa ||
-              c.tpa_id === response.tpa ||
-              c.payer_code === response.tpa,
+              c.ins_code === response?.tpa ||
+              c.tpa_id === response?.tpa ||
+              c.payer_code === response?.tpa,
           );
           if (foundConfig) {
             currentTpaConfig = foundConfig;
@@ -429,7 +429,7 @@ export const useMantysActions = ({
             if (!currentTpaConfig.hospital_insurance_mapping_id) {
               try {
                 const mapping = await retryWithBackoff(
-                  () => clinicConfigApi.getTPAMapping(clinicId, response.tpa!),
+                  () => clinicConfigApi.getTPAMapping(clinicId, response?.tpa!),
                   3,
                   1000,
                 );
@@ -439,7 +439,7 @@ export const useMantysActions = ({
                 }
               } catch (mappingError) {
                 console.error("Failed to fetch TPA mapping after retries:", {
-                  tpa: response.tpa,
+                  tpa: response?.tpa,
                   clinicId,
                   error:
                     mappingError instanceof Error
@@ -455,17 +455,17 @@ export const useMantysActions = ({
       }
 
       const configMappingId = currentTpaConfig?.hospital_insurance_mapping_id;
-      const fallbackMappingId = data.patient_info?.insurance_mapping_id
+      const fallbackMappingId = data?.patient_info?.insurance_mapping_id
         ? parseInt(data.patient_info.insurance_mapping_id, 10)
         : null;
       const insuranceMappingId = configMappingId ?? fallbackMappingId;
 
       if (!insuranceMappingId) {
         const diagnosticInfo = {
-          responseTpa: response.tpa,
+          responseTpa: response?.tpa,
           clinicId,
           configMappingId,
-          fallbackMappingId: data.patient_info?.insurance_mapping_id || null,
+          fallbackMappingId: data?.patient_info?.insurance_mapping_id || null,
           tpaConfigExists: !!currentTpaConfig,
           tpaConfigHasMappingId:
             !!currentTpaConfig?.hospital_insurance_mapping_id,
@@ -477,9 +477,9 @@ export const useMantysActions = ({
 
         // Create detailed error message with actionable steps
         const errorMessage =
-          `Missing insurance mapping ID for ${response.tpa || "unknown TPA"}.\n\n` +
+          `Missing insurance mapping ID for ${response?.tpa || "unknown TPA"}.\n\n` +
           `Diagnostic Information:\n` +
-          `- TPA Code: ${response.tpa}\n` +
+          `- TPA Code: ${response?.tpa}\n` +
           `- Clinic ID: ${clinicId}\n` +
           `- Config exists: ${diagnosticInfo.tpaConfigExists ? "Yes" : "No"}\n` +
           `- Has mapping ID: ${diagnosticInfo.tpaConfigHasMappingId ? "Yes" : "No"}\n` +
@@ -488,14 +488,14 @@ export const useMantysActions = ({
           `To fix this issue:\n` +
           `1. Go to Clinic Configuration page\n` +
           `2. Navigate to TPA Config tab\n` +
-          `3. Find or add TPA config for ${response.tpa}\n` +
+          `3. Find or add TPA config for ${response?.tpa}\n` +
           `4. Ensure it has hospital_insurance_mapping_id, insurance_id, insurance_type, and insurance_name\n` +
           `5. Use the "Bulk Import Mappings" feature if you have mapping data from API`;
 
         throw new Error(errorMessage);
       } else {
         console.log("Saving eligibility order:", {
-          responseTpa: response.tpa,
+          responseTpa: response?.tpa,
           clinicId,
           insuranceMappingId,
           insTpaPatId: insTpaPatIdForUpload,
@@ -614,7 +614,7 @@ export const useMantysActions = ({
       setUploadingFiles(false);
     }
   }, [
-    keyFields.referralDocuments,
+    keyFields?.referralDocuments,
     enrichedPatientId,
     enrichedAppointmentId,
     enrichedEncounterId,
@@ -623,7 +623,7 @@ export const useMantysActions = ({
     tpaConfig,
     clinicId,
     data,
-    response.tpa,
+    response?.tpa,
     propPatientId,
     propAppointmentId,
     propEncounterId,
@@ -632,6 +632,15 @@ export const useMantysActions = ({
   ]);
 
   const handleSavePolicy = useCallback(async () => {
+    if (!data) {
+      showDialog({
+        status: "error",
+        title: "No Data",
+        message: "No eligibility data available to save",
+      });
+      return;
+    }
+
     await ensureDataLoaded();
 
     const finalPatientId = enrichedPatientId || propPatientId;
@@ -660,22 +669,22 @@ export const useMantysActions = ({
 
       const insuranceMappingId = tpaConfig?.hospital_insurance_mapping_id
         ? tpaConfig.hospital_insurance_mapping_id
-        : data.patient_info?.insurance_mapping_id
+        : data?.patient_info?.insurance_mapping_id
           ? parseInt(data.patient_info.insurance_mapping_id, 10)
           : null;
 
-      const payerIdToUse = data.patient_info?.payerId
+      const payerIdToUse = data?.patient_info?.payerId
         ? typeof data.patient_info.payerId === "string"
           ? parseInt(data.patient_info.payerId, 10)
           : data.patient_info.payerId
-        : data.patient_info?.payer_id
+        : data?.patient_info?.payer_id
           ? typeof data.patient_info.payer_id === "string"
             ? parseInt(data.patient_info.payer_id, 10)
             : data.patient_info.payer_id
           : null;
 
       const policyData = {
-        policyId: data.patient_info?.policy_id || null,
+        policyId: data?.patient_info?.policy_id || null,
         isActive: 1,
         payerId: payerIdToUse,
         insuranceCompanyId: null,
@@ -685,24 +694,24 @@ export const useMantysActions = ({
         insuranceGroupPolicyId: null,
         encounterid: finalEncounterId || null,
         parentInsPolicyId: null,
-        tpaCompanyId: data.patient_info?.tpa_id || null,
-        planName: data.patient_info?.plan_name || null,
+        tpaCompanyId: data?.patient_info?.tpa_id || null,
+        planName: data?.patient_info?.plan_name || null,
         planCode: null,
         planId: null,
         eligibilityReqId: null,
-        tpaPolicyId: data.patient_info?.patient_id_info?.member_id || null,
+        tpaPolicyId: data?.patient_info?.patient_id_info?.member_id || null,
         insRules: null,
         orgId: null,
         insuranceMappingId: insuranceMappingId,
         tpaGroupPolicyId: null,
         apntId: finalAppointmentId,
-        insuranceValidTill: data.policy_end_date || null,
+        insuranceValidTill: data?.policy_end_date || null,
         orgName: null,
-        tpaValidTill: data.policy_end_date || null,
+        tpaValidTill: data?.policy_end_date || null,
         patientId: finalPatientId,
         insuranceRenewal: null,
         payerType: 1,
-        insuranceStartDate: data.policy_start_date || null,
+        insuranceStartDate: data?.policy_start_date || null,
         insurancePolicyId: null,
         hasTopUpCard: 0,
         proposerRelation: "Self",
@@ -723,7 +732,7 @@ export const useMantysActions = ({
         patientId: finalPatientId,
         appointmentId: finalAppointmentId,
         encounterId: finalEncounterId,
-        payerId: data.patient_info?.payer_id,
+        payerId: data?.patient_info?.payer_id,
       });
 
       setPolicySaved(true);

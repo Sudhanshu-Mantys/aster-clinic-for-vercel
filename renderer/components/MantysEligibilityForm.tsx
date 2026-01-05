@@ -6,6 +6,7 @@ import {
   TPACode,
   IDType,
   VisitType,
+  ReferralDocumentUpload,
 } from "../types/mantys";
 import {
   ApiError,
@@ -50,12 +51,14 @@ interface MantysEligibilityFormProps {
   patientData: PatientData | null;
   insuranceData: InsuranceData | null;
   onClose?: () => void;
+  isLoadingInsurance?: boolean;
 }
 
 export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   patientData,
   insuranceData,
   onClose,
+  isLoadingInsurance = false,
 }) => {
   // ============================================================================
   // STATE MANAGEMENT
@@ -88,12 +91,26 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // NextCare Policy Number specific
   const [payerName, setPayerName] = useState<string | null>(null);
 
+  // Referral Number (TPA002 - NextCare)
+  const [referralNo, setReferralNo] = useState("");
+
+  // Member Present at Facility (TPA004/TPA001)
+  const [isMemberPresentAtFacility, setIsMemberPresentAtFacility] = useState(true);
+
   // Split phone for specific org (ADNIC at org1)
   const [phoneCode, setPhoneCode] = useState("");
   const [phoneSuffix, setPhoneSuffix] = useState("");
 
   // Maternity type
   const [maternityType, setMaternityType] = useState("");
+
+  // Referring Physician
+  const [referringPhysician, setReferringPhysician] = useState("");
+
+  // Referral Document Upload
+  const [referralDocument, setReferralDocument] = useState<ReferralDocumentUpload | null>(null);
+  const [isReferralDocumentUploading, setIsReferralDocumentUploading] = useState(false);
+  const [referralDocumentError, setReferralDocumentError] = useState<string | null>(null);
 
   // Validation & UI State
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -956,6 +973,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     }
     // Fallback to original hardcoded logic
     return (
+      options === "TPA001" || // Neuron - always required
+      options === "TPA004" || // NAS - always required
       options === "INS026" || // Daman
       options === "TPA029" || // eCare
       options === "D004" || // Daman variant
@@ -964,11 +983,24 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       options === "DHPO" ||
       options === "RIYATI" ||
       (options === "TPA037" && selectedOrganizationId === "al-noor") || // Lifeline at Al Noor
-      (options === "TPA001" && selectedOrganizationId === "org1") || // Neuron at Org1
-      (options === "INS017" && selectedOrganizationId === "org1") || // ADNIC at Org1
-      (options === "TPA004" && selectedOrganizationId === "org1") // NAS at Org1
+      (options === "INS017" && selectedOrganizationId === "org1") // ADNIC at Org1
     );
   }, [isDoctorCompulsory, options, selectedOrganizationId]);
+
+  // Doctor name is required for validation (not just shown)
+  // For BOTH, RIYATI, DHPO - doctor field is shown but optional
+  const isDoctorRequired = useMemo(() => {
+    // If doctor is compulsory in config, it's required
+    if (isDoctorCompulsory) {
+      return true;
+    }
+    // BOTH, RIYATI, DHPO - doctor is optional (shown but not required)
+    if (options === "BOTH" || options === "RIYATI" || options === "DHPO") {
+      return false;
+    }
+    // For other TPAs that show the field, it's required
+    return showDoctorsNameField;
+  }, [isDoctorCompulsory, options, showDoctorsNameField]);
 
   // Name field requirement
   const showNameField =
@@ -1004,6 +1036,12 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // Payer name field (NextCare with Policy Number)
   const showPayerNameField = options === "TPA002" && idType === "POLICYNUMBER";
 
+  // Referral Number field (NextCare - TPA002)
+  const showReferralNoField = options === "TPA002";
+
+  // Referring Physician field (TPA001, TPA004, INS026)
+  const showReferringPhysicianField = options === "TPA001" || options === "TPA004" || options === "INS026";
+
   // Visit category (ADNIC at Org1)
   const showVisitCategoryField = isOrg1Ins017;
 
@@ -1015,6 +1053,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // Maternity extra args (NAS, Neuron)
   const showMaternityExtraArgs =
     visitType === "MATERNITY" && (options === "TPA004" || options === "TPA001");
+  const showMemberPresenceField =
+    options === "TPA004" || options === "TPA001";
 
   const maternityExtraArgs = visitTypeOptions?.find(
     (item) => item.value === "MATERNITY",
@@ -1265,6 +1305,145 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     setReferralCode(sanitized);
   };
 
+  const handleReferringPhysicianChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    const sanitized = sanitizeInput(rawValue);
+    setReferringPhysician(sanitized);
+
+    // Clear error for this field
+    if (errors.referringPhysician) {
+      setErrors({ ...errors, referringPhysician: "" });
+    }
+  };
+
+  const handleReferralNoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    // Limit to 32 characters
+    const sanitized = sanitizeAlphanumericInput(rawValue).slice(0, 32);
+    setReferralNo(sanitized);
+  };
+
+  // ============================================================================
+  // REFERRAL DOCUMENT UPLOAD
+  // ============================================================================
+
+  const formatUploadTimestamp = () => {
+    const now = new Date();
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+      now.getDate()
+    )}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  };
+
+  const sanitizeIdForPath = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return "unknown-id";
+    return trimmed.replace(/\s+/g, "_").replace(/[^A-Za-z0-9_-]/g, "-");
+  };
+
+  const uploadReferralDocument = async (file: File) => {
+    if (!file) {
+      return;
+    }
+
+    // Validate PDF only
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setReferralDocumentError("Only PDF files are allowed.");
+      return;
+    }
+
+    const tpaId = options;
+    const patientId = emiratesId;
+
+    if (!tpaId || tpaId === "BOTH") {
+      setReferralDocumentError(
+        "Please select a specific TPA before uploading a referral document."
+      );
+      return;
+    }
+
+    if (!patientId) {
+      setReferralDocumentError(
+        "Please enter an ID before uploading a referral document."
+      );
+      return;
+    }
+
+    setIsReferralDocumentUploading(true);
+    setReferralDocumentError(null);
+
+    const safeId = sanitizeIdForPath(patientId);
+    const timestamp = formatUploadTimestamp();
+    const extensionMatch = file.name.split(".").pop();
+    const extension = extensionMatch ? extensionMatch.toLowerCase() : "pdf";
+    const fileName = `${safeId}_${timestamp}.${extension}`;
+    const pathPrefix = `${tpaId}/referral_documents`;
+
+    // Use browser's native FormData - same as extension
+    const formData = new FormData();
+    formData.append("path", pathPrefix);
+    formData.append("file", file, fileName);
+
+    try {
+      // Get bearer token from localStorage - same as extension
+      const accessToken = localStorage.getItem("stack_access_token");
+      const MANTYS_CLIENT_ID = process.env.MANTYS_CLIENT_ID || "aster-clinic";
+      const MANTYS_CLINIC_ID =
+        process.env.MANTYS_CLINIC_ID || "92d5da39-36af-4fa2-bde3-3828600d7871";
+
+      // Upload directly to Mantys API - same as extension
+      const response = await fetch(
+        "https://critical.api.mantys.org/v2/eligibilities-v3/upload-document",
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: accessToken ? `Bearer ${accessToken}` : "",
+            "x-client-id": MANTYS_CLIENT_ID,
+            "x-clinic-id": MANTYS_CLINIC_ID,
+          },
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(
+          `Upload failed (${response.status}): ${errorBody || response.statusText}`
+        );
+      }
+
+      const result = await response.json();
+      const url = result?.data?.url;
+      const objectKey = result?.data?.object_key || `${pathPrefix}/${fileName}`;
+
+      if (!url) {
+        throw new Error("Upload succeeded but no URL was returned.");
+      }
+
+      setReferralDocument({
+        url,
+        objectKey,
+        fileName,
+        path: objectKey,
+        tpaId,
+        patientId,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Upload failed.";
+      setReferralDocumentError(message);
+      setReferralDocument(null);
+    } finally {
+      setIsReferralDocumentUploading(false);
+    }
+  };
+
+  const clearReferralDocument = () => {
+    setReferralDocument(null);
+    setReferralDocumentError(null);
+  };
+
   const handlePhoneCodeChange = (selected: any) => {
     const code = selected?.value || "";
     setPhoneNumberParts(code, phoneSuffix);
@@ -1305,8 +1484,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       newErrors.visitType = visitTypeValidation.error || "Visit type is required";
     }
 
-    // Doctor name validation
-    if (showDoctorsNameField) {
+    // Doctor name validation - only validate if required (not just shown)
+    if (isDoctorRequired) {
       const doctorValidation = validateDoctorName(doctorName);
       if (!doctorValidation.isValid) {
         newErrors.doctorName = doctorValidation.error || "Doctor name is required";
@@ -1376,12 +1555,14 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       }
     }
 
-    // Maternity type validation
-    if (showMaternityExtraArgs) {
-      const maternityValidation = validateMaternityType(maternityType);
-      if (!maternityValidation.isValid) {
-        newErrors.maternityType = maternityValidation.error || "Maternity type is required";
-      }
+    // Member Presence at Facility validation (TPA004/TPA001)
+    if (
+      ["TPA001", "TPA004", "C001", "C005", "BOTH", "RIYATI", "DHPO"].includes(
+        options,
+      ) &&
+      isMemberPresentAtFacility === null
+    ) {
+      newErrors.memberPresence = "Please select if member is present at facility";
     }
 
     // Referral code validation (optional field, but validate if present)
@@ -1519,6 +1700,15 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         }
       }
 
+      // Build extraArgs object
+      const extraArgs: Record<string, any> = {};
+      if (showMemberPresenceField && isMemberPresentAtFacility !== null) {
+        extraArgs.is_member_present_at_the_facility = isMemberPresentAtFacility;
+      }
+      if (options === "TPA002" && referralNo) {
+        extraArgs.referral_no = referralNo;
+      }
+
       // Build Mantys payload according to API specification
       const mantysPayload = buildMantysPayload({
         idValue: emiratesId,
@@ -1527,6 +1717,9 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         visitType: visitType as VisitType,
         doctorName: doctorDhaId || doctorName || undefined,
         payerName: undefined,
+        referringPhysician: referringPhysician || undefined,
+        referralDocumentUrl: referralDocument?.url || undefined,
+        extraArgs: Object.keys(extraArgs).length > 0 ? extraArgs : undefined,
       });
 
       // Add patient metadata for Redis enrichment (use enriched data if available)
@@ -1601,6 +1794,13 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     // Reset form to initial state
     setEmiratesId("");
     setVisitType("OUTPATIENT");
+    setIsMemberPresentAtFacility(true);
+    // Reset referring physician and document states
+    setReferringPhysician("");
+    setReferralDocument(null);
+    setReferralDocumentError(null);
+    // Reset referral number (TPA002)
+    setReferralNo("");
     // Reset extraction states
     setInterimScreenshot(null);
     setInterimDocuments([]);
@@ -1609,7 +1809,6 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     setStatusMessage("");
     setPollingAttempts(0);
     setTaskId(null);
-
   };
 
   // ============================================================================
@@ -1667,7 +1866,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         />
       )}
 
-      <div className="space-y-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Loading Indicator for Config/Doctor Loading */}
         {(isLoadingTPAConfig || isLoadingDoctors) && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -1854,6 +2053,47 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
               </div>
             )}
 
+            {showMemberPresenceField && (
+              <div>
+                <label className="block font-semibold text-gray-700 mb-2">
+                  Member Present at Facility <span className="text-red-600">*</span>
+                </label>
+                <div className="mt-2 flex items-center gap-6">
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4"
+                      checked={isMemberPresentAtFacility === true}
+                      onChange={(e) =>
+                        setIsMemberPresentAtFacility(
+                          e.target.checked ? true : false
+                        )
+                      }
+                    />
+                    Yes
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4"
+                      checked={isMemberPresentAtFacility === false}
+                      onChange={(e) =>
+                        setIsMemberPresentAtFacility(
+                          e.target.checked ? false : true
+                        )
+                      }
+                    />
+                    No
+                  </label>
+                </div>
+                {errors.memberPresence && (
+                  <span className="text-red-500 text-sm mt-1 block">
+                    {errors.memberPresence}
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* Name Field (Al Madallah, DHPO, RIYATI, MSH, NextCare Policy) */}
             {showNameField && (
               <div>
@@ -1883,7 +2123,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
             {showDoctorsNameField && (
               <div>
                 <label className="block font-semibold text-gray-700 mb-2">
-                  Doctor's Name <span className="text-red-600">*</span>
+                  Doctor's Name {isDoctorRequired && <span className="text-red-600">*</span>}
                 </label>
                 <Select
                   value={DOCTORS_LIST.find((opt) => opt.value === doctorName)}
@@ -2105,6 +2345,208 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
               </div>
             )}
 
+            {/* Referral Number (TPA002 - NextCare) */}
+            {showReferralNoField && (
+              <div>
+                <label className="block font-semibold text-gray-700 mb-2">
+                  Referral Number{" "}
+                  <span className="text-gray-400 text-xs">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={referralNo}
+                  onChange={handleReferralNoChange}
+                  placeholder="Enter referral number"
+                  maxLength={32}
+                  className="w-full border border-gray-300 rounded-md p-3"
+                />
+                <small className="text-gray-500 mt-1 block">
+                  Maximum 32 characters
+                </small>
+              </div>
+            )}
+
+            {/* Referring Physician - TPA001, TPA004, INS026 */}
+            {showReferringPhysicianField && (
+              <div>
+                <label className="block font-semibold text-gray-700 mb-2">
+                  Referring Physician{" "}
+                  <span className="text-gray-400 text-xs">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={referringPhysician}
+                  onChange={handleReferringPhysicianChange}
+                  placeholder="Enter referring physician name or ID"
+                  maxLength={100}
+                  className={`w-full border ${errors.referringPhysician ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
+                />
+                {errors.referringPhysician && (
+                  <span className="text-red-500 text-sm mt-1 block">
+                    {errors.referringPhysician}
+                  </span>
+                )}
+                <small className="text-gray-500 mt-1 block">
+                  Name or ID of the referring physician (if applicable)
+                </small>
+              </div>
+            )}
+
+            {/* Referral Document Upload - Only for TPA001 and TPA004 */}
+            {["TPA001", "TPA004"].includes(options) && (
+            <div>
+              <label className="block font-semibold text-gray-700 mb-2">
+                Referral Document{" "}
+                <span className="text-gray-400 text-xs">(optional)</span>
+              </label>
+
+              {/* Upload Area */}
+              {!referralDocument && (
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        uploadReferralDocument(file);
+                      }
+                    }}
+                    disabled={isReferralDocumentUploading}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                  />
+                  <div className={`border-2 border-dashed ${referralDocumentError ? "border-red-300 bg-red-50" : "border-gray-300 bg-gray-50"} rounded-lg p-6 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors ${isReferralDocumentUploading ? "opacity-50" : ""}`}>
+                    {isReferralDocumentUploading ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <svg
+                          className="animate-spin h-8 w-8 text-blue-600"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                        <span className="text-sm text-blue-600 font-medium">
+                          Uploading document...
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <svg
+                          className="mx-auto h-10 w-10 text-gray-400"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                          />
+                        </svg>
+                        <p className="mt-2 text-sm text-gray-600">
+                          <span className="font-medium text-blue-600">
+                            Click to upload
+                          </span>{" "}
+                          or drag and drop
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          PDF only (max 10MB)
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Uploaded Document Display */}
+              {referralDocument && (
+                <div className="border border-green-200 bg-green-50 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <svg
+                        className="h-8 w-8 text-green-600"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-medium text-green-900">
+                          {referralDocument.fileName}
+                        </p>
+                        <p className="text-xs text-green-700">
+                          Uploaded successfully
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearReferralDocument}
+                      className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-100 transition-colors"
+                      title="Remove document"
+                    >
+                      <svg
+                        className="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Error Display */}
+              {referralDocumentError && (
+                <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <svg
+                      className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <p className="text-sm text-red-800">{referralDocumentError}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            )}
+
             {/* POD Fields (Daman, Daman Thiqa, D004) */}
             {shouldShowPodFields && (
               <>
@@ -2146,6 +2588,22 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                     Visit not related to same chief complaint
                   </label>
                 </div>
+
+                {/* Member Present at Facility (TPA001, TPA004) */}
+                {["TPA001", "TPA004"].includes(options) && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="memberPresentAtFacility"
+                      checked={isMemberPresentAtFacility}
+                      onChange={(e) => setIsMemberPresentAtFacility(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300"
+                    />
+                    <label htmlFor="memberPresentAtFacility" className="text-sm font-medium text-gray-700 cursor-pointer">
+                      Member Present at Facility
+                    </label>
+                  </div>
+                )}
 
                 {/* POD Selection */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2228,10 +2686,12 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
             <div className="pt-6 flex gap-3 mt-6 border-t border-gray-200">
               <Button
                 onClick={handleSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isLoadingInsurance}
                 className="flex-1 py-3 bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 transition disabled:bg-gray-400"
               >
-                {isSubmitting ? (
+                {isLoadingInsurance ? (
+                  "Loading patient data..."
+                ) : isSubmitting ? (
                   <span className="flex flex-col items-center justify-center">
                     <span className="flex items-center">
                       <svg
@@ -2263,7 +2723,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                     )}
                   </span>
                 ) : (
-                  "✓ Check Eligibility"
+                  "Check Eligibility"
                 )}
               </Button>
               {onClose && (

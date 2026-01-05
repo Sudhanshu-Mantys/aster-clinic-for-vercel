@@ -59,10 +59,9 @@ export function buildMantysPayload(params: {
     visitType: VisitType
     doctorName?: string
     payerName?: string
-    extraArgs?: {
-        title: string
-        value: string
-    }
+    referringPhysician?: string
+    referralDocumentUrl?: string
+    extraArgs?: Record<string, any>
 }): MantysEligibilityRequest {
     const payload: MantysEligibilityRequest = {
         id_value: params.idValue,
@@ -73,15 +72,21 @@ export function buildMantysPayload(params: {
         payerName: params.payerName || ''
     }
 
-    // Add extra_args if provided
-    if (params.extraArgs) {
-        payload.extra_args = params.extraArgs
-    } else {
-        payload.extra_args = {
-            title: '',
-            value: ''
-        }
+    // Build extra_args with optional fields
+    const extraArgs: Record<string, any> = { ...(params.extraArgs || {}) }
+
+    // Add referring physician to extra_args if provided
+    if (params.referringPhysician && params.referringPhysician.trim()) {
+        extraArgs.referring_physician = params.referringPhysician.trim()
     }
+
+    // Add referral document URL to extra_args if provided
+    if (params.referralDocumentUrl && params.referralDocumentUrl.trim()) {
+        extraArgs.referral_document_url = params.referralDocumentUrl.trim()
+    }
+
+    // Add extra_args to payload
+    payload.extra_args = extraArgs
 
     return payload
 }

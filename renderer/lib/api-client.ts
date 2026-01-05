@@ -378,17 +378,32 @@ export const eligibilityHistoryApi = {
 
 // Mantys API
 export const mantysApi = {
-  checkStatus: (taskId: string) =>
-    fetchJson<MantysStatusResponse>("/api/mantys/check-status", {
+  checkStatus: async (taskId: string) => {
+    console.log("[mantysApi.checkStatus] Checking status for task:", taskId);
+    const result = await fetchJson<MantysStatusResponse>("/api/mantys/check-status", {
       method: "POST",
       body: { task_id: taskId },
-    }),
+    });
+    console.log("[mantysApi.checkStatus] Result for task:", taskId, {
+      status: result.status,
+      hasResult: !!result.result,
+      error: result.error,
+      isSearchAll: (result as any).isSearchAll,
+      searchAllStatus: (result as any).searchAllStatus,
+      result: result.result,
+    });
+    return result;
+  },
 
-  createEligibilityCheck: (payload: MantysEligibilityRequest) =>
-    fetchJson<MantysEligibilityResponse>("/api/mantys/eligibility-check", {
+  createEligibilityCheck: async (payload: MantysEligibilityRequest) => {
+    console.log("[mantysApi.createEligibilityCheck] Creating check:", payload);
+    const result = await fetchJson<MantysEligibilityResponse>("/api/mantys/eligibility-check", {
       method: "POST",
       body: payload,
-    }),
+    });
+    console.log("[mantysApi.createEligibilityCheck] Result:", result);
+    return result;
+  },
 };
 
 function extractConfigList<T>(data: unknown): T[] {
@@ -1206,10 +1221,9 @@ export interface MantysEligibilityRequest {
   visit_type: string;
   doctorName?: string;
   payerName?: string;
-  extra_args?: {
-    title: string;
-    value: string;
-  };
+  referringPhysician?: string;
+  referralDocumentUrl?: string;
+  extra_args?: Record<string, unknown>;
   mpi?: string;
   patientId?: string | number;
   patientName?: string;
