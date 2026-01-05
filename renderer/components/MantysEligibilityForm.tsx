@@ -88,6 +88,9 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // NextCare Policy Number specific
   const [payerName, setPayerName] = useState<string | null>(null);
 
+  // Member Present at Facility (TPA004/TPA001)
+  const [isMemberPresentAtFacility, setIsMemberPresentAtFacility] = useState(true);
+
   // Split phone for specific org (ADNIC at org1)
   const [phoneCode, setPhoneCode] = useState("");
   const [phoneSuffix, setPhoneSuffix] = useState("");
@@ -1015,6 +1018,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // Maternity extra args (NAS, Neuron)
   const showMaternityExtraArgs =
     visitType === "MATERNITY" && (options === "TPA004" || options === "TPA001");
+  const showMemberPresenceField =
+    options === "TPA004" || options === "TPA001";
 
   const maternityExtraArgs = visitTypeOptions?.find(
     (item) => item.value === "MATERNITY",
@@ -1376,12 +1381,14 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       }
     }
 
-    // Maternity type validation
-    if (showMaternityExtraArgs) {
-      const maternityValidation = validateMaternityType(maternityType);
-      if (!maternityValidation.isValid) {
-        newErrors.maternityType = maternityValidation.error || "Maternity type is required";
-      }
+    // Member Presence at Facility validation (TPA004/TPA001)
+    if (
+      ["TPA001", "TPA004", "C001", "C005", "BOTH", "RIYATI", "DHPO"].includes(
+        options,
+      ) &&
+      isMemberPresentAtFacility === null
+    ) {
+      newErrors.memberPresence = "Please select if member is present at facility";
     }
 
     // Referral code validation (optional field, but validate if present)
@@ -1527,6 +1534,10 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         visitType: visitType as VisitType,
         doctorName: doctorDhaId || doctorName || undefined,
         payerName: undefined,
+        extraArgs:
+          showMemberPresenceField && isMemberPresentAtFacility !== null
+            ? { is_member_present_at_the_facility: isMemberPresentAtFacility }
+            : undefined,
       });
 
       // Add patient metadata for Redis enrichment (use enriched data if available)
@@ -1601,6 +1612,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     // Reset form to initial state
     setEmiratesId("");
     setVisitType("OUTPATIENT");
+    setIsMemberPresentAtFacility(true);
     // Reset extraction states
     setInterimScreenshot(null);
     setInterimDocuments([]);
@@ -1609,7 +1621,6 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
     setStatusMessage("");
     setPollingAttempts(0);
     setTaskId(null);
-
   };
 
   // ============================================================================
@@ -1849,6 +1860,47 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                 {errors.maternityType && (
                   <span className="text-red-500 text-sm mt-1 block">
                     {errors.maternityType}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {showMemberPresenceField && (
+              <div>
+                <label className="block font-semibold text-gray-700 mb-2">
+                  Member Present at Facility <span className="text-red-600">*</span>
+                </label>
+                <div className="mt-2 flex items-center gap-6">
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4"
+                      checked={isMemberPresentAtFacility === true}
+                      onChange={(e) =>
+                        setIsMemberPresentAtFacility(
+                          e.target.checked ? true : false
+                        )
+                      }
+                    />
+                    Yes
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4"
+                      checked={isMemberPresentAtFacility === false}
+                      onChange={(e) =>
+                        setIsMemberPresentAtFacility(
+                          e.target.checked ? false : true
+                        )
+                      }
+                    />
+                    No
+                  </label>
+                </div>
+                {errors.memberPresence && (
+                  <span className="text-red-500 text-sm mt-1 block">
+                    {errors.memberPresence}
                   </span>
                 )}
               </div>
@@ -2146,6 +2198,22 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                     Visit not related to same chief complaint
                   </label>
                 </div>
+
+                {/* Member Present at Facility (TPA001, TPA004) */}
+                {["TPA001", "TPA004"].includes(options) && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="memberPresentAtFacility"
+                      checked={isMemberPresentAtFacility}
+                      onChange={(e) => setIsMemberPresentAtFacility(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300"
+                    />
+                    <label htmlFor="memberPresentAtFacility" className="text-sm font-medium text-gray-700 cursor-pointer">
+                      Member Present at Facility
+                    </label>
+                  </div>
+                )}
 
                 {/* POD Selection */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -97,6 +97,7 @@ interface FormData {
   phoneCode: string;
   phoneSuffix: string;
   maternityType: string;
+  isMemberPresentAtFacility: boolean | null;
 }
 
 const INSURANCE_OPTIONS = [
@@ -506,6 +507,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
       phoneCode: "",
       phoneSuffix: "",
       maternityType: "",
+      isMemberPresentAtFacility: true,
     },
   });
 
@@ -590,6 +592,7 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
   const showPayerNameField = watchOptions === "TPA002" && watchIdType === "POLICYNUMBER";
   const shouldShowPodFields = (watchOptions === "TPA023" || watchOptions === "INS026" || watchOptions === "D004") && selectedOrganizationId === "medcare";
   const showMaternityExtraArgs = watchVisitType === "MATERNITY" && (watchOptions === "TPA004" || watchOptions === "TPA001");
+  const showMemberPresenceField = watchOptions === "TPA004" || watchOptions === "TPA001";
 
   useEffect(() => {
     if (patientData) {
@@ -753,6 +756,10 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
         visitType: data.visitType as VisitType,
         doctorName: doctorDhaId,
         payerName: undefined,
+        extraArgs:
+          showMemberPresenceField && data.isMemberPresentAtFacility !== null
+            ? { is_member_present_at_the_facility: data.isMemberPresentAtFacility }
+            : undefined,
       });
 
       const payloadWithMetadata = {
@@ -1118,6 +1125,55 @@ export const ModernMantysEligibilityForm: React.FC<MantysEligibilityFormProps> =
                 />
               )}
             />
+          </div>
+        )}
+
+        {showMemberPresenceField && (
+          <div>
+            <Label>Member Present at Facility <span className="text-red-500">*</span></Label>
+            <Controller
+              name="isMemberPresentAtFacility"
+              control={control}
+              rules={{
+                validate: (value) =>
+                  value !== null || "Please select if member is present at facility",
+              }}
+              render={({ field }) => {
+                const isYesChecked = field.value === true;
+                const isNoChecked = field.value === false;
+                return (
+                  <div className="mt-2 flex items-center gap-6">
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4"
+                        checked={isYesChecked}
+                        onChange={(e) =>
+                          field.onChange(e.target.checked ? true : null)
+                        }
+                      />
+                      Yes
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4"
+                        checked={isNoChecked}
+                        onChange={(e) =>
+                          field.onChange(e.target.checked ? false : null)
+                        }
+                      />
+                      No
+                    </label>
+                  </div>
+                );
+              }}
+            />
+            {errors.isMemberPresentAtFacility && (
+              <p className="text-red-500 text-sm mt-1">
+                {errors.isMemberPresentAtFacility.message}
+              </p>
+            )}
           </div>
         )}
 

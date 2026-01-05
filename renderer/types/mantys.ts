@@ -66,10 +66,7 @@ export interface MantysEligibilityRequest {
     id_type: IDType
     tpa_name: TPACode
     visit_type: VisitType
-    extra_args?: {
-        title: string
-        value: string
-    }
+    extra_args?: Record<string, any>
     doctorName?: string
     payerName?: string
 }
@@ -314,4 +311,3 @@ export interface MantysKeyFields {
     specialRemarks: string[]
     referralDocuments: ReferralDocument[]
 }
-

@@ -59,10 +59,7 @@ export function buildMantysPayload(params: {
     visitType: VisitType
     doctorName?: string
     payerName?: string
-    extraArgs?: {
-        title: string
-        value: string
-    }
+    extraArgs?: Record<string, any>
 }): MantysEligibilityRequest {
     const payload: MantysEligibilityRequest = {
         id_value: params.idValue,
@@ -74,13 +71,10 @@ export function buildMantysPayload(params: {
     }
 
     // Add extra_args if provided
-    if (params.extraArgs) {
+    if (params.extraArgs && Object.keys(params.extraArgs).length > 0) {
         payload.extra_args = params.extraArgs
     } else {
-        payload.extra_args = {
-            title: '',
-            value: ''
-        }
+        payload.extra_args = {}
     }
 
     return payload
