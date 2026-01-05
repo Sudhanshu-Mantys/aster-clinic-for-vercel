@@ -1866,7 +1866,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
         />
       )}
 
-      <div className="space-y-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Loading Indicator for Config/Doctor Loading */}
         {(isLoadingTPAConfig || isLoadingDoctors) && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
