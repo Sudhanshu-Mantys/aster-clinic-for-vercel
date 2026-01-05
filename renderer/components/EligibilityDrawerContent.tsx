@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { StickyEligibilityToolbar } from "./StickyEligibilityToolbar";
-import { ModernMantysEligibilityForm } from "./ModernMantysEligibilityForm";
+import { MantysEligibilityForm } from "./MantysEligibilityForm";
 import { EligibilityHistorySection } from "./EligibilityHistorySection";
 import { InsuranceCardGrid } from "./InsuranceCardGrid";
 import { useAuth } from "../contexts/AuthContext";
@@ -138,7 +138,7 @@ export const EligibilityDrawerContent: React.FC<
 
         {/* Eligibility Form - Visible Immediately Below Toolbar */}
         <div className="border-b border-gray-200">
-          <ModernMantysEligibilityForm
+          <MantysEligibilityForm
             patientData={patientData}
             insuranceData={selectedInsurance}
             isLoadingInsurance={isLoadingInsurance}

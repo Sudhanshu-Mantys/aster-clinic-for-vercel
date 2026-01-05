@@ -51,12 +51,14 @@ interface MantysEligibilityFormProps {
   patientData: PatientData | null;
   insuranceData: InsuranceData | null;
   onClose?: () => void;
+  isLoadingInsurance?: boolean;
 }
 
 export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   patientData,
   insuranceData,
   onClose,
+  isLoadingInsurance = false,
 }) => {
   // ============================================================================
   // STATE MANAGEMENT
@@ -2684,10 +2686,12 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
             <div className="pt-6 flex gap-3 mt-6 border-t border-gray-200">
               <Button
                 onClick={handleSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isLoadingInsurance}
                 className="flex-1 py-3 bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 transition disabled:bg-gray-400"
               >
-                {isSubmitting ? (
+                {isLoadingInsurance ? (
+                  "Loading patient data..."
+                ) : isSubmitting ? (
                   <span className="flex flex-col items-center justify-center">
                     <span className="flex items-center">
                       <svg
@@ -2719,7 +2723,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                     )}
                   </span>
                 ) : (
-                  "✓ Check Eligibility"
+                  "Check Eligibility"
                 )}
               </Button>
               {onClose && (
