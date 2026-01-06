@@ -84,6 +84,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   const [isMaternity, setIsMaternity] = useState(false);
   const [notRelatedToChiefComplaint, setNotRelatedToChiefComplaint] =
     useState(false);
+  const [freeFollowupOrExtendedFollowup, setFreeFollowupOrExtendedFollowup] =
+    useState(false);
 
   // AXA Specific
   const [useDental, setUseDental] = useState("NO");
@@ -958,7 +960,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // ============================================================================
 
   // POD eligible locations (example for Daman/Thiqa)
-  const isPodEligible = ["medcare", "healthhub"].includes(
+  const isPodEligible = ["medcare", "healthhub", "aster-clinics"].includes(
     selectedOrganizationId,
   );
   const shouldShowPodFields =
@@ -2609,6 +2611,21 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   />
                   <label className="font-semibold text-gray-700 cursor-pointer">
                     Visit not related to same chief complaint
+                  </label>
+                </div>
+
+                {/* Free Follow-up or Extended Follow-up */}
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={freeFollowupOrExtendedFollowup}
+                    onChange={(e) =>
+                      setFreeFollowupOrExtendedFollowup(e.target.checked)
+                    }
+                    className="w-5 h-5 cursor-pointer"
+                  />
+                  <label className="font-semibold text-gray-700 cursor-pointer">
+                    Free Follow-up or Extended Follow-up
                   </label>
                 </div>
 
