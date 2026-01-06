@@ -84,6 +84,8 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   const [isMaternity, setIsMaternity] = useState(false);
   const [notRelatedToChiefComplaint, setNotRelatedToChiefComplaint] =
     useState(false);
+  const [freeFollowupOrExtendedFollowup, setFreeFollowupOrExtendedFollowup] =
+    useState(false);
 
   // AXA Specific
   const [useDental, setUseDental] = useState("NO");
@@ -958,7 +960,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // ============================================================================
 
   // POD eligible locations (example for Daman/Thiqa)
-  const isPodEligible = ["medcare", "healthhub"].includes(
+  const isPodEligible = ["medcare", "healthhub", "aster-clinics"].includes(
     selectedOrganizationId,
   );
   const shouldShowPodFields =
@@ -1039,8 +1041,20 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // Referral Number field (NextCare - TPA002)
   const showReferralNoField = options === "TPA002";
 
-  // Referring Physician field (TPA001, TPA004, INS026)
-  const showReferringPhysicianField = options === "TPA001" || options === "TPA004" || options === "INS026";
+  // Referring Physician field:
+  // - For TPA001, TPA004: Always show (optional)
+  // - For INS026, TPA023, D004: Only show when visitType is CONSULTATION_REFERRAL (required)
+  const showReferringPhysicianFieldOptional = ["TPA001", "TPA004"].includes(options);
+
+  const showReferringPhysicianFieldRequired = useMemo(() => {
+    return (
+      visitType === "CONSULTATION_REFERRAL" &&
+      ["INS026", "TPA023", "D004"].includes(options)
+    );
+  }, [visitType, options]);
+
+  const showReferringPhysicianField = showReferringPhysicianFieldOptional || showReferringPhysicianFieldRequired;
+  const isReferringPhysicianRequired = showReferringPhysicianFieldRequired;
 
   // Visit category (ADNIC at Org1)
   const showVisitCategoryField = isOrg1Ins017;
@@ -1573,6 +1587,11 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       }
     }
 
+    // Referring Physician validation - REQUIRED for CONSULTATION_REFERRAL with Daman TPAs
+    if (isReferringPhysicianRequired && !referringPhysician.trim()) {
+      newErrors.referringPhysician = "Referring physician ID is required for referral visits";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -1707,6 +1726,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       }
       if (options === "TPA002" && referralNo) {
         extraArgs.referral_no = referralNo;
+      }
+      // POD fields for Daman TPAs (TPA023, INS026, D004)
+      if (shouldShowPodFields) {
+        extraArgs.is_pod = isPod;
+        if (isPod && podId) {
+          extraArgs.pod_id = podId;
+        }
+        extraArgs.is_maternity = isMaternity;
+        extraArgs.not_related_to_chief_complaint = notRelatedToChiefComplaint;
+        extraArgs.free_followup_or_extended_followup = freeFollowupOrExtendedFollowup;
       }
 
       // Build Mantys payload according to API specification
@@ -2366,18 +2395,22 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
               </div>
             )}
 
-            {/* Referring Physician - TPA001, TPA004, INS026 */}
+            {/* Referring Physician - TPA001, TPA004, INS026, TPA023, D004 */}
             {showReferringPhysicianField && (
               <div>
                 <label className="block font-semibold text-gray-700 mb-2">
-                  Referring Physician{" "}
-                  <span className="text-gray-400 text-xs">(optional)</span>
+                  Referring Physician ID{" "}
+                  {isReferringPhysicianRequired ? (
+                    <span className="text-red-600">*</span>
+                  ) : (
+                    <span className="text-gray-400 text-xs">(optional)</span>
+                  )}
                 </label>
                 <input
                   type="text"
                   value={referringPhysician}
                   onChange={handleReferringPhysicianChange}
-                  placeholder="Enter referring physician name or ID"
+                  placeholder="Enter referring physician ID"
                   maxLength={100}
                   className={`w-full border ${errors.referringPhysician ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                 />
@@ -2387,7 +2420,9 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   </span>
                 )}
                 <small className="text-gray-500 mt-1 block">
-                  Name or ID of the referring physician (if applicable)
+                  {isReferringPhysicianRequired
+                    ? "Required for referral visits"
+                    : "ID of the referring physician (if applicable)"}
                 </small>
               </div>
             )}
@@ -2586,6 +2621,21 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   />
                   <label className="font-semibold text-gray-700 cursor-pointer">
                     Visit not related to same chief complaint
+                  </label>
+                </div>
+
+                {/* Free Follow-up or Extended Follow-up */}
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={freeFollowupOrExtendedFollowup}
+                    onChange={(e) =>
+                      setFreeFollowupOrExtendedFollowup(e.target.checked)
+                    }
+                    className="w-5 h-5 cursor-pointer"
+                  />
+                  <label className="font-semibold text-gray-700 cursor-pointer">
+                    Free Follow-up or Extended Follow-up
                   </label>
                 </div>
 

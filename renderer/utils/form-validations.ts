@@ -500,11 +500,43 @@ export const validateVisitType = (visitType: string): {
   }
 
   const validVisitTypes = [
+    // Common visit types
     "OUTPATIENT",
+    "INPATIENT",
+    "DAYCASE",
     "EMERGENCY",
     "MATERNITY",
     "CHRONIC_OUT",
     "DENTAL",
+    "OPTICAL",
+    "PSYCHIATRY",
+    "WELLNESS",
+    "LIFE",
+    "TRAVEL_INSURANCE",
+    // Daman/Thiqa specific (INS026, TPA023, D004)
+    "CONSULTATION_ELECTIVE",
+    "CONSULTATION_EMERGENCY",
+    "CONSULTATION_ONCOLOGY",
+    "CONSULTATION_REFERRAL",
+    "CONSULTATION_SCREENING",
+    "CONSULTATION_VACCINATION",
+    "TELEHEALTH",
+    "FREE_FOLLOWUP",
+    "DIAGNOSTIC",
+    "PHYSIOTHERAPY",
+    "DENTAL_SERVICES",
+    "PHARMACY",
+    "HOMECARE",
+    "REHABILITATION",
+    "DAYCARE",
+    "ULTRASOUND_FIRST_TRIMESTER",
+    "ULTRASOUND_SECOND_TRIMESTER",
+    "ULTRASOUND_THIRD_TRIMESTER",
+    "OTHER_OP",
+    // TPA023 additional dental types
+    "DENTAL_SERVICES_CAPITATION_PROGRAM",
+    "DENTAL_SERVICES_ROUTINE_FFS",
+    "DENTAL_SERVICES_ADVANCED_FFS",
   ];
 
   if (!validVisitTypes.includes(visitType)) {
