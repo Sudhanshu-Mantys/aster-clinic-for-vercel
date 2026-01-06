@@ -1039,8 +1039,20 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // Referral Number field (NextCare - TPA002)
   const showReferralNoField = options === "TPA002";
 
-  // Referring Physician field (TPA001, TPA004, INS026)
-  const showReferringPhysicianField = options === "TPA001" || options === "TPA004" || options === "INS026";
+  // Referring Physician field:
+  // - For TPA001, TPA004: Always show (optional)
+  // - For INS026, TPA023, D004: Only show when visitType is CONSULTATION_REFERRAL (required)
+  const showReferringPhysicianFieldOptional = ["TPA001", "TPA004"].includes(options);
+
+  const showReferringPhysicianFieldRequired = useMemo(() => {
+    return (
+      visitType === "CONSULTATION_REFERRAL" &&
+      ["INS026", "TPA023", "D004"].includes(options)
+    );
+  }, [visitType, options]);
+
+  const showReferringPhysicianField = showReferringPhysicianFieldOptional || showReferringPhysicianFieldRequired;
+  const isReferringPhysicianRequired = showReferringPhysicianFieldRequired;
 
   // Visit category (ADNIC at Org1)
   const showVisitCategoryField = isOrg1Ins017;
@@ -1571,6 +1583,11 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       if (!referralValidation.isValid) {
         newErrors.referralCode = referralValidation.error || "Invalid referral code";
       }
+    }
+
+    // Referring Physician validation - REQUIRED for CONSULTATION_REFERRAL with Daman TPAs
+    if (isReferringPhysicianRequired && !referringPhysician.trim()) {
+      newErrors.referringPhysician = "Referring physician ID is required for referral visits";
     }
 
     setErrors(newErrors);
@@ -2366,18 +2383,22 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
               </div>
             )}
 
-            {/* Referring Physician - TPA001, TPA004, INS026 */}
+            {/* Referring Physician - TPA001, TPA004, INS026, TPA023, D004 */}
             {showReferringPhysicianField && (
               <div>
                 <label className="block font-semibold text-gray-700 mb-2">
-                  Referring Physician{" "}
-                  <span className="text-gray-400 text-xs">(optional)</span>
+                  Referring Physician ID{" "}
+                  {isReferringPhysicianRequired ? (
+                    <span className="text-red-600">*</span>
+                  ) : (
+                    <span className="text-gray-400 text-xs">(optional)</span>
+                  )}
                 </label>
                 <input
                   type="text"
                   value={referringPhysician}
                   onChange={handleReferringPhysicianChange}
-                  placeholder="Enter referring physician name or ID"
+                  placeholder="Enter referring physician ID"
                   maxLength={100}
                   className={`w-full border ${errors.referringPhysician ? "border-red-500" : "border-gray-300"} rounded-md p-3`}
                 />
@@ -2387,7 +2408,9 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
                   </span>
                 )}
                 <small className="text-gray-500 mt-1 block">
-                  Name or ID of the referring physician (if applicable)
+                  {isReferringPhysicianRequired
+                    ? "Required for referral visits"
+                    : "ID of the referring physician (if applicable)"}
                 </small>
               </div>
             )}
