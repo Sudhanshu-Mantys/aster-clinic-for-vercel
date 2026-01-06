@@ -1727,6 +1727,16 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
       if (options === "TPA002" && referralNo) {
         extraArgs.referral_no = referralNo;
       }
+      // POD fields for Daman TPAs (TPA023, INS026, D004)
+      if (shouldShowPodFields) {
+        extraArgs.is_pod = isPod;
+        if (isPod && podId) {
+          extraArgs.pod_id = podId;
+        }
+        extraArgs.is_maternity = isMaternity;
+        extraArgs.not_related_to_chief_complaint = notRelatedToChiefComplaint;
+        extraArgs.free_followup_or_extended_followup = freeFollowupOrExtendedFollowup;
+      }
 
       // Build Mantys payload according to API specification
       const mantysPayload = buildMantysPayload({
