@@ -990,14 +990,14 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   }, [isDoctorCompulsory, options, selectedOrganizationId]);
 
   // Doctor name is required for validation (not just shown)
-  // For BOTH, RIYATI, DHPO - doctor field is shown but optional
+  // For BOTH, RIYATI, DHPO, TPA001, TPA004 - doctor field is shown but optional
   const isDoctorRequired = useMemo(() => {
     // If doctor is compulsory in config, it's required
     if (isDoctorCompulsory) {
       return true;
     }
-    // BOTH, RIYATI, DHPO - doctor is optional (shown but not required)
-    if (options === "BOTH" || options === "RIYATI" || options === "DHPO") {
+    // BOTH, RIYATI, DHPO, TPA001, TPA004 - doctor is optional (shown but not required)
+    if (["BOTH", "RIYATI", "DHPO", "TPA001", "TPA004"].includes(options)) {
       return false;
     }
     // For other TPAs that show the field, it's required
