@@ -4,7 +4,7 @@
  * Matches pattern from upload-document API (environment variables with hardcoded fallbacks)
  */
 
-export const MANTYS_API_BASE_URL = "https://critical.api.mantys.org";
+export const MANTYS_API_BASE_URL = "https://prod.api.mantys.org";
 
 /**
  * Get Mantys Client ID
