@@ -1407,7 +1407,7 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
 
       // Upload directly to Mantys API - same as extension
       const response = await fetch(
-        "https://critical.api.mantys.org/v2/eligibilities-v3/upload-document",
+        "https://prod.api.mantys.org/v2/eligibilities-v3/upload-document",
         {
           method: "POST",
           headers: {
