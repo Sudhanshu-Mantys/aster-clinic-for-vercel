@@ -7,8 +7,8 @@ import { Drawer } from "./ui/drawer";
 import { Badge } from "./ui/badge";
 import { MantysResultsDisplay } from "./MantysResultsDisplay";
 import type { MantysEligibilityResponse } from "../types/mantys";
-import { asterApi, patientApi } from "../lib/api-client";
 import { extractMantysKeyFields } from "../lib/mantys-utils";
+import { Download, Upload } from "lucide-react";
 
 interface AppointmentsTableProps {
   appointments: AppointmentData[];
@@ -17,6 +17,44 @@ interface AppointmentsTableProps {
 }
 
 type EligibilityStatus = "success" | "error" | "processing" | null;
+
+type EligibilityMeta = {
+  status: EligibilityStatus;
+  taskId: string;
+  hasDocuments: boolean;
+  result?: MantysEligibilityResponse;
+};
+
+const normalizeEligibilityResult = (
+  rawResult: any,
+): MantysEligibilityResponse | undefined => {
+  if (!rawResult) return undefined;
+
+  const searchAllResult = rawResult as any;
+  if (
+    searchAllResult.is_search_all === true &&
+    Array.isArray(searchAllResult.aggregated_results)
+  ) {
+    const eligibleEntry = searchAllResult.aggregated_results.find(
+      (r: any) => r.status === "found" && r.data?.is_eligible === true
+    );
+
+    if (eligibleEntry && eligibleEntry.data) {
+      return {
+        tpa: eligibleEntry.tpa_name || eligibleEntry.data?.payer_id || "",
+        data: eligibleEntry.data,
+        status: "found" as const,
+        job_task_id:
+          eligibleEntry.data?.job_task_id || searchAllResult.task_id || "",
+        task_id: searchAllResult.task_id,
+      } as MantysEligibilityResponse;
+    }
+
+    return undefined;
+  }
+
+  return rawResult as MantysEligibilityResponse;
+};
 
 export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
   appointments,
@@ -29,6 +67,10 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
   const [actionAppointment, setActionAppointment] =
     useState<AppointmentData | null>(null);
   const [actionTaskId, setActionTaskId] = useState<string | null>(null);
+  const [actionIntent, setActionIntent] = useState<
+    "save_policy" | "upload_documents" | null
+  >(null);
+  const [actionIntentKey, setActionIntentKey] = useState<string | null>(null);
   const [showActionDrawer, setShowActionDrawer] = useState(false);
   const [copiedMpi, setCopiedMpi] = useState<string | null>(null);
 
@@ -37,45 +79,11 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
   const eligibilityResult = useMemo(() => {
     if (!actionTaskId) return undefined;
     const item = historyItems.find((i) => i.taskId === actionTaskId);
-    const rawResult = item?.result;
-    if (!rawResult) return undefined;
-
-    // Check if this is a search-all result
-    const searchAllResult = rawResult as any;
-    if (
-      searchAllResult.is_search_all === true &&
-      searchAllResult.aggregated_results &&
-      Array.isArray(searchAllResult.aggregated_results)
-    ) {
-      // Find the eligible result from aggregated_results
-      const eligibleEntry = searchAllResult.aggregated_results.find(
-        (r: any) => r.status === "found" && r.data?.is_eligible === true
-      );
-
-      if (eligibleEntry && eligibleEntry.data) {
-        // Transform to MantysEligibilityResponse format
-        return {
-          tpa: eligibleEntry.tpa_name || eligibleEntry.data?.payer_id || "",
-          data: eligibleEntry.data,
-          status: "found" as const,
-          job_task_id: eligibleEntry.data?.job_task_id || searchAllResult.task_id || "",
-          task_id: searchAllResult.task_id,
-        } as MantysEligibilityResponse;
-      }
-
-      // No eligible result found in search-all
-      return undefined;
-    }
-
-    // Regular (non-search-all) result
-    return rawResult as MantysEligibilityResponse;
+    return normalizeEligibilityResult(item?.result);
   }, [actionTaskId, historyItems]);
 
-  const eligibilityStatusMap = useMemo(() => {
-    const statusMap: Record<
-      string,
-      { status: EligibilityStatus; taskId: string }
-    > = {};
+  const eligibilityMetaByMpi = useMemo(() => {
+    const statusMap: Record<string, EligibilityMeta> = {};
 
     const validEligibilityChecks = historyItems.filter((item) =>
       ["complete", "error", "pending", "processing"].includes(item.status),
@@ -105,6 +113,8 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       const mostRecent = checks[0].item;
 
       let status: EligibilityStatus = null;
+      let normalizedResult: MantysEligibilityResponse | undefined;
+      let hasDocuments = false;
       const result = mostRecent.result as any;
       const tpaCode = (mostRecent as any).tpaCode || (mostRecent as any).insurancePayer || "";
 
@@ -119,28 +129,13 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
       ) {
         status = "processing";
       } else if (mostRecent.status === "complete") {
-        if (
-          isSearchAll &&
-          result?.aggregated_results &&
-          Array.isArray(result.aggregated_results)
-        ) {
-          // Find eligible result in aggregated_results
-          const eligibleEntry = result.aggregated_results.find(
-            (r: any) => r.status === "found" && r.data?.is_eligible === true
-          );
-          if (eligibleEntry) {
-            status = "success";
-          } else {
-            // Search-all completed but no eligible results found
-            status = "error";
-          }
-        } else if (isSearchAll && !result) {
-          // Search-all but no result data available yet
-          status = "error";
+        if (isSearchAll) {
+          normalizedResult = normalizeEligibilityResult(result);
+          status = normalizedResult ? "success" : "error";
         } else {
-          // Regular (non-search-all) result
           const resultData = result?.data;
           if (resultData?.is_eligible === true) {
+            normalizedResult = result as MantysEligibilityResponse;
             status = "success";
           } else {
             status = "error";
@@ -148,7 +143,17 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
         }
       }
 
-      statusMap[mpi] = { status, taskId: mostRecent.taskId };
+      if (status === "success" && normalizedResult) {
+        const keyFields = extractMantysKeyFields(normalizedResult);
+        hasDocuments = (keyFields.referralDocuments?.length ?? 0) > 0;
+      }
+
+      statusMap[mpi] = {
+        status,
+        taskId: mostRecent.taskId,
+        hasDocuments,
+        result: normalizedResult,
+      };
     });
 
     return statusMap;
@@ -181,135 +186,28 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
 
   const handleSavePolicy = (appointment: AppointmentData) => {
     const mpi = appointment.mpi;
-    if (mpi && eligibilityStatusMap[mpi]?.taskId) {
+    const taskId = mpi ? eligibilityMetaByMpi[mpi]?.taskId : null;
+    if (mpi && taskId) {
       setActionAppointment(appointment);
-      setActionTaskId(eligibilityStatusMap[mpi].taskId);
+      setActionTaskId(taskId);
+      setActionIntent("save_policy");
+      setActionIntentKey(`save_policy:${taskId}:${Date.now()}`);
       setShowActionDrawer(true);
     }
   };
 
-  const handleUploadScreenshot = async (appointment: AppointmentData) => {
+  const handleUploadDocuments = (appointment: AppointmentData) => {
     const mpi = appointment.mpi;
-    const taskInfo = eligibilityStatusMap[mpi || ""];
-
-    if (!taskInfo?.taskId) {
+    const taskId = mpi ? eligibilityMetaByMpi[mpi]?.taskId : null;
+    if (!taskId) {
       alert("No eligibility check found for this patient");
       return;
     }
-
-    const eligibilityItem = historyItems.find(
-      (item) => item.taskId === taskInfo.taskId,
-    );
-    const response = eligibilityItem?.result as
-      | MantysEligibilityResponse
-      | undefined;
-
-    if (!response) {
-      alert("Eligibility result not found");
-      return;
-    }
-
-    const keyFields = extractMantysKeyFields(response);
-
-    if (
-      !keyFields.referralDocuments ||
-      keyFields.referralDocuments.length === 0
-    ) {
-      alert("No referral documents to upload");
-      return;
-    }
-
-    const patientId = appointment.patient_id;
-    const appointmentId = appointment.appointment_id;
-
-    if (!patientId || !appointmentId) {
-      alert("Missing patient or appointment ID");
-      return;
-    }
-
-    try {
-      const insuranceResponse = await patientApi.getInsuranceDetails({
-        patientId,
-        apntId: appointmentId,
-        encounterId: 0,
-        customerId: 1,
-        primaryInsPolicyId: null,
-        siteId: 1,
-        isDiscard: 0,
-        hasTopUpCard: 0,
-      });
-
-      let insTpaPatId: number | null = null;
-
-      if (
-        insuranceResponse?.body?.Data &&
-        Array.isArray(insuranceResponse.body.Data)
-      ) {
-        // Priority 1: Active + Valid
-        let selectedInsurance = insuranceResponse.body.Data.find(
-          (record: any) =>
-            record.insurance_status?.toLowerCase() === "active" &&
-            record.is_valid === 1,
-        );
-        // Priority 2: Just Active
-        if (!selectedInsurance) {
-          selectedInsurance = insuranceResponse.body.Data.find(
-            (record: any) =>
-              record.insurance_status?.toLowerCase() === "active",
-          );
-        }
-        if (!selectedInsurance) {
-          alert("There is no active Insurance policy for this user");
-          return;
-        }
-        const insTpaPatIdValue =
-          selectedInsurance?.patient_insurance_tpa_policy_id_sites ||
-          selectedInsurance?.patient_insurance_tpa_policy_id;
-        if (insTpaPatIdValue) {
-          insTpaPatId = Number(insTpaPatIdValue);
-        }
-        if (!insTpaPatId) {
-          alert("There is no active Insurance policy for this user");
-          return;
-        }
-      } else {
-        alert("There is no active Insurance policy for this user");
-        return;
-      }
-
-      let uploadedCount = 0;
-      let failedCount = 0;
-
-      for (const doc of keyFields.referralDocuments) {
-        try {
-          await asterApi.uploadAttachment({
-            patientId,
-            encounterId: 0,
-            appointmentId,
-            insTpaPatId,
-            fileName: `${doc.tag.replace(/\s+/g, "_")}.pdf`,
-            fileUrl: doc.s3_url,
-          });
-          uploadedCount++;
-        } catch (error) {
-          console.error(`Failed to upload ${doc.tag}:`, error);
-          failedCount++;
-        }
-      }
-
-      if (failedCount === 0) {
-        alert(
-          `SUCCESS!\n\nAll ${uploadedCount} documents uploaded successfully!`,
-        );
-      } else {
-        alert(
-          `Partially completed\n\nUploaded: ${uploadedCount}\nFailed: ${failedCount}`,
-        );
-      }
-    } catch (error) {
-      console.error("Upload error:", error);
-      alert("Failed to upload documents");
-    }
+    setActionAppointment(appointment);
+    setActionTaskId(taskId);
+    setActionIntent("upload_documents");
+    setActionIntentKey(`upload_documents:${taskId}:${Date.now()}`);
+    setShowActionDrawer(true);
   };
 
   const handleCloseActionDrawer = () => {
@@ -317,6 +215,8 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
     setTimeout(() => {
       setActionAppointment(null);
       setActionTaskId(null);
+      setActionIntent(null);
+      setActionIntentKey(null);
     }, 300);
   };
 
@@ -568,9 +468,9 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                         );
                       })()}
                     </div>
-                    {eligibilityStatusMap[appointment.mpi]?.status && (
+                    {eligibilityMetaByMpi[appointment.mpi]?.status && (
                       <div className="flex-shrink-0 mt-1">
-                        {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status, "sm")}
+                        {renderEligibilityIcon(eligibilityMetaByMpi[appointment.mpi]?.status, "sm")}
                       </div>
                     )}
                   </div>
@@ -609,27 +509,31 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                   </div>
                 </td>
                 <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 text-left">
-                  {eligibilityStatusMap[appointment.mpi]?.status ===
+                  {eligibilityMetaByMpi[appointment.mpi]?.status ===
                     "success" ? (
                     <div className="flex flex-col gap-1 items-start">
-                      <button
+                      <Button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleSavePolicy(appointment);
                         }}
-                        className="w-full bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium"
+                        size="sm"
+                        className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs"
                       >
-                        Save Policy
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleUploadScreenshot(appointment);
-                        }}
-                        className="w-full bg-black hover:bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-medium"
-                      >
-                        Upload Documents
-                      </button>
+                        <Download className="h-3.5 w-3.5" /> Save Policy
+                      </Button>
+                      {eligibilityMetaByMpi[appointment.mpi]?.hasDocuments && (
+                        <Button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleUploadDocuments(appointment);
+                          }}
+                          size="sm"
+                          className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs"
+                        >
+                          <Upload className="h-3.5 w-3.5" /> Upload Documents
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <button
@@ -726,9 +630,9 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                         appointment.payer_type ||
                         "N/A"}
                     </p>
-                    {eligibilityStatusMap[appointment.mpi]?.status && (
+                    {eligibilityMetaByMpi[appointment.mpi]?.status && (
                       <div className="flex-shrink-0 mt-0.5">
-                        {renderEligibilityIcon(eligibilityStatusMap[appointment.mpi]?.status, "sm")}
+                        {renderEligibilityIcon(eligibilityMetaByMpi[appointment.mpi]?.status, "sm")}
                       </div>
                     )}
                   </div>
@@ -750,26 +654,30 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                 </p>
               )}
 
-              {eligibilityStatusMap[appointment.mpi]?.status === "success" ? (
+              {eligibilityMetaByMpi[appointment.mpi]?.status === "success" ? (
                 <div className="mt-4 flex gap-2">
-                  <button
+                  <Button
                     onClick={(e) => {
                       e.stopPropagation();
                       handleSavePolicy(appointment);
                     }}
-                    className="flex-1 bg-black hover:bg-gray-800 text-white py-2 rounded text-sm font-medium"
+                    size="sm"
+                    className="flex-1 gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm"
                   >
-                    Save Policy
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleUploadScreenshot(appointment);
-                    }}
-                    className="flex-1 bg-black hover:bg-gray-800 text-white py-2 rounded text-sm font-medium"
-                  >
-                    Upload Documents
-                  </button>
+                    <Download className="h-4 w-4" /> Save Policy
+                  </Button>
+                  {eligibilityMetaByMpi[appointment.mpi]?.hasDocuments && (
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleUploadDocuments(appointment);
+                      }}
+                      size="sm"
+                      className="flex-1 gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm"
+                    >
+                      <Upload className="h-4 w-4" /> Upload Documents
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <button
@@ -834,6 +742,13 @@ export const AppointmentsTable: React.FC<AppointmentsTableProps> = ({
                 ? ((actionAppointment as any).physician_id || (actionAppointment as any).physicianId)
                 : parseInt(String((actionAppointment as any).physician_id || (actionAppointment as any).physicianId), 10))
               : undefined}
+            taskId={actionTaskId || undefined}
+            autoAction={actionIntent || undefined}
+            autoActionKey={actionIntentKey || undefined}
+            onAutoActionHandled={() => {
+              setActionIntent(null);
+              setActionIntentKey(null);
+            }}
           />
         </Drawer>
       )}

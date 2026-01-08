@@ -3,7 +3,7 @@
  * Uses tabbed interface with collapsible sections
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Select from "react-select";
 import { MantysEligibilityResponse, MantysKeyFields } from "../types/mantys";
 import { extractMantysKeyFields } from "../lib/mantys-utils";
@@ -47,6 +47,9 @@ interface MantysResultsDisplayProps {
   physicianId?: number;
   errorMessage?: string | null;
   taskId?: string;
+  autoAction?: "save_policy" | "upload_documents";
+  autoActionKey?: string;
+  onAutoActionHandled?: () => void;
 }
 
 type TabValue = "overview" | "benefits" | "policy" | "documents";
@@ -64,6 +67,9 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   physicianId,
   errorMessage,
   taskId,
+  autoAction,
+  autoActionKey,
+  onAutoActionHandled,
 }) => {
   const [activeTab, setActiveTab] = useState<TabValue>("documents");
   const [copied, setCopied] = useState<string | null>(null);
@@ -72,6 +78,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
   const [v3Result, setV3Result] = useState<unknown | null>(null);
   const [showLifetrenzPreview, setShowLifetrenzPreview] = useState(false);
   const [showScreenshot, setShowScreenshot] = useState(true);
+  const lastAutoActionKeyRef = useRef<string | null>(null);
 
   // Save Policy Form States
   const [savingPolicy, setSavingPolicy] = useState(false);
@@ -620,6 +627,42 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       setShowSavePolicyModal(true);
     }, 0);
   };
+
+  useEffect(() => {
+    if (!autoAction) return;
+
+    const resolvedTaskId = taskId || response?.task_id || "";
+    const effectiveKey = autoActionKey || `${autoAction}:${resolvedTaskId}`;
+    if (!effectiveKey) return;
+    if (lastAutoActionKeyRef.current === effectiveKey) return;
+    if (!data) return;
+
+    lastAutoActionKeyRef.current = effectiveKey;
+
+    const runAutoAction = async () => {
+      try {
+        if (autoAction === "save_policy") {
+          await handleSavePolicy();
+        } else if (autoAction === "upload_documents") {
+          await logButtonClick(resolvedTaskId, "upload_documents");
+          await handleUploadScreenshots();
+        }
+      } finally {
+        onAutoActionHandled?.();
+      }
+    };
+
+    void runAutoAction();
+  }, [
+    autoAction,
+    autoActionKey,
+    handleSavePolicy,
+    handleUploadScreenshots,
+    onAutoActionHandled,
+    data,
+    taskId,
+    response?.task_id,
+  ]);
 
   const handleConfirmSavePolicy = async () => {
     const finalPatientId = patientId;
