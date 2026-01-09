@@ -1081,34 +1081,17 @@ export const MantysEligibilityForm: React.FC<MantysEligibilityFormProps> = ({
   // Auto-select visit type when insurance provider changes
   useEffect(() => {
     if (options && VISIT_TYPES[options]) {
-      let newDefaultVisitType = "OUTPATIENT";
-
-      // Special logic for NextCare based on organization
-      if (options === "TPA002") {
-        if (
-          ["healthhub", "medcare", "al-noor"].includes(selectedOrganizationId)
-        ) {
-          newDefaultVisitType = "OUTPATIENT";
-        } else {
-          // Use CHRONIC_OUT for other organizations
-          const chronicOutOption = VISIT_TYPES[options]?.find(
-            (opt) => opt.value === "CHRONIC_OUT",
-          );
-          newDefaultVisitType = chronicOutOption ? "CHRONIC_OUT" : "OUTPATIENT";
-        }
-      } else {
-        // For other TPAs, use OUTPATIENT if available
-        const outpatientOption = VISIT_TYPES[options]?.find(
-          (opt) => opt.value === "OUTPATIENT",
-        );
-        newDefaultVisitType = outpatientOption
-          ? "OUTPATIENT"
-          : VISIT_TYPES[options][0]?.value || "OUTPATIENT";
-      }
+      // Use OUTPATIENT if available, otherwise use the first available option
+      const outpatientOption = VISIT_TYPES[options]?.find(
+        (opt) => opt.value === "OUTPATIENT",
+      );
+      const newDefaultVisitType = outpatientOption
+        ? "OUTPATIENT"
+        : VISIT_TYPES[options][0]?.value || "OUTPATIENT";
 
       setVisitType(newDefaultVisitType);
     }
-  }, [options, selectedOrganizationId]);
+  }, [options]);
 
   // AXA: Auto-switch to Member ID when DENTAL is selected
   useEffect(() => {
