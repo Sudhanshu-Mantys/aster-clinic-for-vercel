@@ -186,8 +186,8 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
   const { data: freshTaskResult } = useEligibilityTaskStatus(
     selectedTaskId || "",
     {
-      enabled: !!selectedTaskId && showEligibilityResultsDrawer,
-      refetchInterval: false,
+      enabled: !!selectedTaskId && (showEligibilityResultsDrawer || showEligibilityModal),
+      refetchInterval: showEligibilityModal ? 5000 : false,
     },
   );
 
@@ -211,6 +211,39 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
     freshTaskResult,
     showEligibilityResultsDrawer,
   ]);
+
+  // Auto-transition from modal to drawer when results become available
+  React.useEffect(() => {
+    if (showEligibilityModal && (selectedEligibilityItem || freshTaskResult)) {
+      // Check both selectedEligibilityItem.result and freshTaskResult.result
+      const itemResult = selectedEligibilityItem?.result as any;
+      const freshResult = freshTaskResult?.result as any;
+      const result = freshResult || itemResult;
+
+      const hasResult = result && (
+        result.status ||
+        result.data_dump ||
+        result.aggregated_results
+      );
+
+      // Also check if the task has completed or failed
+      const isComplete = selectedEligibilityItem?.status === "complete" ||
+                        selectedEligibilityItem?.status === "error" ||
+                        freshTaskResult?.status === "complete" ||
+                        freshTaskResult?.status === "error";
+
+      if (hasResult || isComplete) {
+        console.log("[TodaysAppointmentsList] Auto-transitioning from modal to drawer", {
+          hasResult,
+          isComplete,
+          itemStatus: selectedEligibilityItem?.status,
+          freshStatus: freshTaskResult?.status,
+        });
+        setShowEligibilityModal(false);
+        setShowEligibilityResultsDrawer(true);
+      }
+    }
+  }, [showEligibilityModal, selectedEligibilityItem, freshTaskResult]);
 
   const emiratesIdFromContext = patientContext?.nationality_id || null;
 
@@ -253,23 +286,39 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
       });
       const isErrorStatus =
         search.status === "error" || (search.status as string) === "failed";
-      console.log("[handlePreviousSearchClick] isErrorStatus:", isErrorStatus);
+
+      // Check if there's a result available (including failed results with detailed status)
+      const result = search.result as any;
+      const hasResult = result && (
+        result.status ||
+        result.data_dump ||
+        result.aggregated_results
+      );
+
+      console.log("[handlePreviousSearchClick] isErrorStatus:", isErrorStatus, "hasResult:", hasResult);
       setSelectedTaskId(search.taskId);
-      if (search.status === "complete" || isErrorStatus) {
-        // Show drawer for completed or error status (same as EligibilityHistoryList)
+
+      if (search.status === "complete" || isErrorStatus || hasResult) {
+        // Show drawer for completed, error status, or if result is available
         console.log(
           "[handlePreviousSearchClick] Opening eligibility results drawer (status:",
           search.status,
+          ", hasResult:",
+          hasResult,
           ")",
         );
+        // Close modal first if it's open
+        setShowEligibilityModal(false);
         setShowEligibilityResultsDrawer(true);
       } else {
-        // Pending/processing - show modal for live progress
+        // Pending/processing without result - show modal for live progress
         console.log(
           "[handlePreviousSearchClick] Opening eligibility modal (status:",
           search.status,
           ")",
         );
+        // Close drawer first if it's open
+        setShowEligibilityResultsDrawer(false);
         setShowEligibilityModal(true);
       }
     },
@@ -467,10 +516,7 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
       {/* Eligibility Results Drawer */}
       {showEligibilityResultsDrawer &&
-        selectedEligibilityItem &&
-        (selectedEligibilityItem.status === "complete" ||
-          selectedEligibilityItem.status === "error" ||
-          (selectedEligibilityItem.status as string) === "failed") && (
+        selectedEligibilityItem && (
           <Drawer
             isOpen={showEligibilityResultsDrawer}
             onClose={handleCloseEligibilityResultsDrawer}
@@ -479,6 +525,20 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
               resultData
                 ? (() => {
                     const keyFields = extractMantysKeyFields(resultData);
+                    // Check if this is a search-all with no eligible results
+                    const resultAsAny = resultData as any;
+                    const isSearchAllNoResults = resultAsAny.is_search_all &&
+                      resultAsAny.aggregated_results &&
+                      !resultAsAny.aggregated_results.some((r: any) => r.data?.is_eligible === true);
+
+                    if (isSearchAllNoResults) {
+                      return (
+                        <Badge className="bg-red-100 text-red-800">
+                          Could Not Determine
+                        </Badge>
+                      );
+                    }
+
                     return (
                       <Badge
                         className={

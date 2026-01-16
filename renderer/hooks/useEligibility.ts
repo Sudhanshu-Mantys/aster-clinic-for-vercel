@@ -131,7 +131,7 @@ export function useEligibilityTaskStatus(
       if (data?.status === "complete" || data?.status === "error") {
         return false;
       }
-      return options?.refetchInterval ?? 3000;
+      return options?.refetchInterval ?? 8000;
     },
   });
 }
