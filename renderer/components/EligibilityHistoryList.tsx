@@ -193,7 +193,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
       error: "bg-red-100 text-red-800 border-red-300",
       failed: "bg-red-100 text-red-800 border-red-300",
       invalid_credentials: "bg-orange-100 text-orange-800 border-orange-300",
-      member_not_found: "bg-purple-100 text-purple-800 border-purple-300",
+      member_not_found: "bg-red-100 text-red-800 border-red-300",
       not_found: "bg-gray-100 text-gray-800 border-gray-300",
       backoff: "bg-yellow-100 text-yellow-800 border-yellow-300",
     };
@@ -208,7 +208,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
       error: "Failed",
       failed: "Failed",
       invalid_credentials: "Invalid Credentials",
-      member_not_found: "Member Not Found",
+      member_not_found: "Not Eligible",
       not_found: "Not Found",
       backoff: "Rate Limited",
     };
