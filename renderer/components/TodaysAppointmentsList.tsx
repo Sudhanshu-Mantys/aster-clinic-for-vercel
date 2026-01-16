@@ -340,11 +340,20 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
           job_task_id:
             eligibleEntry.data?.job_task_id || searchAllResult.task_id || "",
           task_id: searchAllResult.task_id,
-        } as MantysEligibilityResponse;
+          aggregated_results: searchAllResult.aggregated_results,
+        } as MantysEligibilityResponse & { aggregated_results?: any[] };
       }
 
-      // No eligible result found in search-all
-      return null;
+      // No eligible result found in search-all - return search-all response with aggregated results
+      return {
+        tpa: "",
+        data: null,
+        status: "not_found" as const,
+        job_task_id: searchAllResult.task_id || "",
+        task_id: searchAllResult.task_id,
+        aggregated_results: searchAllResult.aggregated_results,
+        is_search_all: true,
+      } as MantysEligibilityResponse & { aggregated_results?: any[]; is_search_all?: boolean };
     }
 
     // Regular (non-search-all) result
@@ -458,10 +467,10 @@ export const TodaysAppointmentsList: React.FC<TodaysAppointmentsListProps> = ({
 
       {/* Eligibility Results Drawer */}
       {showEligibilityResultsDrawer &&
-        (selectedEligibilityItem?.status === "complete" ||
-          freshTaskResult?.status === "complete" ||
-          selectedEligibilityItem?.status === "error" ||
-          (selectedEligibilityItem?.status as string) === "failed") && (
+        selectedEligibilityItem &&
+        (selectedEligibilityItem.status === "complete" ||
+          selectedEligibilityItem.status === "error" ||
+          (selectedEligibilityItem.status as string) === "failed") && (
           <Drawer
             isOpen={showEligibilityResultsDrawer}
             onClose={handleCloseEligibilityResultsDrawer}

@@ -196,7 +196,16 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       return;
     }
 
-    const isFinalStatus = ["found", "not_found", "error"].includes(response.status);
+    // Check if status indicates a final state (completed or error)
+    const isFinalStatus = [
+      "found",
+      "not_found",
+      "error",
+      "invalid_credentials",
+      "member_not_found",
+      "failed",
+    ].includes(response.status);
+
     if (!isFinalStatus) {
       setV3Result(null);
       return;
@@ -941,6 +950,57 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
   // Handle error-only case (no response data)
   if (!data) {
+    // Check if this is a search-all result with no eligible entries
+    const isSearchAllNoEligible = response?.aggregated_results && Array.isArray(response.aggregated_results);
+
+    // Extract error message from v3Result OR response if available
+    const v3ErrorMessage = (() => {
+      // First try to get from v3Result
+      if (v3Result) {
+        const dataDump = (v3Result as any)?.eligibility_result?.data_dump;
+        if (dataDump?.message) return dataDump.message;
+
+        const eligResult = (v3Result as any)?.eligibility_result;
+        if (eligResult?.message) return eligResult.message;
+      }
+
+      // Fallback: Try to get from response itself (might have error status with message)
+      if (response) {
+        const responseData = (response as any)?.data_dump;
+        if (responseData?.message) return responseData.message;
+
+        if ((response as any)?.message) return (response as any).message;
+      }
+
+      return null;
+    })();
+
+    // Extract screenshot from v3Result OR response if available
+    const v3Screenshot = (() => {
+      // Try v3Result first
+      if (v3Result) {
+        const dataDump = (v3Result as any)?.eligibility_result?.data_dump;
+        if (dataDump?.screenshot_key) return dataDump?.screenshot_key;
+      }
+
+      // Fallback: Try response itself
+      if (response) {
+        const responseData = (response as any)?.data_dump;
+        if (responseData?.screenshot_key) return responseData.screenshot_key;
+
+        if ((response as any)?.screenshot_key) return (response as any).screenshot_key;
+      }
+
+      return null;
+    })();
+
+    const finalScreenshot = screenshotSrc || v3Screenshot;
+
+    // For search-all with no eligible, show different message
+    const finalErrorMessage = isSearchAllNoEligible
+      ? `Patient not found in any insurance provider. Checked ${response.aggregated_results.length} TPAs.`
+      : (v3ErrorMessage || errorMessage || "Unable to retrieve eligibility information. Please try again later.");
+
     return (
       <div className="space-y-4">
         {/* Error Banner */}
@@ -950,7 +1010,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
             <div className="flex-1">
               <h2 className="text-xl font-semibold text-red-900 mb-2">Eligibility Check Failed</h2>
               <p className="text-red-700 mb-4">
-                {errorMessage || "Unable to retrieve eligibility information. Please try again later."}
+                {finalErrorMessage}
               </p>
               {taskId && (
                 <p className="text-xs text-red-500 font-mono">Task ID: {taskId}</p>
@@ -960,23 +1020,85 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         </div>
 
         {/* Screenshot if available */}
-        {screenshotSrc && (
+        {finalScreenshot && (
           <Card className="p-4">
             <h4 className="text-sm font-semibold text-gray-700 mb-2">
               Eligibility Screenshot
             </h4>
             <a
-              href={screenshotSrc}
+              href={finalScreenshot}
               target="_blank"
               rel="noopener noreferrer"
               className="block border border-gray-300 rounded-lg overflow-hidden bg-gray-50 shadow-sm hover:border-gray-400 transition-colors"
             >
               <img
-                src={screenshotSrc}
+                src={finalScreenshot}
                 alt="Eligibility verification screenshot"
                 className="w-full h-auto max-h-[420px] object-contain"
               />
             </a>
+          </Card>
+        )}
+
+        {/* Search-All TPA Results (when no data but have aggregated_results) */}
+        {isSearchAllNoEligible && response.aggregated_results && response.aggregated_results.length > 0 && (
+          <Card className="p-4">
+            <h4 className="text-sm font-semibold text-gray-700 mb-3">
+              TPA Search Results ({response.aggregated_results.length} checked)
+            </h4>
+            <div className="space-y-4">
+              {response.aggregated_results.map((result: any, idx: number) => (
+                <div key={idx} className="border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="flex items-center justify-between p-3 bg-gray-50">
+                    <span className="font-medium text-gray-900">{result.tpa_name}</span>
+                    <Badge
+                      className={
+                        result.status === "found" && result.data?.is_eligible
+                          ? "bg-green-100 text-green-800"
+                          : result.status === "failed" || result.status === "error" || result.status === "invalid_credentials" || result.status === "backoff"
+                            ? "bg-red-100 text-red-800"
+                            : result.status === "member_not_found"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-gray-100 text-gray-800"
+                      }
+                    >
+                      {result.status === "found" && result.data?.is_eligible
+                        ? "Eligible"
+                        : result.status === "found"
+                          ? "Not Eligible"
+                          : result.status === "member_not_found"
+                            ? "Not Found"
+                            : result.status === "invalid_credentials"
+                              ? "Invalid Credentials"
+                              : result.status === "backoff"
+                                ? "Rate Limited"
+                                : result.status === "failed" || result.status === "error"
+                                  ? "Failed"
+                                  : result.status}
+                    </Badge>
+                  </div>
+                  {result.message && (
+                    <div className="px-3 py-2 text-sm text-gray-600 border-t border-gray-200 bg-white">
+                      {result.message}
+                    </div>
+                  )}
+                  {(result.screenshot_url || result.data?.screenshot_key) && (
+                    <a
+                      href={result.screenshot_url || result.data?.screenshot_key}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block border-t border-gray-200"
+                    >
+                      <img
+                        src={result.screenshot_url || result.data?.screenshot_key}
+                        alt={`${result.tpa_name} screenshot`}
+                        className="w-full h-auto max-h-[300px] object-contain bg-gray-50"
+                      />
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
           </Card>
         )}
 
