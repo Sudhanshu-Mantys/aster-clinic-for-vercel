@@ -470,16 +470,16 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       if (values.LAB) {
         chargeGroupsData.push({
           name: "Laboratory",
-          flat: values.LAB.copay || "0",
-          percent: "0",
+          flat: "0",
+          percent: values.LAB.copay || "0",
           max: values.LAB._maxDeductible || values.LAB.deductible || "0",
         });
       }
       if (values.MEDICINES) {
         chargeGroupsData.push({
           name: "Medicine",
-          flat: values.MEDICINES.copay || "0",
-          percent: "0",
+          flat: "0",
+          percent: values.MEDICINES.copay || "0",
           max:
             values.MEDICINES._maxDeductible ||
             values.MEDICINES.deductible ||
@@ -489,8 +489,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       if (values.RADIOLOGY) {
         chargeGroupsData.push({
           name: "Radiology",
-          flat: values.RADIOLOGY.copay || "0",
-          percent: "0",
+          flat: "0",
+          percent: values.RADIOLOGY.copay || "0",
           max:
             values.RADIOLOGY._maxDeductible ||
             values.RADIOLOGY.deductible ||
@@ -500,8 +500,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       if (values.CONSULTATION) {
         chargeGroupsData.push({
           name: "Consultation",
-          flat: values.CONSULTATION.copay || "0",
-          percent: "0",
+          flat: "0",
+          percent: values.CONSULTATION.copay || "0",
           max:
             values.CONSULTATION._maxDeductible ||
             values.CONSULTATION.deductible ||
@@ -511,8 +511,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       if (values.PROCEDURE) {
         chargeGroupsData.push({
           name: "Procedure",
-          flat: values.PROCEDURE.copay || "0",
-          percent: "0",
+          flat: "0",
+          percent: values.PROCEDURE.copay || "0",
           max:
             values.PROCEDURE._maxDeductible ||
             values.PROCEDURE.deductible ||
@@ -522,8 +522,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       if (values["DENTAL CONSULTATION & PROCEDURE"]) {
         chargeGroupsData.push({
           name: "Dental",
-          flat: values["DENTAL CONSULTATION & PROCEDURE"].copay || "0",
-          percent: "0",
+          flat: "0",
+          percent: values["DENTAL CONSULTATION & PROCEDURE"].copay || "0",
           max:
             values["DENTAL CONSULTATION & PROCEDURE"]._maxDeductible ||
             values["DENTAL CONSULTATION & PROCEDURE"].deductible ||
@@ -533,7 +533,12 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
 
       setChargeGroups(chargeGroupsData);
       setHasDeductible(chargeGroupsData.some((cg) => parseFloat(cg.max) > 0));
-      setHasCopay(chargeGroupsData.some((cg) => parseFloat(cg.flat) > 0));
+      setHasCopay(
+        chargeGroupsData.some(
+          (cg) =>
+            parseFloat(cg.percent) > 0 || parseFloat(cg.flat) > 0,
+        ),
+      );
     }
 
     // Auto-match payer
@@ -696,7 +701,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       const customerId = tpaConfig?.lt_customer_id
         ? parseInt(tpaConfig.lt_customer_id, 10)
         : 1;
-      const createdBy = 13295; // Always use 13295 for new policies to match system expectations
+      const createdBy = 13295;
       const ltOtherConfig = tpaConfig?.lt_other_config || {};
 
       // Get insurance mapping ID from config or Mantys response
@@ -714,20 +719,33 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         planIdFromConfig = selectedPlan.plan_id || null;
       }
 
-      // Get network ID from selected plan
-      // In the Aster system, the plan_id IS the network_id
-      // For example: plan_id 30530 corresponds to "N5 - MEDNET / DUBAICARE" network
-      let networkIdNumeric: number | null = null;
+      const parseNumeric = (value: unknown): number | null => {
+        if (value === null || value === undefined) return null;
+        const num =
+          typeof value === "string" ? parseInt(value, 10) : Number(value);
+        return Number.isFinite(num) ? num : null;
+      };
 
-      if (selectedPlan && selectedPlan.plan_id) {
-        networkIdNumeric = parseInt(selectedPlan.plan_id, 10);
-      }
+      const existingPayerId = !isNewPolicy
+        ? parseNumeric(selectedExistingPolicy?.payer_id)
+        : null;
+      const existingNetworkId = !isNewPolicy
+        ? parseNumeric(
+            selectedExistingPolicy?.rate_card_id ??
+              selectedExistingPolicy?.plan_id,
+          )
+        : null;
+      const selectedPlanNetworkId = parseNumeric(selectedPlan?.plan_id);
+      const selectedPlanContractId = parseNumeric(selectedPlan?.cm_contract_id);
+
+      // Prefer selected plan network ID; fallback to existing policy network if needed
+      let networkIdNumeric: number | null =
+        selectedPlanNetworkId ?? selectedPlanContractId ?? existingNetworkId;
 
       // Build insRules array from charge groups and deductible
       const insRules: any[] = [];
 
-      // Charge group ID mapping (from Aster system)
-      const chargeGroupIdMap: Record<string, number> = {
+      const defaultChargeGroupIdMap: Record<string, number> = {
         Laboratory: 331,
         Medicine: 326,
         Radiology: 330,
@@ -735,24 +753,118 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         Procedure: 327,
         Dental: 329,
       };
+      const existingChargeGroupIdMap: Record<string, number> = {};
+      const existingCopayDetails =
+        selectedExistingPolicy?.copay?.Default?.copay_details || [];
+      const normalizeChargeGroupName = (name: string | null | undefined) =>
+        (name || "").trim().toLowerCase();
+      existingCopayDetails.forEach((detail: any) => {
+        if (detail?.chargeGroupName && detail?.chargeGroupId !== null) {
+          existingChargeGroupIdMap[detail.chargeGroupName] =
+            detail.chargeGroupId;
+        }
+      });
+      const findExistingCopay = (params: {
+        chargeGroupId: number | null;
+        chargeGroupName: string;
+        isDeductable: number;
+        isMaternity: number;
+      }) => {
+        if (!existingCopayDetails.length) return null;
+        const byId =
+          params.chargeGroupId !== null
+            ? existingCopayDetails.find(
+                (detail: any) =>
+                  detail?.chargeGroupId === params.chargeGroupId &&
+                  detail?.isDeductable === params.isDeductable &&
+                  detail?.isMaternity === params.isMaternity,
+              )
+            : null;
+        if (byId) return byId;
+        if (params.chargeGroupId === null && params.isDeductable === 1) {
+          const deductibleMatch = existingCopayDetails.find(
+            (detail: any) =>
+              (detail?.chargeGroupId === null || detail?.chargeGroupId === 0) &&
+              detail?.isDeductable === 1 &&
+              detail?.isMaternity === params.isMaternity,
+          );
+          if (deductibleMatch) return deductibleMatch;
+        }
+        const byName = existingCopayDetails.find(
+          (detail: any) =>
+            normalizeChargeGroupName(detail?.chargeGroupName) ===
+              normalizeChargeGroupName(params.chargeGroupName) &&
+            detail?.isDeductable === params.isDeductable &&
+            detail?.isMaternity === params.isMaternity,
+        );
+        return byName || null;
+      };
+      const buildExistingCopayRule = (detail: any, isActive: number) => {
+        const payableAmount = detail?.payableAmount;
+        const parsedPayableAmount =
+          typeof payableAmount === "string"
+            ? parseFloat(payableAmount)
+            : typeof payableAmount === "number"
+              ? payableAmount
+              : 0;
+        const payableAmountMax = detail?.payableAmountMax;
+        const parsedPayableAmountMax =
+          typeof payableAmountMax === "string"
+            ? parseFloat(payableAmountMax)
+            : typeof payableAmountMax === "number"
+              ? payableAmountMax
+              : null;
+
+        return {
+          isActive: isActive,
+          payableAmnt: Number.isFinite(parsedPayableAmount)
+            ? parsedPayableAmount
+            : 0,
+          patientInsTpaId: selectedExistingPolicy?.patient_insurance_tpa_policy_id || 0,
+          copayDeductId: parseNumeric(detail?.copayDeductId) || 0,
+          payableAmntType: parseNumeric(detail?.payableAmountType) || 1,
+          chargeGrpName: detail?.chargeGroupName || "",
+          chargeGrpId: parseNumeric(detail?.chargeGroupId) ?? null,
+          isAcrossChargeGroup: parseNumeric(detail?.isAcrossChargeGroup) || 0,
+          specialityId: parseNumeric(detail?.specialityId) ?? null,
+          payableAmountMax:
+            parsedPayableAmountMax === null || Number.isNaN(parsedPayableAmountMax)
+              ? null
+              : parsedPayableAmountMax,
+          isDefault: parseNumeric(detail?.isDefault) || 1,
+          isDeductable: parseNumeric(detail?.isDeductable) || 0,
+          isMaternity: parseNumeric(detail?.isMaternity) || 0,
+        };
+      };
+      const chargeGroupIdMap = {
+        ...defaultChargeGroupIdMap,
+        ...existingChargeGroupIdMap,
+      };
 
       // Add deductible rule if exists
       if (hasDeductible && deductibleFlat) {
+        const existingDeductible = findExistingCopay({
+          chargeGroupId: null,
+          chargeGroupName: "",
+          isDeductable: 1,
+          isMaternity: 0,
+        });
         insRules.push({
           isActive: 1,
           payableAmnt: parseFloat(deductibleFlat) || 0,
           patientInsTpaId: isNewPolicy
             ? 0
             : selectedExistingPolicy?.patient_insurance_tpa_policy_id || 0,
-          copayDeductId: 0, // Will be auto-generated by API
+          copayDeductId: existingDeductible?.copayDeductId || 0,
           payableAmntType: 3, // Type 3 = flat deductible
           chargeGrpName: "",
           isAcrossChargeGroup: 0,
           chargeGrpId: null,
-          specialityId: 0,
-          payableAmountMax: deductibleMax
-            ? parseFloat(deductibleMax).toFixed(2)
-            : null,
+          specialityId: null,
+          payableAmountMax:
+            deductibleMax && parseFloat(deductibleMax) > 0
+              ? parseFloat(deductibleMax).toFixed(2)
+              : null,
           isDefault: 1,
           isDeductable: 1,
           isMaternity: 0,
@@ -767,25 +879,40 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           const payableAmntType = parseFloat(cg.percent) > 0 ? 2 : 1; // 2 = percentage, 1 = flat
 
           if (payableAmnt > 0) {
+            const existingCopay = findExistingCopay({
+              chargeGroupId: chargeGroupIdMap[cg.name] || null,
+              chargeGroupName: cg.name,
+              isDeductable: 0,
+              isMaternity: 0,
+            });
             insRules.push({
               isActive: 1,
               payableAmnt: payableAmnt,
               patientInsTpaId: isNewPolicy
                 ? 0
                 : selectedExistingPolicy?.patient_insurance_tpa_policy_id || 0,
-              copayDeductId: 0, // Will be auto-generated by API
+              copayDeductId: existingCopay?.copayDeductId || 0,
               payableAmntType: payableAmntType,
               chargeGrpName: cg.name,
               isAcrossChargeGroup: 0,
               chargeGrpId: chargeGroupIdMap[cg.name] || null,
-              specialityId: 0,
-              payableAmountMax: cg.max ? parseFloat(cg.max).toFixed(2) : null,
+              specialityId: null,
+              payableAmountMax:
+                cg.max && parseFloat(cg.max) > 0
+                  ? parseFloat(cg.max).toFixed(2)
+                  : null,
               isDefault: 1,
               isDeductable: 0,
               isMaternity: 0,
             });
           }
         });
+      } else if (!isNewPolicy && existingCopayDetails.length > 0) {
+        existingCopayDetails
+          .filter((detail: any) => parseNumeric(detail?.isDeductable) !== 1)
+          .forEach((detail: any) => {
+            insRules.push(buildExistingCopayRule(detail, 0));
+          });
       }
 
       // Get TPA company ID from config (insurance_id from clinic config)
@@ -800,6 +927,27 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         if (!dateStr) return null;
         return dateStr.replace(/-/g, "/");
       };
+      const addMonthsForAster = (
+        dateStr: string | null,
+        monthsToAdd: number,
+      ): string | null => {
+        if (!dateStr) return null;
+        const separator = dateStr.includes("/") ? "/" : "-";
+        const parts = dateStr.split(separator);
+        if (parts.length !== 3) return null;
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+          return null;
+        }
+        const date = new Date(Date.UTC(year, month, day));
+        date.setUTCMonth(date.getUTCMonth() + monthsToAdd);
+        const yyyy = date.getUTCFullYear();
+        const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+        const dd = String(date.getUTCDate()).padStart(2, "0");
+        return `${yyyy}/${mm}/${dd}`;
+      };
 
       // Build policy data object
       const policyData = {
@@ -811,7 +959,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
           : selectedExistingPolicy?.patient_insurance_tpa_policy_id || 0,
         isActive: 1,
         // Use selectedPayer.ins_tpaid as payerId (this is the Payer ID from clinic's payer config)
-        payerId: selectedPayer?.ins_tpaid || null,
+        payerId: (existingPayerId ?? selectedPayer?.ins_tpaid) || null,
         insuranceCompanyId: null,
         networkId: networkIdNumeric,
         siteId: siteId,
@@ -838,10 +986,12 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         insuranceRenewal: null,
         payerType: ltOtherConfig.payerType || 1,
         insuranceStartDate: formatDateForAster(startDate),
+        waitingPeriodTill: addMonthsForAster(startDate, 6),
+        isPreCapped: ltOtherConfig.isPreCapped ?? false,
         insurancePolicyId: null,
         hasTopUpCard: 0,
         proposerRelation: "Self",
-        // createdBy should be current user (13295 or user.id) for new policies,
+        // createdBy should be current user (from LT desktop payload) for new policies,
         // else preserve the original creator from existing policy
         createdBy: isNewPolicy
           ? createdBy

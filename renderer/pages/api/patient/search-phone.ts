@@ -12,6 +12,7 @@ const useTunnel = process.env.NEXT_USE_TUNNEL !== 'false'
 
 const API_BASE_URL = useTunnel ? 'https://aster-clinics-dev.mantys.org/SCMS/web/app.php' : 'https://prod.asterclinics.com/SCMS/web/app.php'
 
+
 interface RequestHead {
     reqtime: string
     srvseqno: string
