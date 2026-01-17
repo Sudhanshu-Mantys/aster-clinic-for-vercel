@@ -10,9 +10,12 @@ import { patientContextRedisService } from "../../../lib/redis-patient-context";
 // Set NEXT_USE_TUNNEL=false to bypass tunnel for direct access
 const useTunnel = process.env.NEXT_USE_TUNNEL !== "false";
 
-const API_BASE_URL = useTunnel
-  ? "https://aster-clinics-dev.mantys.org/SCMS/web/app.php"
-  : "https://prod.asterclinics.com/SCMS/web/app.php";
+// const API_BASE_URL = useTunnel
+//   ? "https://aster-clinics-dev.mantys.org/SCMS/web/app.php"
+//   : "https://prod.asterclinics.com/SCMS/web/app.php";
+
+const API_BASE_URL = "https://stage.asterclinics.com/SCMS/web/app_sbox.php"
+
 
 interface RequestHead {
   reqtime: string;

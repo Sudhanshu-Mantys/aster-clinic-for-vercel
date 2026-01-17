@@ -8,9 +8,12 @@ import { NextApiRequest, NextApiResponse } from 'next';
 // Set NEXT_USE_TUNNEL=false to bypass tunnel for direct access
 const useTunnel = process.env.NEXT_USE_TUNNEL !== 'false';
 
-const API_BASE_URL = useTunnel
-  ? 'https://aster-clinics-dev.mantys.org/SCMS/web/app.php'
-  : 'https://prod.asterclinics.com/SCMS/web/app.php';
+// const API_BASE_URL = useTunnel
+//   ? 'https://aster-clinics-dev.mantys.org/SCMS/web/app.php'
+//   : 'https://prod.asterclinics.com/SCMS/web/app.php';
+
+const API_BASE_URL = 'https://stage.asterclinics.com/SCMS/web/app_sbox.php'
+
 
 export default async function handler(
   req: NextApiRequest,
@@ -111,10 +114,46 @@ export default async function handler(
       }
     );
 
-    const updateResult = await updateResponse.json();
+    const rawResponse = await updateResponse.text();
+    const contentType = updateResponse.headers.get('content-type') || '';
+    let updateResult: any = null;
+    let parsedJson = false;
+
+    if (rawResponse) {
+      if (contentType.includes('application/json') || rawResponse.trim().startsWith('{')) {
+        try {
+          updateResult = JSON.parse(rawResponse);
+          parsedJson = true;
+        } catch (parseError) {
+          console.error('Failed to parse JSON response:', parseError);
+        }
+      }
+    }
+
+    if (!updateResponse.ok) {
+      console.error('Failed to save policy:', parsedJson ? updateResult : rawResponse);
+      return res.status(updateResponse.status || 500).json({
+        error: parsedJson
+          ? updateResult.head?.StatusText || 'Failed to save policy details'
+          : 'Failed to save policy details',
+        details: parsedJson ? updateResult : rawResponse,
+      });
+    }
+
+    if (!parsedJson) {
+      console.error('Unexpected non-JSON response from update endpoint:', rawResponse);
+      return res.status(502).json({
+        error: 'Unexpected response from update endpoint',
+        details: rawResponse,
+      });
+    }
+
     console.log('Update response:', JSON.stringify(updateResult, null, 2));
 
-    if (!updateResponse.ok || updateResult.head?.StatusValue !== 'Success') {
+    const statusValue = updateResult.head?.StatusValue;
+    const isSuccess =
+      statusValue === 'Success' || statusValue === 200 || statusValue === '200';
+    if (!isSuccess) {
       console.error('Failed to save policy:', updateResult);
       return res.status(updateResponse.status || 500).json({
         error: updateResult.head?.StatusText || 'Failed to save policy details',

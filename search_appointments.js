@@ -3,7 +3,7 @@ const fs = require("fs");
 
 // Configuration
 const API_URL =
-  "https://aster-clinics-dev.mantys.org/SCMS/web/app.php/apmgnt/patient/all/appointment/search/get";
+  "https://stage.asterclinics.com/SCMS/web/app_sbox.php/apmgnt/patient/all/appointment/search/get";
 const MPII = 1005774132;
 const DAYS_PER_CALL = 3;
 const TOTAL_CALLS = 150;
