@@ -66,7 +66,7 @@ export const ExtractionProgressModal: React.FC<ExtractionProgressModalProps> = (
 
   const { data: taskStatus } = useEligibilityTaskStatus(actualTaskId || "", {
     enabled: isOpen && !!actualTaskId,
-    refetchInterval: 5000,
+    refetchInterval: 10000,
   });
 
   const status = taskStatus?.status || "pending";

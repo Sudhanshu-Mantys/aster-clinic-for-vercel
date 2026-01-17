@@ -142,26 +142,89 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
 
 
 
-  const getStatusBadge = (status: EligibilityHistoryItem["status"]) => {
-    const badges = {
+  const getStatusBadge = (item: EligibilityHistoryItem) => {
+    // Extract the actual detailed status from the result
+    let actualStatus: string = item.status;
+    let displayLabel: string = item.status;
+
+    // Try to get the detailed status from result
+    if (item.result) {
+      const result = item.result as any;
+      const dataDump = result.data_dump;
+      const resultStatus = result.status;
+
+      // For PROCESS_COMPLETE or search-all cases, check is_eligible flag
+      if (resultStatus === "PROCESS_COMPLETE" || result.is_search_all) {
+        // Check if any aggregated results have eligible entries
+        if (result.aggregated_results && Array.isArray(result.aggregated_results)) {
+          const hasEligible = result.aggregated_results.some(
+            (aggResult: any) => aggResult.data?.is_eligible === true
+          );
+          if (hasEligible) {
+            actualStatus = "eligible";
+            displayLabel = "eligible";
+          } else if (result.found_results === 0 || result.is_search_all) {
+            // For search-all with no eligible results, show "Could Not Determine"
+            actualStatus = "could_not_determine";
+            displayLabel = "could_not_determine";
+          }
+        }
+        // Check is_eligible in data_dump for single TPA checks
+        else if (dataDump?.is_eligible === true) {
+          actualStatus = "eligible";
+          displayLabel = "eligible";
+        } else if (dataDump?.is_eligible === false) {
+          actualStatus = "not_eligible";
+          displayLabel = "not_eligible";
+        }
+      }
+      // For other statuses, use the result status
+      else if (resultStatus) {
+        actualStatus = resultStatus;
+        displayLabel = resultStatus;
+      }
+    }
+
+    const badges: Record<string, string> = {
       pending: "bg-yellow-100 text-yellow-800 border-yellow-300",
       processing: "bg-blue-100 text-blue-800 border-blue-300",
       complete: "bg-green-100 text-green-800 border-green-300",
+      eligible: "bg-green-100 text-green-800 border-green-300",
+      not_eligible: "bg-red-100 text-red-800 border-red-300",
+      could_not_determine: "bg-red-100 text-red-800 border-red-300",
+      found: "bg-green-100 text-green-800 border-green-300",
       error: "bg-red-100 text-red-800 border-red-300",
+      failed: "bg-red-100 text-red-800 border-red-300",
+      invalid_credentials: "bg-orange-100 text-orange-800 border-orange-300",
+      member_not_found: "bg-red-100 text-red-800 border-red-300",
+      not_found: "bg-gray-100 text-gray-800 border-gray-300",
+      backoff: "bg-yellow-100 text-yellow-800 border-yellow-300",
     };
 
-    const labels = {
+    const labels: Record<string, string> = {
       pending: "Pending",
       processing: "Processing",
       complete: "Complete",
+      eligible: "Eligible",
+      not_eligible: "Not Eligible",
+      could_not_determine: "Could Not Determine",
+      found: "Found",
       error: "Failed",
+      failed: "Failed",
+      invalid_credentials: "Invalid Credentials",
+      member_not_found: "Not Eligible",
+      not_found: "Not Found",
+      backoff: "Rate Limited",
     };
+
+    const badgeClass = badges[actualStatus] || "bg-gray-100 text-gray-800 border-gray-300";
+    const label = labels[actualStatus] || actualStatus.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 
     return (
       <span
-        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${badges[status]}`}
+        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${badgeClass}`}
       >
-        {labels[status]}
+        {label}
       </span>
     );
   };
@@ -361,7 +424,7 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
                       <h3 className="text-sm font-semibold text-gray-900 truncate">
                         {item.patientName || "Unknown Patient"}
                       </h3>
-                      {getStatusBadge(item.status)}
+                      {getStatusBadge(item)}
                     </div>
 
                     <div className="space-y-1">
@@ -435,6 +498,20 @@ export const EligibilityHistoryList: React.FC<EligibilityHistoryListProps> = ({
             resultData ? (
               (() => {
                 const keyFields = extractMantysKeyFields(resultData);
+                // Check if this is a search-all with no eligible results
+                const resultAsAny = resultData as any;
+                const isSearchAllNoResults = resultAsAny.is_search_all &&
+                  resultAsAny.aggregated_results &&
+                  !resultAsAny.aggregated_results.some((r: any) => r.data?.is_eligible === true);
+
+                if (isSearchAllNoResults) {
+                  return (
+                    <Badge className="bg-red-100 text-red-800">
+                      Could Not Determine
+                    </Badge>
+                  );
+                }
+
                 return (
                   <Badge className={keyFields.isEligible ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
                     {keyFields.isEligible ? "Eligible" : "Not Eligible"}
