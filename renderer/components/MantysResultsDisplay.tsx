@@ -701,7 +701,7 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
       const customerId = tpaConfig?.lt_customer_id
         ? parseInt(tpaConfig.lt_customer_id, 10)
         : 1;
-      const createdBy = 11522; // Update per environment based on LT desktop payload
+      const createdBy = 13295;
       const ltOtherConfig = tpaConfig?.lt_other_config || {};
 
       // Get insurance mapping ID from config or Mantys response
@@ -927,6 +927,27 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         if (!dateStr) return null;
         return dateStr.replace(/-/g, "/");
       };
+      const addMonthsForAster = (
+        dateStr: string | null,
+        monthsToAdd: number,
+      ): string | null => {
+        if (!dateStr) return null;
+        const separator = dateStr.includes("/") ? "/" : "-";
+        const parts = dateStr.split(separator);
+        if (parts.length !== 3) return null;
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+          return null;
+        }
+        const date = new Date(Date.UTC(year, month, day));
+        date.setUTCMonth(date.getUTCMonth() + monthsToAdd);
+        const yyyy = date.getUTCFullYear();
+        const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+        const dd = String(date.getUTCDate()).padStart(2, "0");
+        return `${yyyy}/${mm}/${dd}`;
+      };
 
       // Build policy data object
       const policyData = {
@@ -965,6 +986,8 @@ export const MantysResultsDisplay: React.FC<MantysResultsDisplayProps> = ({
         insuranceRenewal: null,
         payerType: ltOtherConfig.payerType || 1,
         insuranceStartDate: formatDateForAster(startDate),
+        waitingPeriodTill: addMonthsForAster(startDate, 6),
+        isPreCapped: ltOtherConfig.isPreCapped ?? false,
         insurancePolicyId: null,
         hasTopUpCard: 0,
         proposerRelation: "Self",

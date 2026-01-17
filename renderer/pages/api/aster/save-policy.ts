@@ -60,7 +60,9 @@ export default async function handler(
         siteId: cleanPolicyData.siteId || 31,
         policyNumber: cleanPolicyData.policyNumber || null,
         insuranceGroupPolicyId: cleanPolicyData.insuranceGroupPolicyId || null,
-        encounterid: null, // Always null to prevent state conflicts - policies are patient-level, not encounter-specific
+        encounterid: cleanPolicyData.encounterid
+          ? (typeof cleanPolicyData.encounterid === 'string' ? parseInt(cleanPolicyData.encounterid, 10) : cleanPolicyData.encounterid)
+          : null,
         parentInsPolicyId: cleanPolicyData.parentInsPolicyId || null,
         tpaCompanyId: cleanPolicyData.tpaCompanyId || null,
         planName: cleanPolicyData.planName || null,
@@ -80,6 +82,8 @@ export default async function handler(
         insuranceRenewal: cleanPolicyData.insuranceRenewal || null,
         payerType: cleanPolicyData.payerType || 1,
         insuranceStartDate: cleanPolicyData.insuranceStartDate || null,
+        waitingPeriodTill: cleanPolicyData.waitingPeriodTill || null,
+        isPreCapped: cleanPolicyData.isPreCapped ?? false,
         insurancePolicyId: cleanPolicyData.insurancePolicyId || null,
         hasTopUpCard: cleanPolicyData.hasTopUpCard ?? 0,
         proposerRelation: cleanPolicyData.proposerRelation || "Self",
@@ -285,9 +289,6 @@ export default async function handler(
     let currentPolicyError: any = null;
     let markToBillResult: any = null;
     let markToBillError: any = null;
-    let markArriveResult: any = null;
-    let markArriveError: any = null;
-
     if (!currentPolicyId || !patIdValue || !apntIdValue) {
       currentPolicyError = 'Missing policyId, patientId, or appointmentId';
       console.warn('Skipping current-policy call:', currentPolicyError);
@@ -314,7 +315,6 @@ export default async function handler(
 
       if (!encounterIdValue) {
         markToBillError = 'Missing encounterId for mark-to-bill call';
-        markArriveError = 'Missing encounterId for mark-arrive call';
       } else {
         const markToBillCall = await callAsterEndpoint(
           '/op/order/item/ready/to/bill/add',
@@ -338,20 +338,6 @@ export default async function handler(
         } else {
           markToBillError = markToBillCall.error;
         }
-
-        const markArriveCall = await callAsterEndpoint(
-          '/mark/arrive/list/get',
-          {
-            encounterId: encounterIdValue,
-            appmntId: apntIdValue,
-            siteId: cleanPolicyData.siteId || 31,
-          },
-        );
-        if (markArriveCall.ok) {
-          markArriveResult = markArriveCall.data;
-        } else {
-          markArriveError = markArriveCall.error;
-        }
       }
     }
 
@@ -363,8 +349,6 @@ export default async function handler(
       currentPolicyError: currentPolicyError || undefined,
       markToBill: markToBillResult,
       markToBillError: markToBillError || undefined,
-      markArrive: markArriveResult,
-      markArriveError: markArriveError || undefined,
     });
   } catch (error) {
     console.error('Error saving policy details:', error);
