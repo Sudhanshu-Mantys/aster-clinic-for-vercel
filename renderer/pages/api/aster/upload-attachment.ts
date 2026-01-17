@@ -12,11 +12,9 @@ import https from "https";
 // Use tunnel by default (safer, works from any network)
 const useTunnel = process.env.NEXT_USE_TUNNEL !== "false";
 
-// const API_BASE_URL = useTunnel
-//   ? "https://aster-clinics-dev.mantys.org/SCMS/web/app.php"
-//   : "https://prod.asterclinics.com/SCMS/web/app.php";
-
-const API_BASE_URL = "https://stage.asterclinics.com/SCMS/web/app_sbox.php"
+const API_BASE_URL = useTunnel
+  ? "https://aster-clinics-dev.mantys.org/SCMS/web/app.php"
+  : "https://prod.asterclinics.com/SCMS/web/app.php";
 
 interface UploadMetadata {
   recType: null;
