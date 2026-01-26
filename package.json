@@ -46,7 +46,7 @@
     "baseline-browser-mapping": "^2.9.11",
     "electron": "^34.0.0",
     "electron-builder": "^24.13.3",
-    "next": "^16.0.5",
+    "next": "16.0.7",
     "nextron": "^9.5.0",
     "postcss": "^8.4.38",
     "react": "^19.2.0",
